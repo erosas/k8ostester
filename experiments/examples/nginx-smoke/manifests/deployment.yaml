@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smoke-nginx
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: smoke-nginx
+  template:
+    metadata:
+      labels:
+        app: smoke-nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {cpu: 100m, memory: 64Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: smoke-nginx
+spec:
+  selector:
+    app: smoke-nginx
+  ports:
+    - port: 80
+      targetPort: 80

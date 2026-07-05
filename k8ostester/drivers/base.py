@@ -51,11 +51,15 @@ class TechnologyDriver:
         """Role → pod mapping for fault targeting (e.g. {'primary': 'pg-1'})."""
         raise NotImplementedError
 
-    def make_loadgen(self) -> Any:  # returns a LoadGenerator (phase 2)
-        raise NotImplementedError
+    def run_load(self, run_dir: Path) -> None:
+        """Run the experiment's load plan to completion, writing metrics.jsonl
+        and journal.jsonl into run_dir."""
+        raise NotImplementedError(f"{type(self).__name__} has no load generator")
 
-    def integrity_check(self) -> Any:
-        raise NotImplementedError
+    def ensure_backup(self) -> None:
+        """Take a base backup now (before load, so PITR can replay forward)."""
+        raise NotImplementedError(f"{type(self).__name__} has no backup support")
 
-    def backup_ops(self) -> Any | None:
-        return None
+    def verify(self, check: str, config: dict) -> dict:
+        """Run a verify step; returns {check, passed, detail}."""
+        raise NotImplementedError(f"{type(self).__name__} has no '{check}' verification")

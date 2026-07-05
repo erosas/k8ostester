@@ -18,6 +18,15 @@ _DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)(ms|s|m|h)$")
 _DURATION_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
 
 
+def parse_rate(value: str | int | float | None) -> float:
+    """'50/s' / bare number → ops per second; None/0 → 0 (pause)."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    return float(value.strip().removesuffix("/s"))
+
+
 def parse_duration(value: str | int | float) -> float:
     """'30s' / '2m' / '150ms' / bare seconds → seconds as float."""
     if isinstance(value, (int, float)):

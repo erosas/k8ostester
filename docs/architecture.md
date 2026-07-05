@@ -56,8 +56,12 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `core/capabilities.py` | cluster probe: nodes, storage classes, snapshot CRDs, operators (by CRD), helm — used to skip/flag goals a cluster can't exercise |
 | `core/events.py` | append-only JSONL event log |
 | `core/metrics.py` | append-only JSONL metric store + percentile helper (authoritative tier for goal verdicts) |
-| `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, loadgen, integrity, backup ops |
+| `core/infra.py` | shared prerequisites, installed idempotently: CNPG operator (pinned chart 0.28.3 / app 1.29.1), SeaweedFS + backup bucket |
+| `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, run_load, ensure_backup, verify |
 | `drivers/generic.py` | deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
+| `drivers/postgres_cnpg/driver.py` | CNPG driver: Cluster CR lifecycle, topology from CR status, loadgen Job, integrity/backup/PITR verification |
+| `drivers/postgres_cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
+| `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |
 | `experiments/` | experiment directories (the configs being validated) |
 | `infra/` | shared cluster prerequisites (operator pins, SeaweedFS, monitoring) — phase 2+ |
 
@@ -69,6 +73,27 @@ object store), deploying the config, readiness, **topology** (role → pod, so f
 journal against the database — this is how RPO/data loss is measured), and backup/PITR verbs.
 New technology = new folder under `drivers/` implementing the same contract; runner, workers,
 goals, metrics, and reports are shared.
+
+## The CNPG run, concretely (phase 2, working)
+
+1. **Prereqs** (idempotent): CNPG operator via pinned helm chart; SeaweedFS + `backups` bucket
+   in `k8ost-infra`.
+2. **Deploy**: the experiment's manifests are applied with `${K8OST_NAMESPACE}` substituted, so
+   each run's Barman catalog path (`s3://backups/<run-namespace>`) is unique. Readiness = the
+   Cluster CR reports "healthy" with all instances ready.
+3. **Base backup before load** (when `verify` includes backup/pitr): a Backup CR, waited to
+   `completed` — PITR replays WAL forward from it through the whole run.
+4. **Load**: `loadgen.py` runs as a Job (ConfigMap + stock python image, D12), executing the
+   pre-declared phases; every op is a JSON line on stdout. After completion the driver pulls pod
+   logs, writes `loadgen.log` (raw), `metrics.jsonl` (all records), `journal.jsonl` (acked
+   writes) into the run dir.
+5. **Verify**:
+   - *integrity* — every acked write's id+checksum must be in the database;
+   - *backup* — the Backup CR completed (LSN range recorded);
+   - *pitr* — a second cluster (`pg-pitr`) is bootstrapped from the object store with
+     `targetTime` = middle of the load plan's zero-rate pause phase (D13), then the restored row
+     set must equal the pre-pause acked set exactly.
+6. Any verify failure → run status `failed` (vs `error` for framework/infra problems).
 
 ## Metrics: two tiers
 

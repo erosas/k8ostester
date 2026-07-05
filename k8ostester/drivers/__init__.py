@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from k8ostester.drivers.base import TechnologyDriver
 from k8ostester.drivers.generic import GenericDriver
+from k8ostester.drivers.postgres_cnpg.driver import CnpgDriver
 
 _REGISTRY: dict[str, type[TechnologyDriver]] = {
     "generic": GenericDriver,
+    "postgres-cnpg": CnpgDriver,
 }
 
 

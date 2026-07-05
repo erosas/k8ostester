@@ -31,6 +31,7 @@ class RunResult:
         self.status = "unknown"
         self.namespace: str | None = None
         self.error: str | None = None
+        self.verifications: list[dict] = []
 
 
 class Runner:
@@ -80,9 +81,34 @@ class Runner:
             driver.wait_ready()
             self.events.emit("ready.ok", f"workloads ready after {time.time() - started:.1f}s")
 
-            self._not_yet_implemented()
+            verify_names = [
+                s if isinstance(s, str) else next(iter(s)) for s in self.spec.verify
+            ]
+            if {"backup", "pitr"} & set(verify_names):
+                self.events.emit("backup.start", "taking base backup before load")
+                driver.ensure_backup()
 
-            result.status = "passed"
+            if self.spec.load and self.spec.load.phases:
+                driver.run_load(self.run_dir)
+
+            for step in self.spec.verify:
+                name = step if isinstance(step, str) else next(iter(step))
+                config = {} if isinstance(step, str) else (step[name] or {})
+                self.events.emit("verify.start", name)
+                outcome = driver.verify(name, config)
+                result.verifications.append(outcome)
+                self.events.emit(
+                    "verify.pass" if outcome["passed"] else "verify.fail",
+                    f"{name}: {outcome['detail']}",
+                )
+
+            if self.spec.faults:
+                self.events.emit("faults.skip", "fault injection lands in phase 3")
+            if self.spec.goals:
+                self.events.emit("goals.skip", "goal evaluation lands in phase 3")
+
+            failed = [v for v in result.verifications if not v["passed"]]
+            result.status = "failed" if failed else "passed"
         except Exception as e:
             result.status = "error"
             result.error = str(e)
@@ -110,16 +136,6 @@ class Runner:
                 "those faults will be skipped",
             )
 
-    def _not_yet_implemented(self) -> None:
-        if self.spec.load and self.spec.load.phases:
-            self.events.emit("load.skip", "load generation lands in phase 2")
-        if self.spec.faults:
-            self.events.emit("faults.skip", "fault injection lands in phase 3")
-        if self.spec.verify:
-            self.events.emit("verify.skip", "verification lands in phase 2")
-        if self.spec.goals:
-            self.events.emit("goals.skip", "goal evaluation lands in phase 3")
-
     def _teardown(self, k8s: ClusterClient, result: RunResult) -> None:
         if self.keep:
             self.events.emit("teardown.skip", f"--keep: namespace {self.namespace} left running")
@@ -143,6 +159,7 @@ class Runner:
             "namespace": self.namespace,
             "status": result.status,
             "error": result.error,
+            "verifications": result.verifications,
             "duration_s": round(time.time() - started, 1),
             "kept": self.keep,
         }

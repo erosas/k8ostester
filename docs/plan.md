@@ -9,8 +9,8 @@
 |---|---|---|
 | 0 — environment | ✅ done (2026-07-05) | helm v4 installed; `k8ost env check` verified against the 4-worker docker-desktop cluster |
 | 1 — skeleton | ✅ done (2026-07-05) | spec models, runner lifecycle, generic driver, events/metrics stores, helm/kubectl wrappers; nginx-smoke run green end-to-end |
-| 2 — CNPG happy path | ⬜ next | operator install, SeaweedFS, loadgen image + journal, backup + PITR verification |
-| 3 — faults + goals | ⬜ | the failing-single / passing-HA proof |
+| 2 — CNPG happy path | ✅ done (2026-07-05) | cnpg-baseline green: CNPG 1.29.1 + SeaweedFS, 2938-op load, integrity + backup verified, PITR restored the 601 pre-pause rows exactly |
+| 3 — faults + goals | ⬜ next | the failing-single / passing-HA proof |
 | 4 — observability & reporting | ⬜ | Prometheus stack, dashboards (license decision pending), HTML reports, compare |
 | 5 — scale-out | ⬜ | Chaos Mesh adapter, Kafka driver, CI mode |
 
@@ -350,8 +350,7 @@ A custom run-browser UI stays deferred — nothing in the design blocks it.
 
 - **Grafana is AGPL** — conflicts with the license policy. Permissive alternative: Perses
   (CNCF, Apache 2.0), less mature. Decide at phase 4; Prometheus itself is Apache 2.0 and fine.
-
-- Image distribution to the cluster (local registry container vs public registry) — resolve in
-  phase 2 when the loadgen image exists.
 - Loadgen journal durability if the loadgen pod itself dies mid-run (v1: accept as a framework
-  error; later: persist journal to PVC).
+  error; later: persist journal to PVC). Journal retrieval is via pod logs (D12), so a deleted
+  pod loses the journal.
+- Pin the SeaweedFS image to a digest (currently `latest`).

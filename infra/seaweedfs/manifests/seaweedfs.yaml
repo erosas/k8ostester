@@ -1,0 +1,84 @@
+# SeaweedFS (Apache 2.0) — S3-compatible object store for Barman backups/WAL (D7: no AGPL).
+# Single-pod "weed server" with the S3 gateway; plenty for test runs.
+# Credentials are static test-only values, mirrored by each experiment's s3 secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: seaweedfs-s3-config
+data:
+  s3.json: |
+    {
+      "identities": [
+        {
+          "name": "k8ost",
+          "credentials": [{"accessKey": "k8ost", "secretKey": "k8ost-test-secret"}],
+          "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seaweedfs-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs
+  strategy:
+    type: Recreate   # single PVC, RWO
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:latest   # TODO(D7 follow-up): pin a digest
+          args:
+            - server
+            - -dir=/data
+            - -s3
+            - -s3.config=/etc/seaweedfs/s3.json
+            - -master.volumeSizeLimitMB=256
+          ports:
+            - {containerPort: 8333, name: s3}
+            - {containerPort: 9333, name: master}
+          readinessProbe:
+            httpGet: {path: /status, port: 8333}
+            initialDelaySeconds: 5
+            periodSeconds: 3
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: s3-config, mountPath: /etc/seaweedfs}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: seaweedfs-data
+        - name: s3-config
+          configMap:
+            name: seaweedfs-s3-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+spec:
+  selector:
+    app: seaweedfs
+  ports:
+    - {name: s3, port: 8333, targetPort: 8333}

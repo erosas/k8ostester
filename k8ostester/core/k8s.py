@@ -43,6 +43,10 @@ class ClusterClient:
         return client.CustomObjectsApi(self._api_client)
 
     @cached_property
+    def batch(self) -> client.BatchV1Api:
+        return client.BatchV1Api(self._api_client)
+
+    @cached_property
     def version(self) -> client.VersionApi:
         return client.VersionApi(self._api_client)
 
@@ -86,18 +90,71 @@ class ClusterClient:
 
     # -- manifests -----------------------------------------------------------
 
-    def apply_manifests(self, path: Path, namespace: str) -> str:
-        """kubectl apply -R a file or directory into a namespace."""
+    def apply_manifests(
+        self, path: Path, namespace: str, variables: dict[str, str] | None = None
+    ) -> str:
+        """kubectl apply a file or directory into a namespace.
+
+        With `variables`, every ${NAME} occurrence in the YAML text is
+        substituted first (used for per-run values like the namespace in
+        backup destination paths)."""
         kubectl = shutil.which("kubectl")
         if not kubectl:
             raise RuntimeError("kubectl not found on PATH")
-        cmd = [kubectl, "apply", "--recursive", "--filename", str(path), "-n", namespace]
+        cmd = [kubectl, "apply", "-n", namespace]
         if self.context:
             cmd += ["--context", self.context]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+        stdin: str | None = None
+        if variables:
+            files = sorted(path.rglob("*.yaml")) if path.is_dir() else [path]
+            text = "\n---\n".join(f.read_text() for f in files)
+            for key, value in variables.items():
+                text = text.replace("${" + key + "}", value)
+            stdin = text
+            cmd += ["--filename", "-"]
+        else:
+            cmd += ["--recursive", "--filename", str(path)]
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300, input=stdin
+        )
         if result.returncode != 0:
             raise RuntimeError(f"kubectl apply failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
+
+    def exec_pod(
+        self,
+        namespace: str,
+        pod: str,
+        command: list[str],
+        container: str | None = None,
+        timeout: int = 120,
+    ) -> str:
+        """Run a command in a pod via kubectl exec; returns stdout."""
+        kubectl = shutil.which("kubectl")
+        if not kubectl:
+            raise RuntimeError("kubectl not found on PATH")
+        cmd = [kubectl, "exec", "-n", namespace, pod]
+        if self.context:
+            cmd += ["--context", self.context]
+        if container:
+            cmd += ["-c", container]
+        cmd += ["--", *command]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"exec in {pod} failed: {' '.join(command)}\n{result.stderr.strip()}"
+            )
+        return result.stdout
+
+    def pod_logs(self, namespace: str, pod: str, container: str | None = None) -> str:
+        # _preload_content=False + explicit decode: the client otherwise hands
+        # back bytes coerced through str(), i.e. "b'...'" with escaped newlines
+        resp = self.core.read_namespaced_pod_log(
+            pod, namespace, container=container, _preload_content=False
+        )
+        return resp.data.decode()
 
     # -- readiness -----------------------------------------------------------
 

@@ -64,3 +64,18 @@ locator (context + namespace + label selector) for fault aiming, goals evaluated
 instead of the journal, `deploy: none` supported. Limitation: no RPO/data-loss or PITR
 verification without a journal — those remain driver-specific. Goal evaluators therefore read
 from an abstract `MetricSource` (journal or PromQL), chosen per goal.
+
+## D12 — Loadgen ships as a ConfigMap script on a stock image; journal via pod logs
+No registry or image build needed: the driver puts `loadgen.py` in a ConfigMap and runs it as a
+Job on `python:3.12-slim` (pinned psycopg installed at container start). Works unchanged against
+any cluster, local or remote — the image-distribution problem disappears. Amends D3: there is no
+HTTP control API in v1 — load phases are pre-declared in the spec (fault timing needs no runtime
+coordination; correlation happens offline via timestamps), and the journal is one JSON line per
+operation on stdout, retrieved from pod logs after the Job completes. A prebuilt image and a
+control API return only if startup cost or interactive control ever matter.
+
+## D13 — PITR verification targets a deliberate pause phase
+The load plan includes a zero-rate pause; the PITR target is the middle of it. Every acked write
+before the pause must be in the restored cluster, nothing after it — an exact row-set assertion,
+immune to client/server clock skew and commit-vs-statement timestamp gaps at the boundary.
+

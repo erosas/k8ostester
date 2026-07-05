@@ -1,0 +1,36 @@
+# The config under test: a single-instance CNPG cluster with Barman
+# backups/WAL archiving to the shared SeaweedFS store.
+# ${K8OST_NAMESPACE} is substituted per run so backup catalogs never collide.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: seaweed-s3
+stringData:
+  ACCESS_KEY: k8ost
+  SECRET_KEY: k8ost-test-secret   # test-only creds, mirrors infra/seaweedfs
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://backups/${K8OST_NAMESPACE}
+      endpointURL: http://seaweedfs.k8ost-infra.svc:8333
+      s3Credentials:
+        accessKeyId:
+          name: seaweed-s3
+          key: ACCESS_KEY
+        secretAccessKey:
+          name: seaweed-s3
+          key: SECRET_KEY
+      wal:
+        compression: gzip
+    retentionPolicy: 7d

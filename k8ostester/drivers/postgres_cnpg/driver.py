@@ -1,0 +1,392 @@
+"""CloudNativePG driver.
+
+Owns everything Postgres-specific: operator/object-store prerequisites, the
+Cluster CR under test, readiness and topology from the CR status, the
+in-cluster load generator Job, and the three verifications — integrity
+(journal vs database), backup (Barman base backup completed), and PITR
+(restore a second cluster to the mid-run pause and compare row sets exactly).
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from k8ostester.core.experiment import parse_rate
+from k8ostester.core.infra import InfraManager
+from k8ostester.drivers.base import TechnologyDriver
+
+CNPG_GROUP = "postgresql.cnpg.io"
+CNPG_VERSION = "v1"
+LOADGEN_SCRIPT = Path(__file__).parent / "loadgen.py"
+LOADGEN_IMAGE = "python:3.12-slim"
+PSYCOPG_PIN = "psycopg[binary]==3.2.*"
+
+
+class VerifyResult(dict):
+    @classmethod
+    def make(cls, check: str, passed: bool, detail: str) -> "VerifyResult":
+        return cls(check=check, passed=passed, detail=detail)
+
+
+class CnpgDriver(TechnologyDriver):
+    _journal: list[dict]  # acked-write records from the loadgen run
+    _records: list[dict]  # every op record
+    _backup_name: str | None = None
+
+    # -- lifecycle -----------------------------------------------------------
+
+    def install_prereqs(self) -> None:
+        InfraManager(self.k8s, self.events).ensure(self.spec.infra)
+
+    def deploy(self) -> None:
+        out = self.k8s.apply_manifests(
+            self.spec.manifests_dir,
+            self.namespace,
+            variables={"K8OST_NAMESPACE": self.namespace},
+        )
+        for line in out.splitlines():
+            self.events.emit("manifest.applied", line)
+
+    def wait_ready(self, timeout: float = 600) -> None:
+        self._wait_cluster_healthy(self.cluster_name, timeout)
+
+    # -- cluster introspection -------------------------------------------------
+
+    @property
+    def cluster_name(self) -> str:
+        clusters = self._clusters()["items"]
+        if len(clusters) != 1:
+            raise RuntimeError(
+                f"expected exactly 1 CNPG Cluster in {self.namespace}, found {len(clusters)}"
+            )
+        return clusters[0]["metadata"]["name"]
+
+    def _clusters(self) -> dict:
+        return self.k8s.custom.list_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters"
+        )
+
+    def _cluster(self, name: str) -> dict:
+        return self.k8s.custom.get_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters", name
+        )
+
+    def _wait_cluster_healthy(self, name: str, timeout: float) -> None:
+        deadline = time.time() + timeout
+        last = ""
+        while time.time() < deadline:
+            status = self._cluster(name).get("status", {})
+            phase = status.get("phase", "(no status)")
+            ready = status.get("readyInstances", 0)
+            instances = status.get("instances", "?")
+            if phase != last:
+                self.events.emit("cnpg.phase", f"{name}: {phase} ({ready}/{instances} ready)")
+                last = phase
+            if phase == "Cluster in healthy state" and ready == instances:
+                return
+            time.sleep(3)
+        raise TimeoutError(f"cluster {name} not healthy after {timeout}s (last: {last})")
+
+    def topology(self) -> dict[str, Any]:
+        status = self._cluster(self.cluster_name).get("status", {})
+        primary = status.get("currentPrimary")
+        instances = status.get("instanceNames", [])
+        return {
+            "primary": primary,
+            "replicas": [i for i in instances if i != primary],
+        }
+
+    def _psql(self, sql: str, db: str = "app", pod: str | None = None) -> str:
+        pod = pod or self.topology()["primary"]
+        return self.k8s.exec_pod(
+            self.namespace, pod, ["psql", "-d", db, "-qtAc", sql], container="postgres"
+        )
+
+    # -- load ------------------------------------------------------------------
+
+    def run_load(self, run_dir: Path) -> None:
+        spec = self.spec.load
+        assert spec is not None
+        phases = []
+        for p in spec.phases:
+            clients = p.clients or spec.clients
+            phases.append(
+                {
+                    "duration_s": p.duration_s,
+                    "rate": parse_rate(p.rate),
+                    "mix": p.mix or {"read": 0.5, "write": 0.5},
+                    "clients": clients.count,
+                    "mode": clients.mode,
+                }
+            )
+        total_s = sum(p["duration_s"] for p in phases)
+
+        secret = self.k8s.core.read_namespaced_secret(
+            f"{self.cluster_name}-app", self.namespace
+        )
+        import base64
+
+        decode = lambda k: base64.b64decode(secret.data[k]).decode()
+        host = (
+            f"{self.cluster_name}-rw"
+            if spec.endpoint == "auto"
+            else spec.endpoint
+        )
+        dsn = (
+            f"host={host} port=5432 dbname={decode('dbname')} "
+            f"user={decode('username')} password={decode('password')}"
+        )
+
+        self.k8s.core.create_namespaced_config_map(
+            self.namespace,
+            {
+                "metadata": {"name": "k8ost-loadgen"},
+                "data": {"loadgen.py": LOADGEN_SCRIPT.read_text()},
+            },
+        )
+        job = {
+            "metadata": {"name": "k8ost-loadgen"},
+            "spec": {
+                "backoffLimit": 0,
+                "template": {
+                    "metadata": {"labels": {"app": "k8ost-loadgen"}},
+                    "spec": {
+                        "restartPolicy": "Never",
+                        "containers": [
+                            {
+                                "name": "loadgen",
+                                "image": LOADGEN_IMAGE,
+                                "command": [
+                                    "bash",
+                                    "-c",
+                                    f"pip install --quiet --no-cache-dir '{PSYCOPG_PIN}' "
+                                    "&& exec python /app/loadgen.py",
+                                ],
+                                "env": [
+                                    {"name": "K8OST_DSN", "value": dsn},
+                                    {"name": "K8OST_PHASES", "value": json.dumps(phases)},
+                                ],
+                                "volumeMounts": [{"name": "script", "mountPath": "/app"}],
+                                "resources": {
+                                    "requests": {"cpu": "100m", "memory": "128Mi"},
+                                    "limits": {"cpu": "1", "memory": "512Mi"},
+                                },
+                            }
+                        ],
+                        "volumes": [
+                            {"name": "script", "configMap": {"name": "k8ost-loadgen"}}
+                        ],
+                    },
+                },
+            },
+        }
+        self.k8s.batch.create_namespaced_job(self.namespace, job)
+        self.events.emit("load.start", f"{len(phases)} phase(s), ~{total_s:.0f}s")
+
+        deadline = time.time() + total_s + 300  # image pull + pip install headroom
+        while time.time() < deadline:
+            status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
+            if status.succeeded:
+                break
+            if status.failed:
+                raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
+            time.sleep(5)
+        else:
+            raise TimeoutError("loadgen job did not finish in time")
+
+        logs = self._loadgen_logs()
+        (run_dir / "loadgen.log").write_text(logs)  # raw dump survives any parse failure
+        self._parse_loadgen_output(logs, run_dir)
+
+    def _loadgen_logs(self) -> str:
+        pods = self.k8s.core.list_namespaced_pod(
+            self.namespace, label_selector="app=k8ost-loadgen"
+        ).items
+        return self.k8s.pod_logs(self.namespace, pods[0].metadata.name)
+
+    def _parse_loadgen_output(self, logs: str, run_dir: Path) -> None:
+        self._records, self._journal = [], []
+        with open(run_dir / "metrics.jsonl", "w") as metrics_file:
+            for line in logs.splitlines():
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # pip noise etc.
+                self._records.append(rec)
+                metrics_file.write(line + "\n")
+                if rec.get("kind") == "op" and rec.get("op") == "write" and rec.get("ok"):
+                    self._journal.append(rec)
+        with open(run_dir / "journal.jsonl", "w") as journal_file:
+            journal_file.writelines(json.dumps(r) + "\n" for r in self._journal)
+        ops = [r for r in self._records if r.get("kind") == "op"]
+        failed = sum(1 for r in ops if not r["ok"])
+        self.events.emit(
+            "load.done",
+            f"{len(ops)} ops ({len(self._journal)} acked writes, {failed} failed)",
+        )
+        if not self._journal:
+            raise RuntimeError("loadgen produced no acked writes — check its logs")
+
+    # -- verification ----------------------------------------------------------
+
+    def verify(self, check: str, config: dict) -> VerifyResult:
+        if check == "integrity":
+            return self.verify_integrity()
+        if check == "backup":
+            return self.verify_backup()
+        if check == "pitr":
+            return self.verify_pitr()
+        raise ValueError(f"unknown verify step {check!r}")
+
+    def verify_integrity(self) -> VerifyResult:
+        db_rows = {
+            int(id_): checksum
+            for id_, checksum in (
+                line.split("|")
+                for line in self._psql(
+                    "select id, checksum from k8ost_ops order by id"
+                ).splitlines()
+                if line
+            )
+        }
+        missing = [r["id"] for r in self._journal if r["id"] not in db_rows]
+        corrupt = [
+            r["id"]
+            for r in self._journal
+            if r["id"] in db_rows and db_rows[r["id"]] != r["checksum"]
+        ]
+        passed = not missing and not corrupt
+        detail = (
+            f"{len(self._journal)} acked writes all present with matching checksums"
+            if passed
+            else f"{len(missing)} acked writes LOST, {len(corrupt)} corrupted"
+        )
+        return VerifyResult.make("integrity", passed, detail)
+
+    def ensure_backup(self) -> None:
+        """Take a Barman base backup now (called before load so PITR can
+        replay WAL forward through the whole run)."""
+        self._backup_name = f"k8ost-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+        self.k8s.custom.create_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, self.namespace, "backups",
+            {
+                "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",
+                "kind": "Backup",
+                "metadata": {"name": self._backup_name},
+                "spec": {"cluster": {"name": self.cluster_name}},
+            },
+        )
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            backup = self.k8s.custom.get_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
+            )
+            phase = backup.get("status", {}).get("phase")
+            if phase == "completed":
+                self.events.emit("backup.ok", f"base backup {self._backup_name} completed")
+                return
+            if phase == "failed":
+                raise RuntimeError(
+                    f"backup failed: {backup['status'].get('error', '(no error detail)')}"
+                )
+            time.sleep(5)
+        raise TimeoutError("backup not completed after 600s")
+
+    def verify_backup(self) -> VerifyResult:
+        if not self._backup_name:
+            return VerifyResult.make("backup", False, "no backup was taken")
+        status = self.k8s.custom.get_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
+        ).get("status", {})
+        passed = status.get("phase") == "completed"
+        return VerifyResult.make(
+            "backup",
+            passed,
+            f"{self._backup_name}: phase={status.get('phase')}, "
+            f"beginLSN={status.get('beginLSN')}, endLSN={status.get('endLSN')}",
+        )
+
+    def verify_pitr(self) -> VerifyResult:
+        """Restore a second cluster to the mid-run pause phase and compare row
+        sets exactly: every pre-pause acked write present, nothing after."""
+        target_ts, expected_ids = self._pitr_target()
+        target = datetime.fromtimestamp(target_ts, timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S.%f+00"
+        )
+        self.events.emit("pitr.start", f"restore target: {target} ({len(expected_ids)} rows expected)")
+
+        # make sure WAL covering the target is archived before restoring
+        self._psql("select pg_switch_wal()", db="postgres")
+        self._psql("checkpoint", db="postgres")
+        time.sleep(15)
+
+        source = self._cluster(self.cluster_name)
+        store = source["spec"]["backup"]["barmanObjectStore"]
+        restore_name = f"{self.cluster_name}-pitr"
+        self.k8s.custom.create_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters",
+            {
+                "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",
+                "kind": "Cluster",
+                "metadata": {"name": restore_name},
+                "spec": {
+                    "instances": 1,
+                    "storage": source["spec"]["storage"],
+                    "bootstrap": {
+                        "recovery": {
+                            "source": "source",
+                            "recoveryTarget": {"targetTime": target},
+                        }
+                    },
+                    "externalClusters": [
+                        {
+                            "name": "source",
+                            "barmanObjectStore": {**store, "serverName": self.cluster_name},
+                        }
+                    ],
+                },
+            },
+        )
+        self._wait_cluster_healthy(restore_name, timeout=600)
+
+        restored = {
+            int(line)
+            for line in self._psql(
+                "select id from k8ost_ops", pod=f"{restore_name}-1"
+            ).splitlines()
+            if line
+        }
+        expected = set(expected_ids)
+        missing, extra = expected - restored, restored - expected
+        passed = not missing and not extra
+        detail = (
+            f"restored exactly the {len(expected)} pre-pause rows"
+            if passed
+            else f"{len(missing)} expected rows missing, {len(extra)} post-target rows present"
+        )
+        return VerifyResult.make("pitr", passed, detail)
+
+    def _pitr_target(self) -> tuple[float, list[int]]:
+        """Target = middle of the first pause (zero-rate) phase; expected rows =
+        acked writes from before it."""
+        assert self.spec.load is not None
+        pause_idx = next(
+            (
+                i
+                for i, p in enumerate(self.spec.load.phases)
+                if parse_rate(p.rate) == 0
+            ),
+            None,
+        )
+        if pause_idx is None:
+            raise RuntimeError("pitr verification needs a zero-rate pause phase in the load plan")
+        pause = self.spec.load.phases[pause_idx]
+        before = [r for r in self._journal if r["phase"] < pause_idx]
+        if not before:
+            raise RuntimeError("no acked writes before the pause phase")
+        last_write_ts = max(r["t"] for r in before)
+        return last_write_ts + pause.duration_s / 2, [r["id"] for r in before]

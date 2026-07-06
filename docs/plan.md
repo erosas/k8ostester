@@ -12,7 +12,7 @@
 | 2 — CNPG happy path | ✅ done (2026-07-05) | cnpg-baseline green: CNPG 1.29.1 + SeaweedFS, 2938-op load, integrity + backup verified, PITR restored the 601 pre-pause rows exactly |
 | 3 — faults + goals | ✅ done (2026-07-05) | D2 proof landed: cnpg-single FAILED (RTO 10.1s, 12 acked writes lost) vs cnpg-ha-3node PASSED (RTO 1.7s, RPO 0) under the identical primary kill |
 | 4 — observability & reporting | ✅ done (2026-07-06) | run groups + `k8ost report` (self-contained HTML comparison graphs); kube-prometheus-stack (Grafana excluded) + Perses with provisioned datasource; CNPG PodMonitor scrape verified |
-| 5 — scale-out | 🔶 in progress | ✅ pooling comparison (direct FAILED storm 39% connect errors vs pooled PASSED). ✅ tech-owned layout (D15): `technologies/<tech>/{driver.py, experiments/}`. ✅ cnpg-ha-pooler-storm: FAILED — PgBouncer stretches failover RTO 1.7s→15s (finding! tune Pooler params as follow-up). ✅ `k8ost runs`, `report --open`, `dashboard`. Remaining: Chaos Mesh adapter, Kafka driver, CI mode |
+| 5 — scale-out | 🔶 in progress | ✅ pooling comparison (direct FAILED storm 39% connect errors vs pooled PASSED). ✅ tech-owned layout (D15). ✅ cnpg-ha-pooler-storm FAILED (RTO 15s) → ✅ **-tuned PASSED (RTO 1.1s)**: `server_login_retry=1` was the fix — config-variant comparison in one group. ✅ cnpg-replica-down PASSED (target architecture: quorum any/1, replica kill = 0.4s RTO, 100% availability). ✅ `k8ost runs`, `report --open`, `dashboard`. Remaining: Chaos Mesh adapter, Kafka driver, CI mode |
 
 ---
 

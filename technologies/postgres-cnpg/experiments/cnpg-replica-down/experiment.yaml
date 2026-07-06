@@ -1,0 +1,35 @@
+# Validates the target architecture: primary + 2 replicas with quorum sync
+# (ANY 1 of the 2 must ack — i.e. one sync guarantee, the other effectively
+# async). Killing a replica mid-load must be a NON-EVENT: the surviving
+# replica takes over the sync ack and writes continue uninterrupted.
+name: cnpg-replica-down
+technology: postgres-cnpg
+group: replica-resilience
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: auto
+  clients: {count: 10, mode: persistent}
+  phases:
+    - {duration: 150s, rate: 30/s, mix: {read: 0.4, write: 0.6}}
+
+faults:
+  - at: 60s
+    worker: pod_kill
+    target: {role: replica}
+
+verify:
+  - integrity
+
+goals:
+  - {metric: rto, max: 3s}          # replica loss must not interrupt writes
+  - {metric: rpo, max: 0}
+  - {metric: availability, min: 99.9%}
+  - {metric: write_latency_p99, max: 150ms}

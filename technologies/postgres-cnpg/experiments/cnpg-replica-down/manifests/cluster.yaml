@@ -1,0 +1,18 @@
+# The target architecture: 3 instances, quorum sync ANY 1 of 2 replicas.
+# Equivalent durability to "1 sync + 1 async" but either replica can serve
+# the sync ack — so losing either one never blocks writes.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    synchronous:
+      method: any
+      number: 1

@@ -53,6 +53,8 @@ class CnpgDriver(TechnologyDriver):
 
     def wait_ready(self, timeout: float = 600) -> None:
         self._wait_cluster_healthy(self.cluster_name, timeout)
+        # anything else in the manifests (e.g. a PgBouncer Pooler deployment)
+        self.k8s.wait_workloads_ready(self.namespace, timeout=300)
 
     # -- cluster introspection -------------------------------------------------
 

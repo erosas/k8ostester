@@ -55,7 +55,11 @@ def record(op, phase, t0, ok, err=None, **extra):
 async def connect(phase):
     t0 = time.time()
     try:
-        conn = await psycopg.AsyncConnection.connect(DSN, autocommit=True, connect_timeout=5)
+        # prepare_threshold=None: server-side prepared statements break
+        # PgBouncer transaction pooling; disabled everywhere for comparability
+        conn = await psycopg.AsyncConnection.connect(
+            DSN, autocommit=True, connect_timeout=5, prepare_threshold=None
+        )
         record("connect", phase, t0, True)
         return conn
     except Exception as e:

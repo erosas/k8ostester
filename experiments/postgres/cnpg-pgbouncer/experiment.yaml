@@ -1,0 +1,34 @@
+# Pooling comparison, arm 2: app → PgBouncer (CNPG Pooler CR) → Postgres.
+# Identical cluster, load, and goals to cnpg-direct; only the connection path
+# differs. PgBouncer multiplexes the 150-client storm over 20 backend
+# connections — expected to PASS.
+name: cnpg-pgbouncer
+technology: postgres-cnpg
+group: pooling
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: pg-pooler                              # the Pooler service
+  clients: {count: 10, mode: persistent}
+  phases:
+    - {duration: 60s, rate: 20/s, mix: {read: 0.5, write: 0.5}}   # steady baseline
+    - {duration: 45s, rate: 30/s, mix: {read: 0.5, write: 0.5},
+       clients: {count: 10, mode: churn}}                          # connection churn
+    - {duration: 45s, rate: 100/s, mix: {read: 0.5, write: 0.5},
+       clients: {count: 150, mode: persistent}}                    # connection storm
+
+verify:
+  - integrity
+
+goals:
+  - {metric: connect_error_rate, max: 1%}
+  - {metric: connect_latency_p99, max: 100ms}
+  - {metric: write_latency_p99, max: 200ms}
+  - {metric: availability, min: 99%}

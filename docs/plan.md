@@ -12,7 +12,7 @@
 | 2 — CNPG happy path | ✅ done (2026-07-05) | cnpg-baseline green: CNPG 1.29.1 + SeaweedFS, 2938-op load, integrity + backup verified, PITR restored the 601 pre-pause rows exactly |
 | 3 — faults + goals | ✅ done (2026-07-05) | D2 proof landed: cnpg-single FAILED (RTO 10.1s, 12 acked writes lost) vs cnpg-ha-3node PASSED (RTO 1.7s, RPO 0) under the identical primary kill |
 | 4 — observability & reporting | ✅ done (2026-07-06) | run groups + `k8ost report` (self-contained HTML comparison graphs); kube-prometheus-stack (Grafana excluded) + Perses with provisioned datasource; CNPG PodMonitor scrape verified |
-| 5 — scale-out | ⬜ next | pooling comparison (cnpg-pgbouncer), Chaos Mesh adapter, Kafka driver, CI mode |
+| 5 — scale-out | 🔶 in progress | ✅ pooling comparison done (2026-07-06): cnpg-direct FAILED the 150-client storm (39% connect errors) vs cnpg-pgbouncer PASSED (0%, +28% storm throughput). Remaining: Chaos Mesh adapter, Kafka driver, CI mode |
 
 ---
 

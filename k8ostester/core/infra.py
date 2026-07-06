@@ -1,7 +1,9 @@
-"""Shared cluster prerequisites (operators, object store).
+"""COMMON cluster prerequisites (object store, monitoring).
 
-Installed idempotently before a run, never torn down per run (D8). Each infra
-entry in experiment.yaml maps to a handler here.
+Installed idempotently before a run, never torn down per run (D8). Core only
+owns infra any technology can use; technology-specific prerequisites (e.g. the
+CNPG operator) are installed by the technology's own driver (D15), which
+delegates the common entries here.
 """
 
 from __future__ import annotations
@@ -15,9 +17,7 @@ from k8ostester.core.events import EventLog
 from k8ostester.core.helm import Helm
 from k8ostester.core.k8s import ClusterClient
 
-# Pinned versions (upgrade deliberately, in one place).
-CNPG_CHART_VERSION = "0.28.3"  # CloudNativePG operator 1.29.1
-CNPG_REPO = "https://cloudnative-pg.github.io/charts"
+# Pinned versions of COMMON infra (tech-specific pins live in each driver).
 KPS_CHART_VERSION = "87.10.1"  # kube-prometheus-stack (prometheus-operator 0.92)
 KPS_REPO = "https://prometheus-community.github.io/helm-charts"
 PERSES_CHART_VERSION = "0.22.0"  # Perses 0.53 (Apache 2.0 dashboards, D7)
@@ -35,26 +35,17 @@ class InfraManager:
         self.k8s = k8s
         self.events = events
 
+    def handles(self, entry: str | dict[str, Any]) -> bool:
+        return entry in ("seaweedfs", "monitoring")
+
     def ensure(self, infra: list[str | dict[str, Any]]) -> None:
         for entry in infra:
             if entry == "seaweedfs":
                 self._ensure_seaweedfs()
             elif entry == "monitoring":
                 self._ensure_monitoring()
-            elif isinstance(entry, dict) and entry.get("operator") == "cnpg":
-                self._ensure_cnpg()
             else:
-                raise ValueError(f"unknown infra entry: {entry!r}")
-
-    def _ensure_cnpg(self) -> None:
-        helm = Helm(self.k8s.context)
-        self.events.emit(
-            "infra.cnpg", f"ensuring CloudNativePG operator (chart {CNPG_CHART_VERSION})"
-        )
-        helm.repo_add("cnpg", CNPG_REPO)
-        helm.upgrade_install(
-            "cnpg", "cnpg/cloudnative-pg", "cnpg-system", version=CNPG_CHART_VERSION
-        )
+                raise ValueError(f"not common infra: {entry!r} (does the tech driver handle it?)")
 
     def _ensure_monitoring(self) -> None:
         """Prometheus stack (Grafana disabled — AGPL, D7) + Perses dashboards."""

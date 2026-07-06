@@ -16,11 +16,15 @@ from pathlib import Path
 from typing import Any
 
 from k8ostester.core.experiment import parse_rate
+from k8ostester.core.helm import Helm
 from k8ostester.core.infra import InfraManager
 from k8ostester.drivers.base import TechnologyDriver
 
 CNPG_GROUP = "postgresql.cnpg.io"
 CNPG_VERSION = "v1"
+# this technology's own prerequisite pins (D15) — core only pins common infra
+CNPG_CHART_VERSION = "0.28.3"  # CloudNativePG operator 1.29.1
+CNPG_REPO = "https://cloudnative-pg.github.io/charts"
 LOADGEN_SCRIPT = Path(__file__).parent / "loadgen.py"
 LOADGEN_IMAGE = "python:3.12-slim"
 PSYCOPG_PIN = "psycopg[binary]==3.2.*"
@@ -40,7 +44,26 @@ class CnpgDriver(TechnologyDriver):
     # -- lifecycle -----------------------------------------------------------
 
     def install_prereqs(self) -> None:
-        InfraManager(self.k8s, self.events).ensure(self.spec.infra)
+        """Tech-owned prerequisites here; common entries delegate to core."""
+        common = InfraManager(self.k8s, self.events)
+        common.ensure([e for e in self.spec.infra if common.handles(e)])
+        for entry in self.spec.infra:
+            if common.handles(entry):
+                continue
+            if isinstance(entry, dict) and entry.get("operator") == "cnpg":
+                self._ensure_operator()
+            else:
+                raise ValueError(f"unknown infra entry for postgres-cnpg: {entry!r}")
+
+    def _ensure_operator(self) -> None:
+        helm = Helm(self.k8s.context)
+        self.events.emit(
+            "infra.cnpg", f"ensuring CloudNativePG operator (chart {CNPG_CHART_VERSION})"
+        )
+        helm.repo_add("cnpg", CNPG_REPO)
+        helm.upgrade_install(
+            "cnpg", "cnpg/cloudnative-pg", "cnpg-system", version=CNPG_CHART_VERSION
+        )
 
     def deploy(self) -> None:
         out = self.k8s.apply_manifests(
@@ -427,3 +450,6 @@ class CnpgDriver(TechnologyDriver):
             raise RuntimeError("no acked writes before the pause phase")
         last_write_ts = max(r["t"] for r in before)
         return last_write_ts + pause.duration_s / 2, [r["id"] for r in before]
+
+
+DRIVER = CnpgDriver

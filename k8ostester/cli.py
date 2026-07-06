@@ -37,8 +37,11 @@ def report(
     group: str = typer.Option(None, "--group", "-g", help="Include every run recorded with this group"),
     out: Path = typer.Option(Path("results/report.html"), "--out", "-o"),
     title: str = typer.Option(None, "--title"),
+    open_browser: bool = typer.Option(False, "--open", help="Open the report in the browser"),
 ) -> None:
     """Render a self-contained HTML report comparing runs (graphs + goal matrix)."""
+    import webbrowser
+
     from k8ostester.core import report as report_mod
 
     dirs = list(runs or [])
@@ -50,6 +53,63 @@ def report(
     data = [report_mod.gather_run(d) for d in dirs]
     path = report_mod.render(data, title or group or "K8osTester comparison", out)
     console.print(f"[green]✔[/green] report with {len(data)} run(s): {path}")
+    if open_browser:
+        webbrowser.open(path.resolve().as_uri())
+
+
+@app.command()
+def runs(
+    results: Path = typer.Option(Path("results"), "--results"),
+) -> None:
+    """List recorded runs (experiment, group, status) newest first."""
+    import json
+
+    rows = []
+    for summary_path in results.glob("*/*/summary.json"):
+        try:
+            rows.append(json.loads(summary_path.read_text()))
+        except json.JSONDecodeError:
+            continue
+    if not rows:
+        console.print("no runs recorded")
+        return
+    rows.sort(key=lambda s: s["run_id"], reverse=True)
+    table = Table(title=f"{len(rows)} run(s)", title_justify="left")
+    for col in ("Run", "Experiment", "Group", "Status", "Duration"):
+        table.add_column(col)
+    for s in rows:
+        status = s.get("status", "?")
+        color = "green" if status == "passed" else "red"
+        table.add_row(
+            s["run_id"], s["experiment"], s.get("group") or "—",
+            f"[{color}]{status}[/{color}]", f"{s.get('duration_s', 0):.0f}s",
+        )
+    console.print(table)
+
+
+@app.command()
+def dashboard(
+    context: str = typer.Option(None, "--context", "-c", help="Kubeconfig context"),
+    port: int = typer.Option(8080, "--port"),
+) -> None:
+    """Open the live metrics dashboard (Perses; needs the monitoring infra installed)."""
+    import subprocess
+    import webbrowser
+
+    url = f"http://localhost:{port}"
+    console.print(f"Perses at [bold]{url}[/bold] — Ctrl-C to stop the port-forward")
+    cmd = ["kubectl", "port-forward", "-n", "k8ost-monitoring", "svc/perses", f"{port}:8080"]
+    if context:
+        cmd += ["--context", context]
+    proc = subprocess.Popen(cmd)
+    try:
+        import time as _time
+
+        _time.sleep(1.5)
+        webbrowser.open(url)
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.terminate()
 
 
 @app.command()

@@ -79,6 +79,15 @@ The load plan includes a zero-rate pause; the PITR target is the middle of it. E
 before the pause must be in the restored cluster, nothing after it — an exact row-set assertion,
 immune to client/server clock skew and commit-vs-statement timestamp gaps at the boundary.
 
+## D15 — Technologies own their directory: driver + experiments + prerequisites
+`technologies/<tech>/` contains `driver.py` (+ helpers like `loadgen.py`) and `experiments/`.
+Drivers are discovered by walking up from the experiment directory to the nearest `driver.py`
+(loaded dynamically; `DRIVER` attr or the single TechnologyDriver subclass); built-ins (generic)
+remain a core fallback. Tech-specific prerequisites and their version pins (e.g. the CNPG
+operator chart) live in the tech driver; core `InfraManager` only owns **common** infra
+(SeaweedFS, monitoring) and drivers delegate those entries to it. Future: per-tech Python
+dependencies declared in the tech dir (uv extras) — not needed yet.
+
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
 Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
 in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap

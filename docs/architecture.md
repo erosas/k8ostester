@@ -58,9 +58,11 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `core/metrics.py` | append-only JSONL metric store + percentile helper (authoritative tier for goal verdicts) |
 | `core/infra.py` | shared prerequisites, installed idempotently: CNPG operator (pinned chart 0.28.3 / app 1.29.1), SeaweedFS + backup bucket |
 | `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, run_load, ensure_backup, verify |
-| `drivers/generic.py` | deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
-| `drivers/postgres_cnpg/driver.py` | CNPG driver: Cluster CR lifecycle, topology from CR status, loadgen Job, integrity/backup/PITR verification |
-| `drivers/postgres_cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
+| `drivers/__init__.py` | driver discovery (D15): nearest `driver.py` above the experiment dir, loaded dynamically; built-ins as fallback |
+| `drivers/generic.py` | built-in deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
+| `technologies/postgres-cnpg/driver.py` | tech-owned CNPG driver: operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
+| `technologies/postgres-cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
+| `technologies/<tech>/experiments/` | each technology's experiments live beside its driver (D15) |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
 | `workers/` | fault workers: `pod_kill` (grace 0), `node_drain` (cordon + evict run pods, uncordon cleanup); targets resolve at injection time via driver topology |
 | `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |

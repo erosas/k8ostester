@@ -17,17 +17,19 @@ backup/PITR, and get a pass/fail verdict per goal.
 uv pip install -e . -p .venv/bin/python
 
 k8ost env check                              # what can this cluster do?
-k8ost validate experiments/examples/nginx-smoke
-k8ost run experiments/examples/nginx-smoke   # full lifecycle smoke test
+k8ost run technologies/postgres-cnpg/experiments/cnpg-single
+k8ost runs                                   # list recorded runs
+k8ost report --group pooling --open          # comparison graphs for a run group
+k8ost dashboard                              # live metrics (Perses; needs monitoring infra)
 ```
 
-Runs write artifacts to `results/<experiment>/<run-id>/` (events timeline, spec snapshot,
-summary). Add `--keep` to leave the run namespace up for inspection.
+Runs write artifacts to `results/<experiment>/<run-id>/` (events timeline, journal, metrics,
+summary). Add `--keep` to leave the run namespace up for inspection, `--group` to group runs
+for reporting.
 
 ## Layout
 
-- `k8ostester/` — the framework (CLI `k8ost`)
-- `experiments/` — experiment directories: the configs being validated + `experiment.yaml`
-  (load, faults, goals)
-- `infra/` — shared cluster prerequisites (operator pins, object store, monitoring)
+- `k8ostester/` — the framework core (CLI `k8ost`): runner, workers, goals, reports, common infra
+- `technologies/<tech>/` — each technology owns its `driver.py` and its `experiments/` (D15)
+- `infra/` — common cluster prerequisites (object store, monitoring)
 - `results/` — per-run artifacts (gitignored)

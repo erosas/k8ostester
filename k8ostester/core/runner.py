@@ -69,7 +69,7 @@ class Runner:
             self._snapshot_spec()
             self._check_capabilities(k8s)
 
-            driver_cls = get_driver(self.spec.technology)
+            driver_cls = get_driver(self.spec.technology, self.spec.dir)
             driver = driver_cls(k8s, self.spec, self.namespace, self.events)
 
             self.events.emit("run.start", f"experiment {self.spec.name}",

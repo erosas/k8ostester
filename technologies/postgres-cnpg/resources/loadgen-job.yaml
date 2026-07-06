@@ -1,0 +1,36 @@
+# Load generator Job (D12): stock python image + the loadgen.py ConfigMap.
+# Scalars: '${X}'. The phase plan substitutes as a JSON string into K8OST_PHASES.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k8ost-loadgen
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: k8ost-loadgen
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: loadgen
+          image: '${IMAGE}'
+          command:
+            - bash
+            - -c
+            - pip install --quiet --no-cache-dir '${PSYCOPG_PIN}' && exec python /app/loadgen.py
+          env:
+            - name: K8OST_DSN
+              value: '${DSN}'
+            - name: K8OST_PHASES
+              value: '${PHASES_JSON}'
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      volumes:
+        - name: script
+          configMap:
+            name: k8ost-loadgen

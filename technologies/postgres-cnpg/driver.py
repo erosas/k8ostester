@@ -18,6 +18,7 @@ from typing import Any
 from k8ostester.core.experiment import parse_rate
 from k8ostester.core.helm import Helm
 from k8ostester.core.infra import InfraManager
+from k8ostester.core.resources import load_resource
 from k8ostester.drivers.base import TechnologyDriver
 
 CNPG_GROUP = "postgresql.cnpg.io"
@@ -26,6 +27,7 @@ CNPG_VERSION = "v1"
 CNPG_CHART_VERSION = "0.28.3"  # CloudNativePG operator 1.29.1
 CNPG_REPO = "https://cloudnative-pg.github.io/charts"
 LOADGEN_SCRIPT = Path(__file__).parent / "loadgen.py"
+RESOURCES = Path(__file__).parent / "resources"
 LOADGEN_IMAGE = "python:3.12-slim"
 PSYCOPG_PIN = "psycopg[binary]==3.2.*"
 
@@ -178,42 +180,15 @@ class CnpgDriver(TechnologyDriver):
                 "data": {"loadgen.py": LOADGEN_SCRIPT.read_text()},
             },
         )
-        job = {
-            "metadata": {"name": "k8ost-loadgen"},
-            "spec": {
-                "backoffLimit": 0,
-                "template": {
-                    "metadata": {"labels": {"app": "k8ost-loadgen"}},
-                    "spec": {
-                        "restartPolicy": "Never",
-                        "containers": [
-                            {
-                                "name": "loadgen",
-                                "image": LOADGEN_IMAGE,
-                                "command": [
-                                    "bash",
-                                    "-c",
-                                    f"pip install --quiet --no-cache-dir '{PSYCOPG_PIN}' "
-                                    "&& exec python /app/loadgen.py",
-                                ],
-                                "env": [
-                                    {"name": "K8OST_DSN", "value": dsn},
-                                    {"name": "K8OST_PHASES", "value": json.dumps(phases)},
-                                ],
-                                "volumeMounts": [{"name": "script", "mountPath": "/app"}],
-                                "resources": {
-                                    "requests": {"cpu": "100m", "memory": "128Mi"},
-                                    "limits": {"cpu": "1", "memory": "512Mi"},
-                                },
-                            }
-                        ],
-                        "volumes": [
-                            {"name": "script", "configMap": {"name": "k8ost-loadgen"}}
-                        ],
-                    },
-                },
+        job = load_resource(
+            RESOURCES / "loadgen-job.yaml",
+            {
+                "IMAGE": LOADGEN_IMAGE,
+                "PSYCOPG_PIN": PSYCOPG_PIN,
+                "DSN": dsn,
+                "PHASES_JSON": json.dumps(phases),
             },
-        }
+        )
         self.k8s.batch.create_namespaced_job(self.namespace, job)
         self._load_total_s = total_s
         self._run_dir = run_dir
@@ -333,12 +308,10 @@ class CnpgDriver(TechnologyDriver):
         self._backup_name = f"k8ost-{datetime.now(timezone.utc).strftime('%H%M%S')}"
         self.k8s.custom.create_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, self.namespace, "backups",
-            {
-                "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",
-                "kind": "Backup",
-                "metadata": {"name": self._backup_name},
-                "spec": {"cluster": {"name": self.cluster_name}},
-            },
+            load_resource(
+                RESOURCES / "backup.yaml",
+                {"BACKUP_NAME": self._backup_name, "CLUSTER_NAME": self.cluster_name},
+            ),
         )
         deadline = time.time() + 600
         while time.time() < deadline:
@@ -389,27 +362,15 @@ class CnpgDriver(TechnologyDriver):
         restore_name = f"{self.cluster_name}-pitr"
         self.k8s.custom.create_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters",
-            {
-                "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",
-                "kind": "Cluster",
-                "metadata": {"name": restore_name},
-                "spec": {
-                    "instances": 1,
-                    "storage": source["spec"]["storage"],
-                    "bootstrap": {
-                        "recovery": {
-                            "source": "source",
-                            "recoveryTarget": {"targetTime": target},
-                        }
-                    },
-                    "externalClusters": [
-                        {
-                            "name": "source",
-                            "barmanObjectStore": {**store, "serverName": self.cluster_name},
-                        }
-                    ],
+            load_resource(
+                RESOURCES / "pitr-cluster.yaml",
+                {
+                    "RESTORE_NAME": restore_name,
+                    "TARGET_TIME": target,
+                    "STORAGE_JSON": json.dumps(source["spec"]["storage"]),
+                    "STORE_JSON": json.dumps({**store, "serverName": self.cluster_name}),
                 },
-            },
+            ),
         )
         self._wait_cluster_healthy(restore_name, timeout=600)
 

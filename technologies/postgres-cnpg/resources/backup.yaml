@@ -1,0 +1,8 @@
+# On-demand Barman base backup for the cluster under test.
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata:
+  name: '${BACKUP_NAME}'
+spec:
+  cluster:
+    name: '${CLUSTER_NAME}'

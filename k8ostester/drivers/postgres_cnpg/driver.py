@@ -109,6 +109,11 @@ class CnpgDriver(TechnologyDriver):
     # -- load ------------------------------------------------------------------
 
     def run_load(self, run_dir: Path) -> None:
+        self.start_load(run_dir)
+        self.wait_load_started()
+        self.wait_load_done()
+
+    def start_load(self, run_dir: Path) -> None:
         spec = self.spec.load
         assert spec is not None
         phases = []
@@ -185,9 +190,32 @@ class CnpgDriver(TechnologyDriver):
             },
         }
         self.k8s.batch.create_namespaced_job(self.namespace, job)
+        self._load_total_s = total_s
+        self._run_dir = run_dir
         self.events.emit("load.start", f"{len(phases)} phase(s), ~{total_s:.0f}s")
 
-        deadline = time.time() + total_s + 300  # image pull + pip install headroom
+    def wait_load_started(self, timeout: float = 300) -> float:
+        """Block until the loadgen emits its 'start' record (schema created,
+        ops flowing). Returns the framework-clock timestamp — the zero point
+        for the fault timeline."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
+            if status.failed:
+                raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
+            if status.active or status.succeeded:
+                try:
+                    started = '"kind": "start"' in self._loadgen_logs()
+                except Exception:
+                    started = False  # pod still ContainerCreating / not listed yet
+                if started:
+                    self.events.emit("load.started", "loadgen is emitting ops")
+                    return time.time()
+            time.sleep(3)
+        raise TimeoutError("loadgen did not start emitting ops in time")
+
+    def wait_load_done(self) -> None:
+        deadline = time.time() + self._load_total_s + 300  # pull + pip headroom
         while time.time() < deadline:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
             if status.succeeded:
@@ -199,8 +227,12 @@ class CnpgDriver(TechnologyDriver):
             raise TimeoutError("loadgen job did not finish in time")
 
         logs = self._loadgen_logs()
-        (run_dir / "loadgen.log").write_text(logs)  # raw dump survives any parse failure
-        self._parse_loadgen_output(logs, run_dir)
+        (self._run_dir / "loadgen.log").write_text(logs)  # raw dump survives any parse failure
+        self._parse_loadgen_output(logs, self._run_dir)
+
+    @property
+    def op_records(self) -> list[dict]:
+        return [r for r in self._records if r.get("kind") == "op"]
 
     def _loadgen_logs(self) -> str:
         pods = self.k8s.core.list_namespaced_pod(
@@ -265,7 +297,10 @@ class CnpgDriver(TechnologyDriver):
             if passed
             else f"{len(missing)} acked writes LOST, {len(corrupt)} corrupted"
         )
-        return VerifyResult.make("integrity", passed, detail)
+        result = VerifyResult.make("integrity", passed, detail)
+        result["missing"] = len(missing)  # rpo goal reads this (lost acked writes)
+        result["corrupt"] = len(corrupt)
+        return result
 
     def ensure_backup(self) -> None:
         """Take a Barman base backup now (called before load so PITR can

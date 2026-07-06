@@ -51,10 +51,32 @@ def run(
     except Exception as e:
         console.print(f"\n[red]run error:[/red] {e}")
         raise typer.Exit(1)
+
+    if result.goals or result.verifications:
+        table = Table(title="Verdict", title_justify="left")
+        table.add_column("")
+        table.add_column("Goal / check")
+        table.add_column("Value")
+        table.add_column("Threshold")
+        table.add_column("Detail")
+        for v in result.verifications:
+            table.add_row(
+                "[green]✔[/green]" if v["passed"] else "[red]✘[/red]",
+                f"verify:{v['check']}", "", "", v["detail"],
+            )
+        for g in result.goals:
+            table.add_row(
+                "[green]✔[/green]" if g["passed"] else "[red]✘[/red]",
+                g["goal"], str(g["value"]), str(g["threshold"]), g["detail"],
+            )
+        console.print(table)
+
     console.print(
         f"\n[bold]{'[green]PASSED[/green]' if result.status == 'passed' else '[red]' + result.status.upper() + '[/red]'}[/bold]"
         f"  results: {result.run_dir}"
     )
+    if result.status != "passed":
+        raise typer.Exit(2)
 
 
 @env_app.command("contexts")

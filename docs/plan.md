@@ -10,8 +10,8 @@
 | 0 — environment | ✅ done (2026-07-05) | helm v4 installed; `k8ost env check` verified against the 4-worker docker-desktop cluster |
 | 1 — skeleton | ✅ done (2026-07-05) | spec models, runner lifecycle, generic driver, events/metrics stores, helm/kubectl wrappers; nginx-smoke run green end-to-end |
 | 2 — CNPG happy path | ✅ done (2026-07-05) | cnpg-baseline green: CNPG 1.29.1 + SeaweedFS, 2938-op load, integrity + backup verified, PITR restored the 601 pre-pause rows exactly |
-| 3 — faults + goals | ⬜ next | the failing-single / passing-HA proof |
-| 4 — observability & reporting | ⬜ | Prometheus stack, dashboards (license decision pending), HTML reports, compare |
+| 3 — faults + goals | ✅ done (2026-07-05) | D2 proof landed: cnpg-single FAILED (RTO 10.1s, 12 acked writes lost) vs cnpg-ha-3node PASSED (RTO 1.7s, RPO 0) under the identical primary kill |
+| 4 — observability & reporting | ⬜ next | Prometheus stack, dashboards (license decision pending), HTML reports, compare |
 | 5 — scale-out | ⬜ | Chaos Mesh adapter, Kafka driver, CI mode |
 
 ---
@@ -354,3 +354,9 @@ A custom run-browser UI stays deferred — nothing in the design blocks it.
   error; later: persist journal to PVC). Journal retrieval is via pod logs (D12), so a deleted
   pod loses the journal.
 - Pin the SeaweedFS image to a digest (currently `latest`).
+- **Investigate: single-instance CNPG lost 12 acked writes under `kill -9`** (cnpg-single run
+  20260705-232309). Suspects: storage-stack fsync honesty (local-path in the Docker Desktop VM)
+  vs commit settings. Sync-rep HA lost none, which points at local storage.
+- Availability measured by op-count is soft when clients back off during outages (few attempts
+  → few failures). Consider a time-bucketed availability metric (fraction of seconds with ≥1
+  successful op).

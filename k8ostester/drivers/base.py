@@ -56,6 +56,21 @@ class TechnologyDriver:
         and journal.jsonl into run_dir."""
         raise NotImplementedError(f"{type(self).__name__} has no load generator")
 
+    def start_load(self, run_dir: Path) -> None:
+        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+
+    def wait_load_started(self, timeout: float = 300) -> float:
+        """Block until ops are flowing; returns the fault-timeline zero point."""
+        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+
+    def wait_load_done(self) -> None:
+        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+
+    @property
+    def op_records(self) -> list[dict]:
+        """Per-operation records from the completed load run (goal evidence)."""
+        return []
+
     def ensure_backup(self) -> None:
         """Take a base backup now (before load, so PITR can replay forward)."""
         raise NotImplementedError(f"{type(self).__name__} has no backup support")

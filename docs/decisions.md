@@ -79,3 +79,12 @@ The load plan includes a zero-rate pause; the PITR target is the middle of it. E
 before the pause must be in the restored cluster, nothing after it — an exact row-set assertion,
 immune to client/server clock skew and commit-vs-statement timestamp gaps at the boundary.
 
+## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
+Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
+in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap
+between consecutive successful writes within a window around the fault — both ends of the gap
+are on the same clock, and skew merely shifts the window. Fault targets resolve at injection
+time, not run start: after a failover, "primary" is a different pod. Cluster-level fault
+mutations (cordons) return cleanup callables run at teardown — a namespace delete won't undo
+them.
+

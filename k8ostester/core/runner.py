@@ -18,8 +18,10 @@ from pathlib import Path
 from k8ostester.core.capabilities import probe
 from k8ostester.core.events import EventLog
 from k8ostester.core.experiment import ExperimentSpec
+from k8ostester.core.goals import evaluate_goals
 from k8ostester.core.k8s import ClusterClient
 from k8ostester.drivers import get_driver
+from k8ostester.workers import get_worker
 
 RUN_LABEL = "k8ostester.io/run"
 
@@ -32,6 +34,7 @@ class RunResult:
         self.namespace: str | None = None
         self.error: str | None = None
         self.verifications: list[dict] = []
+        self.goals: list[dict] = []
 
 
 class Runner:
@@ -52,6 +55,8 @@ class Runner:
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.events = EventLog(self.run_dir / "events.jsonl", on_event=on_event)
         self.namespace = f"{self.spec.namespace_base}-{run_stamp.replace('-', '')[-6:]}"
+        self._cleanups: list = []
+        self._fault_events: list[dict] = []
 
     def run(self) -> RunResult:
         result = RunResult(self.run_id, self.run_dir)
@@ -89,7 +94,12 @@ class Runner:
                 driver.ensure_backup()
 
             if self.spec.load and self.spec.load.phases:
-                driver.run_load(self.run_dir)
+                driver.start_load(self.run_dir)
+                t0 = driver.wait_load_started()
+                self._inject_faults(k8s, driver, t0, result)
+                driver.wait_load_done()
+            elif self.spec.faults:
+                raise ValueError("faults require a load plan (the timeline is relative to load start)")
 
             for step in self.spec.verify:
                 name = step if isinstance(step, str) else next(iter(step))
@@ -102,12 +112,18 @@ class Runner:
                     f"{name}: {outcome['detail']}",
                 )
 
-            if self.spec.faults:
-                self.events.emit("faults.skip", "fault injection lands in phase 3")
             if self.spec.goals:
-                self.events.emit("goals.skip", "goal evaluation lands in phase 3")
+                result.goals = evaluate_goals(
+                    self.spec.goals, driver.op_records, self._fault_events, result.verifications
+                )
+                for g in result.goals:
+                    self.events.emit(
+                        "goal.pass" if g["passed"] else "goal.fail",
+                        f"{g['goal']}: {g['value']} (threshold {g['threshold']}) — {g['detail']}",
+                    )
 
             failed = [v for v in result.verifications if not v["passed"]]
+            failed += [g for g in result.goals if not g["passed"]]
             result.status = "failed" if failed else "passed"
         except Exception as e:
             result.status = "error"
@@ -136,7 +152,31 @@ class Runner:
                 "those faults will be skipped",
             )
 
+    def _inject_faults(self, k8s: ClusterClient, driver, t0: float, result: RunResult) -> None:
+        """Fire each fault at its offset from load start; targets resolve at
+        injection time (topology shifts as faults land)."""
+        for fault in sorted(self.spec.faults, key=lambda f: f.at_s):
+            delay = t0 + fault.at_s - time.time()
+            if delay > 0:
+                time.sleep(delay)
+            worker = get_worker(fault.worker)(k8s, driver, self.namespace, self.events)
+            cleanup = worker.execute(fault.target)
+            if cleanup:
+                self._cleanups.append(cleanup)
+            event = self.events.emit(
+                "fault.injected",
+                f"{fault.worker} at +{fault.at_s:.0f}s",
+                worker=fault.worker,
+                target=fault.target,
+            )
+            self._fault_events.append(event)
+
     def _teardown(self, k8s: ClusterClient, result: RunResult) -> None:
+        for cleanup in self._cleanups:
+            try:
+                cleanup()
+            except Exception as e:
+                self.events.emit("teardown.error", f"fault cleanup failed: {e}")
         if self.keep:
             self.events.emit("teardown.skip", f"--keep: namespace {self.namespace} left running")
             return
@@ -160,6 +200,7 @@ class Runner:
             "status": result.status,
             "error": result.error,
             "verifications": result.verifications,
+            "goals": result.goals,
             "duration_s": round(time.time() - started, 1),
             "kept": self.keep,
         }

@@ -1,0 +1,34 @@
+# Experiment: single-instance CNPG under a primary kill (D2).
+# EXPECTED TO FAIL its goals — one instance means every failure is an outage
+# while the pod is recreated and Postgres runs crash recovery.
+# Compare with cnpg-ha-3node: identical load, fault, and goals.
+name: cnpg-single
+technology: postgres-cnpg
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: auto
+  clients: {count: 5, mode: persistent}
+  phases:
+    - {duration: 150s, rate: 20/s, mix: {read: 0.3, write: 0.7}}
+
+faults:
+  - at: 60s
+    worker: pod_kill
+    target: {role: primary}
+
+verify:
+  - integrity                    # also feeds the rpo goal
+
+goals:
+  - {metric: rto, max: 10s}
+  - {metric: rpo, max: 0}
+  - {metric: availability, min: 98%}
+  - {metric: write_latency_p99, max: 150ms, window: steady-state}

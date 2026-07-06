@@ -61,6 +61,8 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `drivers/generic.py` | deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
 | `drivers/postgres_cnpg/driver.py` | CNPG driver: Cluster CR lifecycle, topology from CR status, loadgen Job, integrity/backup/PITR verification |
 | `drivers/postgres_cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
+| `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
+| `workers/` | fault workers: `pod_kill` (grace 0), `node_drain` (cordon + evict run pods, uncordon cleanup); targets resolve at injection time via driver topology |
 | `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |
 | `experiments/` | experiment directories (the configs being validated) |
 | `infra/` | shared cluster prerequisites (operator pins, SeaweedFS, monitoring) — phase 2+ |

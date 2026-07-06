@@ -63,6 +63,8 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `drivers/postgres_cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
 | `workers/` | fault workers: `pod_kill` (grace 0), `node_drain` (cordon + evict run pods, uncordon cleanup); targets resolve at injection time via driver topology |
+| `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |
+| `infra/monitoring/` | kube-prometheus-stack 87.10.1 (Grafana disabled, D7) + Perses 0.22.0 with provisioned Prometheus datasource; PodMonitor discovery is cluster-wide |
 | `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |
 | `experiments/` | experiment directories (the configs being validated) |
 | `infra/` | shared cluster prerequisites (operator pins, SeaweedFS, monitoring) — phase 2+ |
@@ -102,8 +104,17 @@ goals, metrics, and reports are shared.
 1. **Verdict tier (authoritative):** per-operation records from the loadgen journal, stored in
    `results/<run>/`. Goals are evaluated only against this — Prometheus scrape resolution is too
    coarse for second-level RTO, and RPO requires journal-vs-database reconciliation.
-2. **Observability tier:** Prometheus stack in-cluster for live dashboards and system metrics
-   (phase 4; dashboard tool pending the license decision — Grafana is AGPL).
+2. **Observability tier (installed via the `monitoring` infra entry):** kube-prometheus-stack
+   in `k8ost-monitoring` — Prometheus discovers *all* Pod/ServiceMonitors, so a CNPG cluster
+   with `monitoring.enablePodMonitor: true` is scraped automatically and its metrics outlive
+   the run namespace (7d retention). Dashboards: **Perses** (Apache 2.0 — Grafana is AGPL,
+   excluded by D7) with a provisioned default Prometheus datasource; reach it with
+   `kubectl port-forward -n k8ost-monitoring svc/perses 8080:8080`.
+
+Cross-run comparison graphs do NOT come from Prometheus — `k8ost report` builds them from the
+runs' `metrics.jsonl` (the verdict tier), so reports work offline and after cluster teardown.
+Runs are grouped via `group:` in experiment.yaml or `k8ost run --group`, recorded in
+`summary.json`; `k8ost report --group X` collects and graphs the whole group.
 
 ## Cluster targeting
 

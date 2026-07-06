@@ -109,6 +109,7 @@ class GoalSpec(BaseModel):
 class ExperimentSpec(BaseModel):
     name: str
     technology: str
+    group: str | None = None  # runs sharing a group are reported/graphed together
     cluster: ClusterSpec = ClusterSpec()
     infra: list[str | dict[str, Any]] = []
     config: ConfigSpec = ConfigSpec()

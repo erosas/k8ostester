@@ -32,10 +32,32 @@ def validate(path: Path) -> None:
 
 
 @app.command()
+def report(
+    runs: list[Path] = typer.Argument(None, help="Run directories to compare"),
+    group: str = typer.Option(None, "--group", "-g", help="Include every run recorded with this group"),
+    out: Path = typer.Option(Path("results/report.html"), "--out", "-o"),
+    title: str = typer.Option(None, "--title"),
+) -> None:
+    """Render a self-contained HTML report comparing runs (graphs + goal matrix)."""
+    from k8ostester.core import report as report_mod
+
+    dirs = list(runs or [])
+    if group:
+        dirs += [d for d in report_mod.find_group_runs(group) if d not in dirs]
+    if not dirs:
+        console.print("[red]no runs selected[/red] — pass run directories or --group")
+        raise typer.Exit(1)
+    data = [report_mod.gather_run(d) for d in dirs]
+    path = report_mod.render(data, title or group or "K8osTester comparison", out)
+    console.print(f"[green]✔[/green] report with {len(data)} run(s): {path}")
+
+
+@app.command()
 def run(
     path: Path,
     keep: bool = typer.Option(False, "--keep", help="Leave the namespace running after the run"),
     context: str = typer.Option(None, "--context", "-c", help="Override the experiment's kubeconfig context"),
+    group: str = typer.Option(None, "--group", "-g", help="Record this run under a group for reporting"),
 ) -> None:
     """Run an experiment end-to-end."""
     from k8ostester.core.runner import Runner
@@ -45,7 +67,7 @@ def run(
     def show(event: dict) -> None:
         console.print(f"[dim]{event['t_rel']:>8.1f}s[/dim]  [bold]{event['type']:<18}[/bold] {event['msg']}")
 
-    runner = Runner(spec, keep=keep, context_override=context, on_event=show)
+    runner = Runner(spec, keep=keep, context_override=context, group_override=group, on_event=show)
     try:
         result = runner.run()
     except Exception as e:

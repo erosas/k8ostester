@@ -44,11 +44,13 @@ class Runner:
         results_root: Path = Path("results"),
         keep: bool = False,
         context_override: str | None = None,
+        group_override: str | None = None,
         on_event=None,
     ):
         self.spec = spec
         self.keep = keep
         self.context = context_override or spec.cluster.context
+        self.group = group_override or spec.group
         run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         self.run_id = run_stamp
         self.run_dir = results_root / spec.name / run_stamp
@@ -194,6 +196,7 @@ class Runner:
         summary = {
             "run_id": self.run_id,
             "experiment": self.spec.name,
+            "group": self.group,
             "technology": self.spec.technology,
             "context": self.context or "(current)",
             "namespace": self.namespace,

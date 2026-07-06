@@ -15,6 +15,8 @@ metadata:
   name: pg
 spec:
   instances: 1
+  monitoring:
+    enablePodMonitor: true   # requires the monitoring infra (PodMonitor CRD)
   storage:
     size: 1Gi
   resources:

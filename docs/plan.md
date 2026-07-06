@@ -11,8 +11,8 @@
 | 1 — skeleton | ✅ done (2026-07-05) | spec models, runner lifecycle, generic driver, events/metrics stores, helm/kubectl wrappers; nginx-smoke run green end-to-end |
 | 2 — CNPG happy path | ✅ done (2026-07-05) | cnpg-baseline green: CNPG 1.29.1 + SeaweedFS, 2938-op load, integrity + backup verified, PITR restored the 601 pre-pause rows exactly |
 | 3 — faults + goals | ✅ done (2026-07-05) | D2 proof landed: cnpg-single FAILED (RTO 10.1s, 12 acked writes lost) vs cnpg-ha-3node PASSED (RTO 1.7s, RPO 0) under the identical primary kill |
-| 4 — observability & reporting | ⬜ next | Prometheus stack, dashboards (license decision pending), HTML reports, compare |
-| 5 — scale-out | ⬜ | Chaos Mesh adapter, Kafka driver, CI mode |
+| 4 — observability & reporting | ✅ done (2026-07-06) | run groups + `k8ost report` (self-contained HTML comparison graphs); kube-prometheus-stack (Grafana excluded) + Perses with provisioned datasource; CNPG PodMonitor scrape verified |
+| 5 — scale-out | ⬜ next | pooling comparison (cnpg-pgbouncer), Chaos Mesh adapter, Kafka driver, CI mode |
 
 ---
 
@@ -348,8 +348,9 @@ A custom run-browser UI stays deferred — nothing in the design blocks it.
 
 ## 9. Still open
 
-- **Grafana is AGPL** — conflicts with the license policy. Permissive alternative: Perses
-  (CNCF, Apache 2.0), less mature. Decide at phase 4; Prometheus itself is Apache 2.0 and fine.
+- ~~Grafana is AGPL~~ **Resolved:** Perses (Apache 2.0) is installed with a provisioned
+  Prometheus datasource + metric explorer. Follow-up: author per-technology Perses dashboards
+  as code (provisioning ConfigMap) and a fault-annotation equivalent.
 - Loadgen journal durability if the loadgen pod itself dies mid-run (v1: accept as a framework
   error; later: persist journal to PVC). Journal retrieval is via pod logs (D12), so a deleted
   pod loses the journal.

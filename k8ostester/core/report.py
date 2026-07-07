@@ -30,10 +30,12 @@ def gather_run(run_dir: Path) -> dict:
         t0 = min(r["t"] for r in ops)
         buckets: dict[int, dict] = {}
         for r in ops:
-            if r["op"] != "write":
-                continue
-            b = buckets.setdefault(int((r["t"] - t0) / BUCKET_S), {"ok": 0, "lat": []})
-            if r["ok"]:
+            b = buckets.setdefault(
+                int((r["t"] - t0) / BUCKET_S), {"ok": 0, "err": 0, "lat": []}
+            )
+            if not r["ok"]:
+                b["err"] += 1  # any failed op — read, write or connect
+            elif r["op"] == "write":
                 b["ok"] += 1
                 b["lat"].append(r["lat_ms"])
 
@@ -47,6 +49,7 @@ def gather_run(run_dir: Path) -> dict:
                 {
                     "s": sec,
                     "wps": b["ok"] if b else 0,
+                    "eps": b["err"] if b else 0,
                     "p99": round(percentile(sorted(b["lat"]), 99), 2)
                     if b and b["lat"]
                     else None,

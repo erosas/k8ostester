@@ -3,6 +3,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <style>
+  /* always the light palette — reports are shared artifacts and must look
+     identical everywhere, regardless of the viewer's OS theme */
   .viz-root {
     --surface-1: #fcfcfb; --page: #f9f9f7;
     --ink-1: #0b0b0b; --ink-2: #52514e; --muted: #898781;
@@ -10,16 +12,6 @@
     --good: #0ca30c; --critical: #d03b3b;
     --s1: #2a78d6; --s2: #1baf7a; --s3: #eda100; --s4: #008300;
     --s5: #4a3aa7; --s6: #e34948; --s7: #e87ba4; --s8: #eb6834;
-  }
-  @media (prefers-color-scheme: dark) {
-    .viz-root {
-      --surface-1: #1a1a19; --page: #0d0d0d;
-      --ink-1: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
-      --grid: #2c2c2a; --axis: #383835; --ring: rgba(255,255,255,0.10);
-      --good: #0ca30c; --critical: #d03b3b;
-      --s1: #3987e5; --s2: #199e70; --s3: #c98500; --s4: #008300;
-      --s5: #9085e9; --s6: #e66767; --s7: #d55181; --s8: #d95926;
-    }
   }
   body { margin: 0; background: var(--page); color: var(--ink-1);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -63,6 +55,8 @@
     <div class="legend" id="legend1"></div><div id="chart-wps"></div></div>
   <div class="card"><h2>Write latency p99 (ms, per second)</h2>
     <div class="legend" id="legend2"></div><div id="chart-p99"></div></div>
+  <div class="card"><h2>Failed ops per second (reads, writes and connects)</h2>
+    <div class="legend" id="legend3"></div><div id="chart-eps"></div></div>
 </div>
 <div class="tip" id="tip"></div>
 <script>
@@ -118,7 +112,7 @@ document.getElementById('sub').textContent =
 }
 
 // legends
-for (const id of ['legend1', 'legend2']) {
+for (const id of ['legend1', 'legend2', 'legend3']) {
   const el = document.getElementById(id);
   runs.forEach((r, i) => {
     const s = document.createElement('span');
@@ -261,4 +255,5 @@ function niceStep(raw) {
 
 chart('chart-wps', 'wps');
 chart('chart-p99', 'p99');
+chart('chart-eps', 'eps');
 </script>

@@ -158,6 +158,13 @@ def evaluate_goals(
             value = 100.0 * sum(not r["ok"] for r in pool) / len(pool) if pool else 0.0
             detail = f"{sum(not r['ok'] for r in pool)}/{len(pool)} connects failed"
             display = f"{value:.2f}%"
+        elif metric == "error_rate":
+            # op-level twin of connect_error_rate: failed reads+writes over
+            # attempts — the "how many requests errored" number an app owner asks for
+            pool = [r for r in ops if r["op"] in ("read", "write")]
+            value = 100.0 * sum(not r["ok"] for r in pool) / len(pool) if pool else 0.0
+            detail = f"{sum(not r['ok'] for r in pool)}/{len(pool)} ops failed"
+            display = f"{value:.2f}%"
         else:
             raise ValueError(f"unknown goal metric {metric!r}")
 

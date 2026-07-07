@@ -17,13 +17,16 @@ spec:
         app: k8ost-loadgen
     spec:
       restartPolicy: Never
+      imagePullSecrets: ${PULL_SECRETS}
       containers:
         - name: loadgen
           image: '${IMAGE}'
           command:
             - bash
             - -c
-            - pip install --quiet --no-cache-dir '${PSYCOPG_PIN}' && exec python /app/loadgen.py
+            # idempotent bootstrap: a prebuilt image (load.image, D12) has
+            # psycopg baked in and skips pip; the stock image installs it
+            - python -c 'import psycopg' 2>/dev/null || pip install --quiet --no-cache-dir '${PSYCOPG_PIN}'; exec python /app/loadgen.py
           env:
             - name: K8OST_DSN
               value: '${DSN}'

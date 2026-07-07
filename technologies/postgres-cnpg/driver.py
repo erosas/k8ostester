@@ -46,16 +46,27 @@ class CnpgDriver(TechnologyDriver):
     # -- lifecycle -----------------------------------------------------------
 
     def install_prereqs(self) -> None:
-        """Tech-owned prerequisites here; common entries delegate to core."""
+        """Tech-owned prerequisites here; common entries delegate to core.
+        Omitting `- operator: cnpg` from infra means "the cluster already has
+        the operator, don't touch it" (e.g. a private cluster where ops owns
+        the install) — but the CRD must actually be there."""
         common = InfraManager(self.k8s, self.events)
         common.ensure([e for e in self.spec.infra if common.handles(e)])
+        declares_operator = False
         for entry in self.spec.infra:
             if common.handles(entry):
                 continue
             if isinstance(entry, dict) and entry.get("operator") == "cnpg":
+                declares_operator = True
                 self._ensure_operator()
             else:
                 raise ValueError(f"unknown infra entry for postgres-cnpg: {entry!r}")
+        if not declares_operator and not self.k8s.has_crd("clusters.postgresql.cnpg.io"):
+            raise RuntimeError(
+                "CloudNativePG is not installed on this cluster and the experiment "
+                "doesn't declare it — add '- operator: cnpg' to infra, or install "
+                "the operator out-of-band"
+            )
 
     def _ensure_operator(self) -> None:
         helm = Helm(self.k8s.context)
@@ -186,11 +197,14 @@ class CnpgDriver(TechnologyDriver):
         job = load_resource(
             RESOURCES / "loadgen-job.yaml",
             {
-                "IMAGE": LOADGEN_IMAGE,
+                "IMAGE": spec.image or LOADGEN_IMAGE,
                 "PSYCOPG_PIN": PSYCOPG_PIN,
                 "DSN": dsn,
                 "PHASES_JSON": json.dumps(phases),
                 "WORKERS": str(spec.workers),
+                "PULL_SECRETS": json.dumps(
+                    [{"name": spec.pull_secret}] if spec.pull_secret else []
+                ),
             },
         )
         self.k8s.batch.create_namespaced_job(self.namespace, job)
@@ -239,6 +253,9 @@ class CnpgDriver(TechnologyDriver):
                 "JOBS": str(min(clients, 8)),
                 "DURATION": str(int(phase.duration_s)),
                 "RATE": str(int(rate)) if rate else "",
+                "PULL_SECRETS": json.dumps(
+                    [{"name": spec.pull_secret}] if spec.pull_secret else []
+                ),
             },
         )
         self.k8s.batch.create_namespaced_job(self.namespace, job)

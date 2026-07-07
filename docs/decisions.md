@@ -73,6 +73,12 @@ HTTP control API in v1 — load phases are pre-declared in the spec (fault timin
 coordination; correlation happens offline via timestamps), and the journal is one JSON line per
 operation on stdout, retrieved from pod logs after the Job completes. A prebuilt image and a
 control API return only if startup cost or interactive control ever matter.
+**Private clusters (no PyPI/Docker Hub egress):** build `loadgen.Dockerfile` (psycopg baked in),
+push it to the cluster's registry, and set `load.image` (+ `load.pull_secret` if the repo needs
+auth). The Job bootstrap is idempotent — it pip-installs only when psycopg is absent — so one
+template serves both paths, and the script still ships via ConfigMap either way. The pipeline is
+already private-network-safe by construction: journal retrieval, exec, apply and helm are all
+mediated by the Kubernetes API server, so reaching the API server is the only connectivity needed.
 
 ## D13 — PITR verification targets a deliberate pause phase
 The load plan includes a zero-rate pause; the PITR target is the middle of it. Every acked write

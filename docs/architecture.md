@@ -61,7 +61,7 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `drivers/__init__.py` | driver discovery (D15): nearest `driver.py` above the experiment dir, loaded dynamically; built-ins as fallback |
 | `drivers/generic.py` | built-in deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
 | `technologies/postgres-cnpg/driver.py` | tech-owned CNPG driver: operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
-| `technologies/postgres-cnpg/loadgen.py` | the journal load runner (ships via ConfigMap, D12): HikariCP-style pooled clients, bounded timeouts, `load.workers` Indexed pod pool |
+| `technologies/postgres-cnpg/loadgen.py` | the journal load runner (ships via ConfigMap, D12): HikariCP-style pooled clients, bounded timeouts, `load.workers` Indexed pod pool; `load.image`/`load.pull_secret` for private clusters (prebuilt via `loadgen.Dockerfile`) |
 | `technologies/postgres-cnpg/resources/pgbench-job.yaml` | the pgbench load runner (D17): `load.runner: pgbench` for industry-comparable tps on tuning experiments; per-transaction log parsed into the shared op-record stream |
 | `technologies/<tech>/experiments/` | each technology's experiments live beside its driver (D15); directories (and `name:`) carry a numeric prefix (`01-cnpg-baseline`, …) so the progression reads in order — dashes, not underscores, because the name becomes part of the run namespace (DNS label) |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |

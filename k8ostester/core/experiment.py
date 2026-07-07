@@ -73,6 +73,8 @@ class LoadSpec(BaseModel):
     runner: Literal["journal", "pgbench"] = "journal"  # journal = built-in loadgen (full goal set)
     params: dict[str, Any] = {}  # runner-specific knobs, e.g. pgbench {scale: 20}
     workers: int = 1  # loadgen pods (Indexed Job); clients + rate shard across them
+    image: str | None = None  # loadgen image override (prebuilt for private clusters, D12)
+    pull_secret: str | None = None  # imagePullSecret name for the loadgen/pgbench Job
     clients: ClientsSpec = ClientsSpec()
     phases: list[LoadPhase] = []
 

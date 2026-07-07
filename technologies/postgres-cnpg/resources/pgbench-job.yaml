@@ -17,6 +17,7 @@ spec:
         app: k8ost-loadgen
     spec:
       restartPolicy: Never
+      imagePullSecrets: ${PULL_SECRETS}
       containers:
         - name: pgbench
           image: '${IMAGE}'

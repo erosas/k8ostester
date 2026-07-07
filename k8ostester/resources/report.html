@@ -50,6 +50,7 @@
 <div class="viz-root">
   <h1>__TITLE__</h1>
   <p class="sub" id="sub"></p>
+  <div class="card"><h2>Run stats</h2><div class="wrap"><table id="stats"></table></div></div>
   <div class="card"><h2>Goals</h2><div class="wrap"><table id="matrix"></table></div></div>
   <div class="card"><h2>Successful writes per second</h2>
     <div class="legend" id="legend1"></div><div id="chart-wps"></div></div>
@@ -68,6 +69,45 @@ const runs = DATA.runs;
 
 document.getElementById('sub').textContent =
   runs.map(r => `${r.label} — ${r.status.toUpperCase()}`).join('  ·  ');
+
+// run stats: one row per run, app-perspective numbers from the journal
+{
+  const table = document.getElementById('stats');
+  const COLS = [
+    ['Run', r => r.name],
+    ['Status', null],
+    ['Ops', r => r.stats.ops.toLocaleString()],
+    ['Acked writes', r => r.stats.acked_writes.toLocaleString()],
+    ['Failed ops', r => r.stats.failed.toLocaleString()],
+    ['Avg tps', r => r.stats.avg_tps.toLocaleString()],
+    ['Downtime', r => r.stats.downtime_s + 's'],
+    ['Duration', r => r.stats.span_s + 's'],
+  ];
+  const head = document.createElement('tr');
+  COLS.forEach(([label]) => head.appendChild(document.createElement('th')).textContent = label);
+  table.appendChild(head);
+  runs.forEach((r, i) => {
+    if (!r.stats) return;  // error runs without op records
+    const tr = document.createElement('tr');
+    const name = document.createElement('td');
+    const key = document.createElement('span');
+    key.className = 'k'; key.style.cssText =
+      `display:inline-block;width:12px;height:2px;margin-right:6px;vertical-align:middle;background:var(${color(i)})`;
+    name.appendChild(key);
+    name.appendChild(document.createTextNode(r.name));
+    tr.appendChild(name);
+    const status = document.createElement('td');
+    const b = document.createElement('span');
+    b.className = 'badge ' + (r.status === 'passed' ? 'pass' : 'fail');
+    b.textContent = r.status.toUpperCase();
+    status.appendChild(b);
+    tr.appendChild(status);
+    COLS.slice(2).forEach(([, fn]) => {
+      tr.appendChild(document.createElement('td')).textContent = fn(r);
+    });
+    table.appendChild(tr);
+  });
+}
 
 // goal matrix
 {

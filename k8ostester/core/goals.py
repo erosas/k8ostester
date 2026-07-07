@@ -158,6 +158,19 @@ def evaluate_goals(
             value = 100.0 * sum(not r["ok"] for r in pool) / len(pool) if pool else 0.0
             detail = f"{sum(not r['ok'] for r in pool)}/{len(pool)} connects failed"
             display = f"{value:.2f}%"
+        elif metric == "downtime_total":
+            # sum of demanded seconds with no successful op — complements uptime
+            # (a ratio) with an absolute number, and distinguishes one long
+            # outage from many short ones when a run has multiple faults
+            if not ops:
+                value, detail = float("inf"), "no ops recorded"
+            else:
+                t0 = min(r["t"] for r in ops)
+                demanded = {int(r["t"] - t0) for r in ops}
+                up = {int(r["t"] - t0) for r in ops if r["ok"]}
+                value = float(len(demanded - up))
+                detail = f"{int(value)} of {len(demanded)} demanded seconds had no successful op"
+            display = f"{value:.0f}s"
         elif metric == "error_rate":
             # op-level twin of connect_error_rate: failed reads+writes over
             # attempts — the "how many requests errored" number an app owner asks for
@@ -169,7 +182,9 @@ def evaluate_goals(
             raise ValueError(f"unknown goal metric {metric!r}")
 
         passed = value <= limit if kind == "max" else value >= limit
-        unit = {"rto": "s", "rpo": "", "tps": "/s"}.get(metric, "ms" if "latency" in metric else "%")
+        unit = {"rto": "s", "rpo": "", "tps": "/s", "downtime_total": "s"}.get(
+            metric, "ms" if "latency" in metric else "%"
+        )
         results.append(
             {"goal": metric, "value": display, "threshold": f"{kind} {limit:g}{unit}",
              "passed": passed, "detail": detail}

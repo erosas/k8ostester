@@ -65,6 +65,23 @@ def gather_run(run_dir: Path) -> dict:
                         {"s": round(ev["ts"] - t0, 1), "label": ev["data"]["worker"]}
                     )
 
+    stats = None
+    if ops:
+        t0 = min(r["t"] for r in ops)
+        demanded = {int(r["t"] - t0) for r in ops}
+        up = {int(r["t"] - t0) for r in ops if r["ok"]}
+        acked = sum(1 for r in ops if r["op"] == "write" and r["ok"])
+        ok_ops = sum(1 for r in ops if r["ok"] and r["op"] in ("read", "write"))
+        failed = sum(1 for r in ops if not r["ok"])
+        stats = {
+            "ops": len(ops),
+            "acked_writes": acked,
+            "failed": failed,
+            "avg_tps": round(ok_ops / len(demanded), 1) if demanded else 0,
+            "downtime_s": len(demanded - up),
+            "span_s": int(max(r["t"] for r in ops) - t0) + 1,
+        }
+
     return {
         "label": f"{summary['experiment']} ({summary['run_id']})",
         "name": summary["experiment"],
@@ -74,6 +91,7 @@ def gather_run(run_dir: Path) -> dict:
         "verifications": summary.get("verifications", []),
         "series": series,
         "faults": faults,
+        "stats": stats,
     }
 
 

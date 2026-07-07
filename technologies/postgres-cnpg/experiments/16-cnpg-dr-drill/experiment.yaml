@@ -50,4 +50,6 @@ goals:                           # partition-class SLOs (D18); uptime is demand-
   - {metric: rto, max: 25s}      # so the pause phase doesn't count as downtime
   - {metric: rpo, max: 0}
   - {metric: uptime, min: 88%}
+  - {metric: downtime_total, max: 25s}   # absolute cap across BOTH faults combined
+  - {metric: error_rate, max: 1%}        # failed reads+writes over attempts
   - {metric: write_latency_p99, max: 200ms, window: steady-state}

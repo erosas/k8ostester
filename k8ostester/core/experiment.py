@@ -70,6 +70,7 @@ class LoadPhase(BaseModel):
 
 class LoadSpec(BaseModel):
     endpoint: str = "auto"  # Service to hit; "auto" = driver default
+    workers: int = 1  # loadgen pods (Indexed Job); clients + rate shard across them
     clients: ClientsSpec = ClientsSpec()
     phases: list[LoadPhase] = []
 

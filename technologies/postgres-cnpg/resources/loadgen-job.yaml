@@ -1,11 +1,16 @@
 # Load generator Job (D12): stock python image + the loadgen.py ConfigMap.
 # Scalars: '${X}'. The phase plan substitutes as a JSON string into K8OST_PHASES.
+# An Indexed pool of ${WORKERS} pod(s): each shards the global client count and
+# rate by its completion index, so TPS scales by turning one knob (load.workers).
 apiVersion: batch/v1
 kind: Job
 metadata:
   name: k8ost-loadgen
 spec:
   backoffLimit: 0
+  completionMode: Indexed
+  completions: ${WORKERS}
+  parallelism: ${WORKERS}
   template:
     metadata:
       labels:
@@ -24,6 +29,12 @@ spec:
               value: '${DSN}'
             - name: K8OST_PHASES
               value: '${PHASES_JSON}'
+            - name: K8OST_WORKERS
+              value: '${WORKERS}'
+            - name: JOB_COMPLETION_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
           volumeMounts:
             - name: script
               mountPath: /app

@@ -1,0 +1,49 @@
+# Same architecture as arms 10/11; ONLY the failover detection differs — the
+# middle ground between arm 10 (defaults: ~30s detection) and arm 11 (2s×3
+# probes + 1s isolation timeouts: restart-looped, never recovered):
+#   liveness 3s period × 2 failures, 3s probe timeout ≈ 6-9s detection
+#   isolationCheck with 2s timeouts — self-fence, but tolerate a slow moment
+# PgBouncer keeps the tuned failover-path parameters from the pod_kill arms.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+  probes:
+    liveness:
+      periodSeconds: 3
+      timeoutSeconds: 3
+      failureThreshold: 2
+      isolationCheck:
+        enabled: true
+        connectionTimeout: 2000
+        requestTimeout: 2000
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler
+spec:
+  cluster:
+    name: pg
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"
+      server_login_retry: "1"
+      server_connect_timeout: "3"
+      server_fast_close: "1"
+      query_wait_timeout: "30"

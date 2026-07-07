@@ -64,7 +64,7 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `technologies/postgres-cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
 | `technologies/<tech>/experiments/` | each technology's experiments live beside its driver (D15); directories (and `name:`) carry a numeric prefix (`01-cnpg-baseline`, …) so the progression reads in order — dashes, not underscores, because the name becomes part of the run namespace (DNS label) |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
-| `workers/` | fault workers: `pod_kill` (grace 0), `node_drain` (cordon + evict run pods, uncordon cleanup), `network_partition`/`network_loss`/`network_delay` (NetworkChaos CRs via Chaos Mesh, D16); targets resolve at injection time via driver topology |
+| `workers/` | fault workers: `pod_kill` (grace 0), `process_kill` (kill -9 PID 1 — in-place container crash, scoped stand-in for node loss), `node_drain` (cordon + evict run pods, uncordon cleanup), `network_partition`/`network_loss`/`network_delay` (NetworkChaos CRs via Chaos Mesh, D16); targets resolve at injection time via driver topology |
 | `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |
 | `infra/monitoring/` | kube-prometheus-stack 87.10.1 (Grafana disabled, D7) + Perses 0.22.0 with provisioned Prometheus datasource; PodMonitor discovery is cluster-wide |
 | `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |

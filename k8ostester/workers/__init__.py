@@ -10,9 +10,11 @@ from k8ostester.workers.network import (
 )
 from k8ostester.workers.node_drain import NodeDrainWorker
 from k8ostester.workers.pod_kill import PodKillWorker
+from k8ostester.workers.process_kill import ProcessKillWorker
 
 _REGISTRY: dict[str, type[Worker]] = {
     "pod_kill": PodKillWorker,
+    "process_kill": ProcessKillWorker,
     "node_drain": NodeDrainWorker,
     "network_partition": NetworkPartitionWorker,
     "network_loss": NetworkLossWorker,

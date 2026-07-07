@@ -46,9 +46,11 @@ class Runner:
         context_override: str | None = None,
         group_override: str | None = None,
         on_event=None,
+        allow_concurrent: bool = False,
     ):
         self.spec = spec
         self.keep = keep
+        self.allow_concurrent = allow_concurrent
         self.context = context_override or spec.cluster.context
         self.group = group_override or spec.group
         run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -67,6 +69,7 @@ class Runner:
         started = time.time()
         try:
             self._snapshot_spec()
+            self._check_no_concurrent_run(k8s)
             self._check_capabilities(k8s)
 
             driver_cls = get_driver(self.spec.technology, self.spec.dir)
@@ -143,6 +146,20 @@ class Runner:
         (self.run_dir / "experiment.json").write_text(
             self.spec.model_dump_json(indent=2)
         )
+
+    def _check_no_concurrent_run(self, k8s: ClusterClient) -> None:
+        """One experiment per cluster at a time: faults (especially node-level)
+        and storm-load contention bleed across runs and corrupt both verdicts."""
+        others = [
+            ns.metadata.name
+            for ns in k8s.core.list_namespace(label_selector=RUN_LABEL).items
+        ]
+        if others and not self.allow_concurrent:
+            raise RuntimeError(
+                f"another experiment already occupies this cluster: {', '.join(others)} "
+                "— wait for it (or delete a --keep namespace), or pass --allow-concurrent "
+                "if you accept cross-contaminated results"
+            )
 
     def _check_capabilities(self, k8s: ClusterClient) -> None:
         caps = probe(self.context)

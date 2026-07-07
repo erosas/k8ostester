@@ -121,6 +121,10 @@ def run(
     keep: bool = typer.Option(False, "--keep", help="Leave the namespace running after the run"),
     context: str = typer.Option(None, "--context", "-c", help="Override the experiment's kubeconfig context"),
     group: str = typer.Option(None, "--group", "-g", help="Record this run under a group for reporting"),
+    allow_concurrent: bool = typer.Option(
+        False, "--allow-concurrent",
+        help="Run even if another experiment occupies the cluster (results may cross-contaminate)",
+    ),
 ) -> None:
     """Run an experiment end-to-end."""
     from k8ostester.core.runner import Runner
@@ -130,7 +134,8 @@ def run(
     def show(event: dict) -> None:
         console.print(f"[dim]{event['t_rel']:>8.1f}s[/dim]  [bold]{event['type']:<18}[/bold] {event['msg']}")
 
-    runner = Runner(spec, keep=keep, context_override=context, group_override=group, on_event=show)
+    runner = Runner(spec, keep=keep, context_override=context, group_override=group, on_event=show,
+                    allow_concurrent=allow_concurrent)
     try:
         result = runner.run()
     except Exception as e:

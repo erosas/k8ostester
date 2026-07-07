@@ -187,12 +187,18 @@ class CnpgDriver(TechnologyDriver):
                 "PSYCOPG_PIN": PSYCOPG_PIN,
                 "DSN": dsn,
                 "PHASES_JSON": json.dumps(phases),
+                "WORKERS": str(spec.workers),
             },
         )
         self.k8s.batch.create_namespaced_job(self.namespace, job)
         self._load_total_s = total_s
+        self._workers = spec.workers
         self._run_dir = run_dir
-        self.events.emit("load.start", f"{len(phases)} phase(s), ~{total_s:.0f}s")
+        self.events.emit(
+            "load.start",
+            f"{len(phases)} phase(s), ~{total_s:.0f}s"
+            + (f", {spec.workers} worker pods" if spec.workers > 1 else ""),
+        )
 
     def wait_load_started(self, timeout: float = 300) -> float:
         """Block until the loadgen emits its 'start' record (schema created,
@@ -205,7 +211,8 @@ class CnpgDriver(TechnologyDriver):
                 raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
             if status.active or status.succeeded:
                 try:
-                    started = '"kind": "start"' in self._loadgen_logs()
+                    # every worker pod must be flowing before the fault clock starts
+                    started = self._loadgen_logs().count('"kind": "start"') >= self._workers
                 except Exception:
                     started = False  # pod still ContainerCreating / not listed yet
                 if started:
@@ -218,7 +225,7 @@ class CnpgDriver(TechnologyDriver):
         deadline = time.time() + self._load_total_s + 300  # pull + pip headroom
         while time.time() < deadline:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
-            if status.succeeded:
+            if (status.succeeded or 0) >= self._workers:
                 break
             if status.failed:
                 raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
@@ -235,10 +242,21 @@ class CnpgDriver(TechnologyDriver):
         return [r for r in self._records if r.get("kind") == "op"]
 
     def _loadgen_logs(self) -> str:
-        pods = self.k8s.core.list_namespaced_pod(
-            self.namespace, label_selector="app=k8ost-loadgen"
-        ).items
-        return self.k8s.pod_logs(self.namespace, pods[0].metadata.name)
+        """Concatenated logs of every worker pod; records interleave safely
+        because each carries its own timestamp."""
+        pods = sorted(
+            self.k8s.core.list_namespaced_pod(
+                self.namespace, label_selector="app=k8ost-loadgen"
+            ).items,
+            key=lambda p: p.metadata.name,
+        )
+        chunks = []
+        for pod in pods:
+            try:
+                chunks.append(self.k8s.pod_logs(self.namespace, pod.metadata.name))
+            except Exception:
+                continue  # pod still ContainerCreating; caller retries
+        return "\n".join(chunks)
 
     def _parse_loadgen_output(self, logs: str, run_dir: Path) -> None:
         self._records, self._journal = [], []

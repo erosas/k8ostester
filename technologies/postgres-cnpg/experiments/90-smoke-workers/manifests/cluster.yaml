@@ -1,0 +1,13 @@
+# Minimal single-instance cluster — this smoke tests the loadgen worker pool,
+# not the database architecture.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 1
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}

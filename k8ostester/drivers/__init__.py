@@ -9,18 +9,24 @@ beside their experiments).
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import sys
 from pathlib import Path
 
 from k8ostester.drivers.base import TechnologyDriver
-from k8ostester.drivers.generic import GenericDriver
-from k8ostester.technologies.postgres_cnpg.driver import CnpgDriver
 
-_BUILTINS: dict[str, type[TechnologyDriver]] = {
-    "generic": GenericDriver,
-    "postgres-cnpg": CnpgDriver,
+# built-ins resolve lazily (import path strings): drivers import drivers.base,
+# so importing their classes here would make this module circular with them
+_BUILTINS: dict[str, str] = {
+    "generic": "k8ostester.drivers.generic:GenericDriver",
+    "postgres-cnpg": "k8ostester.technologies.postgres_cnpg.driver:CnpgDriver",
 }
+
+
+def _resolve_builtin(technology: str) -> type[TechnologyDriver]:
+    module_path, _, attr = _BUILTINS[technology].partition(":")
+    return getattr(importlib.import_module(module_path), attr)
 
 
 def _load_tech_driver(experiment_dir: Path) -> type[TechnologyDriver] | None:
@@ -60,7 +66,7 @@ def get_driver(technology: str, experiment_dir: Path | None = None) -> type[Tech
         if driver is not None:
             return driver
     if technology in _BUILTINS:
-        return _BUILTINS[technology]
+        return _resolve_builtin(technology)
     raise KeyError(
         f"no driver for {technology!r}: no driver.py above the experiment and no built-in"
     )

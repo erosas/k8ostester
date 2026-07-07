@@ -35,13 +35,13 @@ faults:
 verify:
   - integrity
 
-goals:  # partition-class SLOs (D18), calibrated from measured data: CNPG's tuned
-        # detection floor is ~15-20s (arm 13), so rto 10s was pod_kill-calibrated
-        # fantasy. Op-count availability is blind with pooled clients (scored 100%
-        # through a 40.6s outage) -> time-bucketed uptime. Whole-run
-        # connect_error_rate only counts the retry storm during the outage
-        # (80-90% regardless of config) -> dropped; rto + uptime carry that signal.
-  - {metric: rto, max: 25s}
+goals:  # partition-class SLOs (D18, revised): CNPG partition detection is BIMODAL —
+        # the readiness transition is either caught immediately (~14s to failover
+        # decision) or missed and picked up by the operator's ~30s reconcile requeue
+        # (~44s). Observed across 7 runs: 18.7-22.5s x5, 45.5/49.9s x2, operator-log
+        # verified. SLOs must hold in BOTH modes or the verdict is a coin toss.
+  - {metric: rto, max: 55s}
   - {metric: rpo, max: 0}
-  - {metric: uptime, min: 88%}
+  - {metric: uptime, min: 75%}
+  - {metric: downtime_total, max: 55s}
   - {metric: write_latency_p99, max: 200ms, window: steady-state}

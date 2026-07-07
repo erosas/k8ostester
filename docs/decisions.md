@@ -124,7 +124,13 @@ inherited the pod_kill arms' SLOs (rto 10s, connect_error_rate 1%) and every con
 including the best possible one. Partition detection via the operator has a floor (~15-20s tuned:
 readiness probe expiry + status propagation + promotion), so partition-class goals are rto ≤ 25s
 and uptime ≥ 88%; connect_error_rate is dropped there because a whole-run ratio just counts the
-retry storm during the outage (80-90% regardless of config — no discrimination). **uptime** is the
+retry storm during the outage (80-90% regardless of config — no discrimination).
+**Revised after 7 runs:** goals must also be *stable* — CNPG partition detection is bimodal
+(readiness transition caught by a watch event → failover decision at ~14s, or missed and caught
+by the operator's ~30s periodic reconcile → ~44s; both modes operator-log verified, 5:2 split).
+An SLO between the modes flips verdicts on a race the config can't influence, so partition-class
+SLOs hold in the slow mode: rto ≤ 55s, downtime_total ≤ 55s, uptime ≥ 75%. Distinguishing the
+modes statistically is what `--repeat N` (CI mode) is for. **uptime** is the
 time-bucketed availability from plan §9: % of seconds with ≥1 successful op. It replaces op-count
 availability in every fault-bearing experiment because pooled clients that cannot get a connection
 attempt nothing — op-count availability scored 100.00% across a 40.6s outage. Op-count

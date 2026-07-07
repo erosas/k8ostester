@@ -14,7 +14,7 @@ from typing import Any
 from kubernetes import client
 
 from k8ostester.core.events import EventLog
-from k8ostester.core.helm import Helm
+from k8ostester.core.helm import Helm, HelmError
 from k8ostester.core.k8s import ClusterClient
 
 # Pinned versions of COMMON infra (tech-specific pins live in each driver).
@@ -58,11 +58,20 @@ class InfraManager:
         values = _infra_path("infra/chaos-mesh/values.yaml", "chaos-mesh/values.yaml")
         self.events.emit("infra.chaos-mesh", f"ensuring chaos-mesh {CHAOS_MESH_CHART_VERSION}")
         helm = Helm(self.k8s.context)
-        helm.repo_add("chaos-mesh", CHAOS_MESH_REPO)
-        helm.upgrade_install(
-            "chaos-mesh", "chaos-mesh/chaos-mesh", CHAOS_NAMESPACE,
-            version=CHAOS_MESH_CHART_VERSION, values_file=values,
-        )
+        try:
+            helm.repo_add("chaos-mesh", CHAOS_MESH_REPO)
+            helm.upgrade_install(
+                "chaos-mesh", "chaos-mesh/chaos-mesh", CHAOS_NAMESPACE,
+                version=CHAOS_MESH_CHART_VERSION, values_file=values,
+            )
+        except HelmError:
+            # a chart-repo blip must not kill a run the cluster can already
+            # serve; pin bumps just need the repo reachable on their first run
+            if not helm.release_exists("chaos-mesh", CHAOS_NAMESPACE):
+                raise
+            self.events.emit(
+                "infra.chaos-mesh", "chart repo unreachable — using the installed release"
+            )
         self.events.emit("infra.chaos-mesh", "chaos-mesh ready")
 
     def _ensure_seaweedfs(self) -> None:

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from k8ostester.core.experiment import parse_rate
-from k8ostester.core.helm import Helm
+from k8ostester.core.helm import Helm, HelmError
 from k8ostester.core.infra import InfraManager
 from k8ostester.core.resources import load_resource
 from k8ostester.drivers.base import TechnologyDriver
@@ -73,10 +73,16 @@ class CnpgDriver(TechnologyDriver):
         self.events.emit(
             "infra.cnpg", f"ensuring CloudNativePG operator (chart {CNPG_CHART_VERSION})"
         )
-        helm.repo_add("cnpg", CNPG_REPO)
-        helm.upgrade_install(
-            "cnpg", "cnpg/cloudnative-pg", "cnpg-system", version=CNPG_CHART_VERSION
-        )
+        try:
+            helm.repo_add("cnpg", CNPG_REPO)
+            helm.upgrade_install(
+                "cnpg", "cnpg/cloudnative-pg", "cnpg-system", version=CNPG_CHART_VERSION
+            )
+        except HelmError:
+            # tolerate chart-repo blips when the operator is already installed
+            if not helm.release_exists("cnpg", "cnpg-system"):
+                raise
+            self.events.emit("infra.cnpg", "chart repo unreachable — using the installed release")
 
     def deploy(self) -> None:
         out = self.k8s.apply_manifests(

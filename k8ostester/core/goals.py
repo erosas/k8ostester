@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from k8ostester.core.experiment import GoalSpec, parse_duration
+from k8ostester.core.experiment import GoalSpec, parse_duration, parse_rate
 from k8ostester.core.metrics import percentile
 
 # how far around a fault we look for its outage gap
@@ -34,6 +34,8 @@ def _threshold(goal: GoalSpec) -> tuple[float, str]:
     s = str(raw).strip()
     if s.endswith("%"):
         return float(s[:-1]), kind
+    if goal.metric == "tps":
+        return parse_rate(s), kind  # canonical ops/s ("500/s" or bare number)
     if goal.metric and _LATENCY_RE.match(goal.metric):
         return parse_duration(s) * 1000, kind  # canonical ms
     return parse_duration(s), kind  # canonical seconds (rto)
@@ -128,6 +130,12 @@ def evaluate_goals(
             value = percentile(sorted(r["lat_ms"] for r in pool), pct)
             detail = f"{len(pool)} {op_kind} ops in window '{goal.window}'"
             display = f"{value:.1f}ms"
+        elif metric == "tps":
+            ok_ops = sorted(r["t"] for r in ops if r["ok"])
+            span = ok_ops[-1] - ok_ops[0] if len(ok_ops) > 1 else 0.0
+            value = len(ok_ops) / span if span else 0.0
+            detail = f"{len(ok_ops)} successful ops over {span:.0f}s"
+            display = f"{value:.0f}/s"
         elif metric == "connect_error_rate":
             pool = [r for r in ops if r["op"] == "connect"]
             value = 100.0 * sum(not r["ok"] for r in pool) / len(pool) if pool else 0.0
@@ -137,7 +145,7 @@ def evaluate_goals(
             raise ValueError(f"unknown goal metric {metric!r}")
 
         passed = value <= limit if kind == "max" else value >= limit
-        unit = {"rto": "s", "rpo": ""}.get(metric, "ms" if "latency" in metric else "%")
+        unit = {"rto": "s", "rpo": "", "tps": "/s"}.get(metric, "ms" if "latency" in metric else "%")
         results.append(
             {"goal": metric, "value": display, "threshold": f"{kind} {limit:g}{unit}",
              "passed": passed, "detail": detail}

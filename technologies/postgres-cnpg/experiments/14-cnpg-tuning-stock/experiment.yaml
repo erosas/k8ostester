@@ -1,0 +1,28 @@
+# Tuning comparison, stock arm (group pg-tuning): the target architecture
+# (3 instances, quorum sync) with default PostgreSQL parameters, measured by
+# the pgbench runner — industry-comparable TPC-B throughput, no faults. The
+# tuned arm (15) changes ONLY postgresql.parameters; the tps/latency delta in
+# the group report is the verdict that matters.
+name: 14-cnpg-tuning-stock
+technology: postgres-cnpg
+group: pg-tuning
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: auto              # straight at -rw: throughput path, no pooler
+  runner: pgbench
+  params: {scale: 20}         # ~320MB dataset — I/O bound past shared_buffers
+  clients: {count: 16}
+  phases:
+    - {duration: 90s}         # unthrottled: measure the ceiling
+
+goals:                        # both arms must clear the floor; the comparison is the point
+  - {metric: tps, min: 200}
+  - {metric: write_latency_p99, max: 150ms}

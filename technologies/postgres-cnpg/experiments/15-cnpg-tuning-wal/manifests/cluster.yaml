@@ -1,0 +1,25 @@
+# Target architecture with TUNED postgres parameters (the config under test):
+#   shared_buffers 128MB→384MB   (dataset fits in cache)
+#   max_wal_size 1GB, checkpoint_completion_target 0.9  (fewer, smoother checkpoints)
+#   wal_compression lz4          (less WAL to flush and replicate)
+# Identical to arm 14 except postgresql.parameters.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3
+  storage:
+    size: 3Gi
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {cpu: "2", memory: 1Gi}
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+    parameters:
+      shared_buffers: 384MB
+      max_wal_size: 1GB
+      checkpoint_completion_target: "0.9"
+      wal_compression: lz4

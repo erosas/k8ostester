@@ -143,6 +143,9 @@ class CnpgDriver(TechnologyDriver):
     def start_load(self, run_dir: Path) -> None:
         spec = self.spec.load
         assert spec is not None
+        if spec.runner == "pgbench":
+            self._start_pgbench(run_dir)
+            return
         phases = []
         for p in spec.phases:
             clients = p.clients or spec.clients
@@ -200,6 +203,54 @@ class CnpgDriver(TechnologyDriver):
             + (f", {spec.workers} worker pods" if spec.workers > 1 else ""),
         )
 
+    def _start_pgbench(self, run_dir: Path) -> None:
+        """The pgbench runner (spec-validated: one phase, no faults, journal-free
+        goals only). Same image as the database pods — pgbench ships in it."""
+        spec = self.spec.load
+        assert spec is not None
+        phase = spec.phases[0]
+        rate = parse_rate(phase.rate)
+        clients = (phase.clients or spec.clients).count
+
+        secret = self.k8s.core.read_namespaced_secret(
+            f"{self.cluster_name}-app", self.namespace
+        )
+        import base64
+
+        decode = lambda k: base64.b64decode(secret.data[k]).decode()
+        host = f"{self.cluster_name}-rw" if spec.endpoint == "auto" else spec.endpoint
+        dsn = (
+            f"host={host} port=5432 dbname={decode('dbname')} "
+            f"user={decode('username')} password={decode('password')}"
+        )
+        cluster = self._cluster(self.cluster_name)
+        # same image the database pods run (pgbench ships in it, already pulled)
+        image = cluster["spec"].get("imageName") or cluster.get("status", {}).get("image")
+        if not image:
+            raise RuntimeError("cannot determine cluster image for the pgbench runner")
+
+        job = load_resource(
+            RESOURCES / "pgbench-job.yaml",
+            {
+                "IMAGE": image,
+                "DSN": dsn,
+                "SCALE": str(spec.params.get("scale", 10)),
+                "CLIENTS": str(clients),
+                "JOBS": str(min(clients, 8)),
+                "DURATION": str(int(phase.duration_s)),
+                "RATE": str(int(rate)) if rate else "",
+            },
+        )
+        self.k8s.batch.create_namespaced_job(self.namespace, job)
+        self._load_total_s = phase.duration_s
+        self._workers = 1
+        self._run_dir = run_dir
+        self.events.emit(
+            "load.start",
+            f"pgbench: scale {spec.params.get('scale', 10)}, {clients} clients, "
+            f"{int(phase.duration_s)}s" + (f", {int(rate)}/s" if rate else " (unthrottled)"),
+        )
+
     def wait_load_started(self, timeout: float = 300) -> float:
         """Block until the loadgen emits its 'start' record (schema created,
         ops flowing). Returns the framework-clock timestamp — the zero point
@@ -235,7 +286,10 @@ class CnpgDriver(TechnologyDriver):
 
         logs = self._loadgen_logs()
         (self._run_dir / "loadgen.log").write_text(logs)  # raw dump survives any parse failure
-        self._parse_loadgen_output(logs, self._run_dir)
+        if self.spec.load and self.spec.load.runner == "pgbench":
+            self._parse_pgbench_output(logs, self._run_dir)
+        else:
+            self._parse_loadgen_output(logs, self._run_dir)
 
     @property
     def op_records(self) -> list[dict]:
@@ -280,6 +334,45 @@ class CnpgDriver(TechnologyDriver):
         )
         if not self._journal:
             raise RuntimeError("loadgen produced no acked writes — check its logs")
+
+    def _parse_pgbench_output(self, logs: str, run_dir: Path) -> None:
+        """Per-transaction log lines (between the Job's markers) into op
+        records: `client txn_no latency_us script_no epoch_s epoch_us [lag]`.
+        Every logged transaction is a completed TPC-B write; there is no
+        journal (spec validation already excluded journal-dependent goals)."""
+        self._records, self._journal = [], []
+        in_log = False
+        with open(run_dir / "metrics.jsonl", "w") as metrics_file:
+            for line in logs.splitlines():
+                if line.startswith("K8OST_TXNLOG_BEGIN"):
+                    in_log = True
+                    continue
+                if line.startswith("K8OST_TXNLOG_END"):
+                    in_log = False
+                    continue
+                if not in_log:
+                    continue
+                parts = line.split()
+                if len(parts) < 6:
+                    continue
+                lat_ms = int(parts[2]) / 1000.0
+                completed = int(parts[4]) + int(parts[5]) / 1e6
+                rec = {
+                    "kind": "op", "op": "write", "phase": 0,
+                    "t": round(completed - lat_ms / 1000.0, 6),
+                    "lat_ms": round(lat_ms, 3), "ok": True,
+                }
+                self._records.append(rec)
+                metrics_file.write(json.dumps(rec) + "\n")
+        (run_dir / "journal.jsonl").write_text("")  # no acked-write journal by design
+        if not self._records:
+            raise RuntimeError("pgbench produced no transaction log — check loadgen.log")
+        span = max(r["t"] for r in self._records) - min(r["t"] for r in self._records)
+        self.events.emit(
+            "load.done",
+            f"{len(self._records)} pgbench transactions"
+            + (f" (~{len(self._records) / span:.0f} tps)" if span else ""),
+        )
 
     # -- verification ----------------------------------------------------------
 

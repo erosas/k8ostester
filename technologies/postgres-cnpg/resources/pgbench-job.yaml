@@ -1,0 +1,52 @@
+# pgbench runner Job: the ecosystem's standard Postgres benchmark as an
+# alternative load runner (industry-comparable TPS, real TPC-B transaction
+# shape). Runs from the same image as the database pods (pgbench ships in the
+# CNPG operand image — already pulled on the nodes, PostgreSQL licence).
+# The per-transaction log (--log) is emitted to stdout between markers and
+# parsed into the same op-record stream the journal runner produces, so
+# latency/tps goals and report graphs work unchanged.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k8ost-loadgen
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: k8ost-loadgen
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: pgbench
+          image: '${IMAGE}'
+          command:
+            - bash
+            - -c
+            - |
+              set -e
+              cd /tmp
+              pgbench -i -s "$K8OST_SCALE" "$K8OST_DSN" 1>&2
+              echo '{"kind": "start"}'
+              pgbench -c "$K8OST_CLIENTS" -j "$K8OST_JOBS" -T "$K8OST_DURATION" \
+                ${K8OST_RATE:+-R "$K8OST_RATE"} \
+                --log --log-prefix=/tmp/k8ost_pgb "$K8OST_DSN" 1>&2
+              echo K8OST_TXNLOG_BEGIN
+              cat /tmp/k8ost_pgb*
+              echo K8OST_TXNLOG_END
+          env:
+            - name: K8OST_DSN
+              value: '${DSN}'
+            - name: K8OST_SCALE
+              value: '${SCALE}'
+            - name: K8OST_CLIENTS
+              value: '${CLIENTS}'
+            - name: K8OST_JOBS
+              value: '${JOBS}'
+            - name: K8OST_DURATION
+              value: '${DURATION}'
+            - name: K8OST_RATE
+              value: '${RATE}'
+          resources:
+            requests: {cpu: 250m, memory: 128Mi}
+            limits: {cpu: "2", memory: 512Mi}

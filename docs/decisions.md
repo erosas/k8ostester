@@ -99,6 +99,19 @@ can't leave a partition behind. Each action gets its own complete template file 
 rather than one template mutated in Python. Workers now receive the whole `FaultSpec`, not just
 the target — duration and worker-specific `params` (loss %, latency) ride along.
 
+## D17 — Load runners are pluggable per technology; pgbench is the Postgres alternative
+`load.runner` selects the instrument: `journal` (default — the acked-write loadgen, full goal
+set) or a technology-standard benchmark (`pgbench` for Postgres: TPC-B shape, industry-comparable
+tps, runs from the same operand image the database pods use). Each runner declares what it can
+measure and the spec validator enforces the boundary up front: pgbench has no journal and its
+clients abort on connection loss, so faults, rpo/integrity/pitr, availability and connect goals
+are rejected at load time — it serves `tps` (new goal metric), `write_latency_*`, and the backup
+check. Runner output is normalized into the same per-op record stream (pgbench's `--log`
+per-transaction lines are parsed into op records), so the verdict tier, goal evaluators and
+report graphs are runner-agnostic. Future drivers follow the pattern (Kafka:
+`kafka-producer-perf-test`; ES: rally) — journaled runner for fault/loss experiments,
+ecosystem benchmark for throughput credibility.
+
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
 Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
 in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap

@@ -1,0 +1,53 @@
+# The disaster-recovery drill: everything the framework can prove, in one run
+# against the full target architecture. Sequence:
+#   base backup before load → steady baseline → 30s pause (the PITR anchor,
+#   D13) → connection storm with a 60s PARTITION of the primary mid-storm →
+#   cool-down with a replica kill (must be a non-event, target architecture)
+# then verify integrity (every acked write present), backup (Barman base
+# backup completed), and PITR (a second cluster restored from the object
+# store to mid-pause must contain exactly the pre-pause acked rows).
+# One report answers: does the architecture fail over, lose nothing, keep
+# serving, AND can we actually get the data back from backups?
+name: 16-cnpg-dr-drill
+technology: postgres-cnpg
+group: dr-drill
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+  - seaweedfs
+  - chaos-mesh
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: pg-pooler
+  clients: {count: 10, mode: persistent}
+  phases:
+    - {duration: 60s, rate: 20/s, mix: {read: 0.5, write: 0.5}}   # baseline
+    - {duration: 30s, rate: 0/s}                                   # pause: PITR target (D13)
+    - {duration: 90s, rate: 100/s, mix: {read: 0.5, write: 0.5},
+       clients: {count: 150, mode: persistent}}                    # storm; partition mid-phase
+    - {duration: 60s, rate: 20/s, mix: {read: 0.5, write: 0.5}}   # cool-down; replica kill
+
+faults:
+  - at: 120s                     # 30s into the storm; heals at 180s, still in-storm
+    worker: network_partition
+    duration: 60s
+    target: {role: primary}
+  - at: 210s                     # mid cool-down: replica loss must be a non-event
+    worker: pod_kill
+    target: {role: replica}
+
+verify:
+  - integrity
+  - backup
+  - pitr
+
+goals:                           # partition-class SLOs (D18); uptime is demand-aware
+  - {metric: rto, max: 25s}      # so the pause phase doesn't count as downtime
+  - {metric: rpo, max: 0}
+  - {metric: uptime, min: 88%}
+  - {metric: write_latency_p99, max: 200ms, window: steady-state}

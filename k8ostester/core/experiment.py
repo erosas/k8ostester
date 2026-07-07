@@ -53,7 +53,7 @@ class ClientsSpec(BaseModel):
 
 class LoadPhase(BaseModel):
     duration: str
-    rate: str | None = None  # e.g. "50/s"; None = unthrottled
+    rate: str | int | float | None = None  # "50/s" / bare number; 0 = pause, None = unthrottled
     mix: dict[str, float] | None = None  # e.g. {read: 0.7, write: 0.3}
     clients: ClientsSpec | None = None  # override for this phase
 

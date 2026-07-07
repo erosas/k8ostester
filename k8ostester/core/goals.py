@@ -117,18 +117,21 @@ def evaluate_goals(
             detail = f"{sum(r['ok'] for r in considered)}/{len(considered)} ops succeeded"
             display = f"{value:.2f}%"
         elif metric == "uptime":
-            # time-bucketed availability: fraction of seconds (over the whole
-            # op stream) with ≥1 successful op. Immune to the op-count metric's
-            # blindspot — pooled clients that can't get a connection attempt
-            # nothing, which op-count availability scores as 100% (plan §9)
+            # time-bucketed availability: of the seconds where clients demanded
+            # service (≥1 op attempted — failures count as demand), the fraction
+            # that saw ≥1 success. Demand-aware so a deliberate pause phase
+            # (PITR anchor, D13) isn't scored as downtime; safe because the
+            # loadgen is bounded — during an outage clients keep attempting and
+            # journaling failures, so outage seconds always land in the
+            # denominator (unlike op-count availability, plan §9)
             if not ops:
                 value, detail = 0.0, "no ops recorded"
             else:
                 t0 = min(r["t"] for r in ops)
-                total = int(max(r["t"] for r in ops) - t0) + 1
-                up = len({int(r["t"] - t0) for r in ops if r["ok"]})
-                value = 100.0 * up / total
-                detail = f"{up}/{total} seconds had ≥1 successful op"
+                demanded = {int(r["t"] - t0) for r in ops}
+                up = {int(r["t"] - t0) for r in ops if r["ok"]}
+                value = 100.0 * len(up & demanded) / len(demanded)
+                detail = f"{len(up & demanded)}/{len(demanded)} demanded seconds had ≥1 successful op"
             display = f"{value:.2f}%"
         elif m := _LATENCY_RE.match(metric):
             op_kind, pct = m.group(1), int(m.group(2))

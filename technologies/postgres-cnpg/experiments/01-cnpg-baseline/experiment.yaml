@@ -9,7 +9,6 @@ cluster:
 infra:
   - operator: cnpg
   - seaweedfs
-  - monitoring        # Prometheus scrapes the cluster via CNPG's PodMonitor
 
 config:
   manifests: ./manifests

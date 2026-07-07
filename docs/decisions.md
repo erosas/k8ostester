@@ -131,6 +131,16 @@ attempt nothing — op-count availability scored 100.00% across a 40.6s outage. 
 availability remains for fault-free load tests (04/05), where attempts never stop. Historical
 runs keep the verdicts of the goals they ran under; recalibration applies from re-run onward.
 
+## D19 — Observability tier removed: metrics are app-perspective, journal-only
+Supersedes the live half of D5/D10 and closes D7's Grafana question. The monitoring stack
+(kube-prometheus-stack + Perses) never fed a verdict — goals are evaluated exclusively from the
+loadgen journal — and its cost was real: the heaviest infra install, a per-cluster image-mirroring
+burden on private clusters, and the whole Grafana-AGPL/Perses workaround. Server-side metrics
+(replication lag etc.) were considered as PromQL goals and rejected: what the application
+experiences is the verdict that matters, and the journal already captures it. `infra/monitoring/`,
+the `monitoring` infra entry and `k8ost dashboard` are gone; live-view during a run, if ever
+needed, is whatever observability the target cluster already has.
+
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
 Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
 in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap

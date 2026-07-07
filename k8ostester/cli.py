@@ -91,31 +91,6 @@ def runs(
 
 
 @app.command()
-def dashboard(
-    context: str = typer.Option(None, "--context", "-c", help="Kubeconfig context"),
-    port: int = typer.Option(8080, "--port"),
-) -> None:
-    """Open the live metrics dashboard (Perses; needs the monitoring infra installed)."""
-    import subprocess
-    import webbrowser
-
-    url = f"http://localhost:{port}"
-    console.print(f"Perses at [bold]{url}[/bold] — Ctrl-C to stop the port-forward")
-    cmd = ["kubectl", "port-forward", "-n", "k8ost-monitoring", "svc/perses", f"{port}:8080"]
-    if context:
-        cmd += ["--context", context]
-    proc = subprocess.Popen(cmd)
-    try:
-        import time as _time
-
-        _time.sleep(1.5)
-        webbrowser.open(url)
-        proc.wait()
-    except KeyboardInterrupt:
-        proc.terminate()
-
-
-@app.command()
 def run(
     path: Path,
     keep: bool = typer.Option(False, "--keep", help="Leave the namespace running after the run"),

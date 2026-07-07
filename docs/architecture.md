@@ -56,7 +56,7 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `core/capabilities.py` | cluster probe: nodes, storage classes, snapshot CRDs, operators (by CRD), helm — used to skip/flag goals a cluster can't exercise |
 | `core/events.py` | append-only JSONL event log |
 | `core/metrics.py` | append-only JSONL metric store + percentile helper (authoritative tier for goal verdicts) |
-| `core/infra.py` | COMMON prerequisites, installed idempotently (D15): SeaweedFS + backup bucket, monitoring stack, chaos-mesh (D16); tech-specific pins live in each driver |
+| `core/infra.py` | COMMON prerequisites, installed idempotently (D15): SeaweedFS + backup bucket, chaos-mesh (D16); tech-specific pins live in each driver |
 | `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, run_load, ensure_backup, verify |
 | `drivers/__init__.py` | driver discovery (D15): nearest `driver.py` above the experiment dir, loaded dynamically; built-ins as fallback |
 | `drivers/generic.py` | built-in deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
@@ -67,11 +67,9 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
 | `workers/` | fault workers: `pod_kill` (grace 0), `process_kill` (kill -9 PID 1 — in-place container crash, scoped stand-in for node loss), `node_drain` (cordon + evict run pods, uncordon cleanup), `network_partition`/`network_loss`/`network_delay` (NetworkChaos CRs via Chaos Mesh, D16); targets resolve at injection time via driver topology |
 | `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |
-| `infra/monitoring/` | kube-prometheus-stack 87.10.1 (Grafana disabled, D7) + Perses 0.22.0 with provisioned Prometheus datasource; PodMonitor discovery is cluster-wide |
 | `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |
 | `infra/chaos-mesh/` | Chaos Mesh 2.8.3 values (containerd socket, dashboard/DNS server off) — engine for the `network_*` workers (D16), installed via the `chaos-mesh` infra entry into `k8ost-chaos` |
 | `experiments/` | experiment directories (the configs being validated) |
-| `infra/` | shared cluster prerequisites (operator pins, SeaweedFS, monitoring) — phase 2+ |
 
 ## The driver contract
 
@@ -103,20 +101,14 @@ goals, metrics, and reports are shared.
      set must equal the pre-pause acked set exactly.
 6. Any verify failure → run status `failed` (vs `error` for framework/infra problems).
 
-## Metrics: two tiers
+## Metrics: app-perspective, journal-only (D19)
 
-1. **Verdict tier (authoritative):** per-operation records from the loadgen journal, stored in
-   `results/<run>/`. Goals are evaluated only against this — Prometheus scrape resolution is too
-   coarse for second-level RTO, and RPO requires journal-vs-database reconciliation.
-2. **Observability tier (installed via the `monitoring` infra entry):** kube-prometheus-stack
-   in `k8ost-monitoring` — Prometheus discovers *all* Pod/ServiceMonitors, so a CNPG cluster
-   with `monitoring.enablePodMonitor: true` is scraped automatically and its metrics outlive
-   the run namespace (7d retention). Dashboards: **Perses** (Apache 2.0 — Grafana is AGPL,
-   excluded by D7) with a provisioned default Prometheus datasource; reach it with
-   `kubectl port-forward -n k8ost-monitoring svc/perses 8080:8080`.
-
-Cross-run comparison graphs do NOT come from Prometheus — `k8ost report` builds them from the
-runs' `metrics.jsonl` (the verdict tier), so reports work offline and after cluster teardown.
+Every metric — verdicts and report graphs alike — comes from the loadgen journal's per-operation
+records in `results/<run>/`. It's the only source precise enough for second-level RTO, the only
+one that can measure RPO (journal-vs-database reconciliation), and it measures what the
+application actually experienced. There is no monitoring stack to install (D19 removed it):
+reports work offline and after cluster teardown, and the same pipeline works unchanged on
+private clusters because journal retrieval rides the Kubernetes API (pod logs, D12).
 Runs are grouped via `group:` in experiment.yaml or `k8ost run --group`, recorded in
 `summary.json`; `k8ost report --group X` collects and graphs the whole group.
 

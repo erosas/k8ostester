@@ -18,18 +18,12 @@ from k8ostester.core.helm import Helm
 from k8ostester.core.k8s import ClusterClient
 
 # Pinned versions of COMMON infra (tech-specific pins live in each driver).
-KPS_CHART_VERSION = "87.10.1"  # kube-prometheus-stack (prometheus-operator 0.92)
-KPS_REPO = "https://prometheus-community.github.io/helm-charts"
-PERSES_CHART_VERSION = "0.22.0"  # Perses 0.53 (Apache 2.0 dashboards, D7)
-PERSES_REPO = "https://perses.github.io/helm-charts"
 CHAOS_MESH_CHART_VERSION = "2.8.3"  # network fault engine (Apache 2.0, D16)
 CHAOS_MESH_REPO = "https://charts.chaos-mesh.org"
 
 INFRA_NAMESPACE = "k8ost-infra"
-MONITORING_NAMESPACE = "k8ost-monitoring"
 CHAOS_NAMESPACE = "k8ost-chaos"
 SEAWEEDFS_MANIFESTS = Path("infra/seaweedfs/manifests")
-MONITORING_DIR = Path("infra/monitoring")
 CHAOS_MESH_DIR = Path("infra/chaos-mesh")
 BACKUP_BUCKET = "backups"
 
@@ -40,14 +34,12 @@ class InfraManager:
         self.events = events
 
     def handles(self, entry: str | dict[str, Any]) -> bool:
-        return entry in ("seaweedfs", "monitoring", "chaos-mesh")
+        return entry in ("seaweedfs", "chaos-mesh")
 
     def ensure(self, infra: list[str | dict[str, Any]]) -> None:
         for entry in infra:
             if entry == "seaweedfs":
                 self._ensure_seaweedfs()
-            elif entry == "monitoring":
-                self._ensure_monitoring()
             elif entry == "chaos-mesh":
                 self._ensure_chaos_mesh()
             else:
@@ -66,30 +58,6 @@ class InfraManager:
             version=CHAOS_MESH_CHART_VERSION, values_file=chaos_dir / "values.yaml",
         )
         self.events.emit("infra.chaos-mesh", "chaos-mesh ready")
-
-    def _ensure_monitoring(self) -> None:
-        """Prometheus stack (Grafana disabled — AGPL, D7) + Perses dashboards."""
-        helm = Helm(self.k8s.context)
-        monitoring = MONITORING_DIR.resolve()
-        if not monitoring.is_dir():
-            raise FileNotFoundError(f"{monitoring} not found — run from the repository root")
-        self.events.emit(
-            "infra.monitoring",
-            f"ensuring kube-prometheus-stack {KPS_CHART_VERSION} + perses {PERSES_CHART_VERSION}",
-        )
-        self._ensure_namespace(MONITORING_NAMESPACE)
-        self.k8s.apply_manifests(monitoring / "manifests", MONITORING_NAMESPACE)
-        helm.repo_add("prometheus-community", KPS_REPO)
-        helm.upgrade_install(
-            "kps", "prometheus-community/kube-prometheus-stack", MONITORING_NAMESPACE,
-            version=KPS_CHART_VERSION, values_file=monitoring / "kps-values.yaml",
-        )
-        helm.repo_add("perses", PERSES_REPO)
-        helm.upgrade_install(
-            "perses", "perses/perses", MONITORING_NAMESPACE,
-            version=PERSES_CHART_VERSION, values_file=monitoring / "perses-values.yaml",
-        )
-        self.events.emit("infra.monitoring", "monitoring stack ready")
 
     def _ensure_seaweedfs(self) -> None:
         self.events.emit("infra.seaweedfs", "ensuring SeaweedFS object store")

@@ -18,7 +18,6 @@ from .k8s import ClusterClient
 OPERATOR_CRDS = {
     "cloudnative-pg": "clusters.postgresql.cnpg.io",
     "cnpg-pooler (pgbouncer)": "poolers.postgresql.cnpg.io",
-    "prometheus-operator": "servicemonitors.monitoring.coreos.com",
     "chaos-mesh": "podchaos.chaos-mesh.org",
 }
 

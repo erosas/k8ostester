@@ -6,6 +6,7 @@ dumb — append during the run, load fully for evaluation afterwards; runs are
 minutes long, not weeks.
 """
 
+from __future__ import annotations
 from k8ostester.core.exceptions import K8osConfigError
 
 import json

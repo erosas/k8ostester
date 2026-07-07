@@ -17,7 +17,7 @@ backup/PITR, and get a pass/fail verdict per goal.
 uv pip install -e . -p .venv/bin/python
 
 k8ost env check                              # what can this cluster do?
-k8ost run technologies/postgres-cnpg/experiments/cnpg-single
+k8ost run technologies/postgres-cnpg/experiments/02-cnpg-single
 k8ost runs                                   # list recorded runs
 k8ost report --group pooling --open          # comparison graphs for a run group
 k8ost dashboard                              # live metrics (Perses; needs monitoring infra)

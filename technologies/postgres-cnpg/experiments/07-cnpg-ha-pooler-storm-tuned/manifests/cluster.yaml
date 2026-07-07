@@ -1,0 +1,38 @@
+# Same architecture as 06-cnpg-ha-pooler-storm; ONLY the pgbouncer failover
+# parameters differ (the config under test is the tuning):
+#   server_login_retry 15s→1s   (the untuned arm's RTO was exactly 15.0s)
+#   server_connect_timeout 15s→3s, server_fast_close on, query_wait_timeout 30s
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler
+spec:
+  cluster:
+    name: pg
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"
+      server_login_retry: "1"
+      server_connect_timeout: "3"
+      server_fast_close: "1"
+      query_wait_timeout: "30"

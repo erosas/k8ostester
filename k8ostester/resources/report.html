@@ -68,6 +68,7 @@
 <script>
 const DATA = __PAYLOAD__;
 const COLORS = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
+const color = i => COLORS[i % COLORS.length];
 const css = v => getComputedStyle(document.querySelector('.viz-root')).getPropertyValue(v).trim();
 const runs = DATA.runs;
 
@@ -83,7 +84,7 @@ document.getElementById('sub').textContent =
     const th = document.createElement('th');
     const key = document.createElement('span');
     key.className = 'k'; key.style.cssText =
-      `display:inline-block;width:12px;height:2px;margin-right:6px;vertical-align:middle;background:var(${COLORS[i]})`;
+      `display:inline-block;width:12px;height:2px;margin-right:6px;vertical-align:middle;background:var(${color(i)})`;
     th.appendChild(key);
     th.appendChild(document.createTextNode(r.name + ' '));
     const b = document.createElement('span');
@@ -122,7 +123,7 @@ for (const id of ['legend1', 'legend2']) {
   runs.forEach((r, i) => {
     const s = document.createElement('span');
     const key = document.createElement('i');
-    key.style.background = `var(${COLORS[i]})`;
+    key.style.background = `var(${color(i)})`;
     s.appendChild(key); s.appendChild(document.createTextNode(r.name));
     el.appendChild(s);
   });
@@ -131,10 +132,12 @@ for (const id of ['legend1', 'legend2']) {
 const tip = document.getElementById('tip');
 
 function chart(mountId, field, yLabel) {
+  const plotted = runs.filter(r => r.series.length);
+  if (!plotted.length) return;
   const W = 900, H = 240, M = {t: 12, r: 12, b: 26, l: 46};
   const iw = W - M.l - M.r, ih = H - M.t - M.b;
-  const xMax = Math.max(...runs.map(r => r.series.at(-1).s)) + 1;
-  const yMax = Math.max(...runs.flatMap(r => r.series.map(p => p[field] ?? 0))) * 1.1 || 1;
+  const xMax = Math.max(...plotted.map(r => r.series.at(-1).s)) + 1;
+  const yMax = Math.max(...plotted.flatMap(r => r.series.map(p => p[field] ?? 0))) * 1.1 || 1;
   const x = s => M.l + s / xMax * iw;
   const y = v => M.t + ih - v / yMax * ih;
   const ns = 'http://www.w3.org/2000/svg';
@@ -165,29 +168,44 @@ function chart(mountId, field, yLabel) {
     svg.appendChild(t);
   }
 
-  // fault markers (first run's faults ≈ shared timeline)
-  runs[0].faults.forEach(f => {
-    const line = document.createElementNS(ns, 'line');
-    line.setAttribute('x1', x(f.s)); line.setAttribute('x2', x(f.s));
-    line.setAttribute('y1', M.t); line.setAttribute('y2', M.t + ih);
-    line.setAttribute('stroke', css('--axis'));
-    line.setAttribute('stroke-width', '1');
-    svg.appendChild(line);
-    const t = document.createElementNS(ns, 'text');
-    t.setAttribute('x', x(f.s) + 4); t.setAttribute('y', M.t + 10);
-    t.textContent = f.label;
-    svg.appendChild(t);
+  // fault markers: each run's faults in that run's color (timelines are only
+  // shared within a group; an all-runs report mixes experiments)
+  const seenFaultX = new Set();
+  runs.forEach((r, i) => {
+    r.faults.forEach(f => {
+      const line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', x(f.s)); line.setAttribute('x2', x(f.s));
+      line.setAttribute('y1', M.t); line.setAttribute('y2', M.t + ih);
+      line.setAttribute('stroke', css(color(i)));
+      line.setAttribute('stroke-width', '1');
+      line.setAttribute('stroke-dasharray', '3 3');
+      const title = document.createElementNS(ns, 'title');
+      title.textContent = `${f.label} @ ${f.s}s — ${r.name}`;
+      line.appendChild(title);
+      svg.appendChild(line);
+      const key = Math.round(x(f.s));
+      if (runs.length <= 4 && !seenFaultX.has(key)) {  // labels clutter beyond a few runs
+        seenFaultX.add(key);
+        const t = document.createElementNS(ns, 'text');
+        t.setAttribute('x', x(f.s) + 4); t.setAttribute('y', M.t + 10);
+        t.textContent = f.label;
+        svg.appendChild(t);
+      }
+    });
   });
 
-  // series lines
+  // series lines; a hole in the data (null p99 seconds) breaks the path —
+  // bridging a gap would draw data where none exists
   runs.forEach((r, i) => {
     const pts = r.series.filter(p => p[field] != null);
     if (!pts.length) return;
-    const d = pts.map((p, j) => `${j ? 'L' : 'M'}${x(p.s).toFixed(1)},${y(p[field]).toFixed(1)}`).join('');
+    const d = pts.map((p, j) =>
+      `${j && p.s - pts[j - 1].s <= 1 ? 'L' : 'M'}${x(p.s).toFixed(1)},${y(p[field]).toFixed(1)}`
+    ).join('');
     const path = document.createElementNS(ns, 'path');
     path.setAttribute('d', d);
     path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', css(COLORS[i]));
+    path.setAttribute('stroke', css(color(i)));
     path.setAttribute('stroke-width', '2');
     path.setAttribute('stroke-linejoin', 'round');
     path.setAttribute('stroke-linecap', 'round');
@@ -216,7 +234,7 @@ function chart(mountId, field, yLabel) {
       const p = r.series.find(q => q.s === sec);
       const row = document.createElement('div'); row.className = 'row';
       const k = document.createElement('span');
-      k.className = 'k'; k.style.background = css(COLORS[i]);
+      k.className = 'k'; k.style.background = css(color(i));
       row.appendChild(k);
       const b = document.createElement('b');
       b.textContent = p && p[field] != null ? p[field].toLocaleString() : '–';

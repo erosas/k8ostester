@@ -24,37 +24,43 @@ def gather_run(run_dir: Path) -> dict:
             rec = json.loads(line)
             if rec.get("kind") == "op":
                 ops.append(rec)
-    if not ops:
-        raise ValueError(f"{run_dir} has no op records to graph")
-    t0 = min(r["t"] for r in ops)
+    series: list[dict] = []
+    faults: list[dict] = []
+    if ops:  # error runs / load-less experiments still belong in the goal matrix
+        t0 = min(r["t"] for r in ops)
+        buckets: dict[int, dict] = {}
+        for r in ops:
+            if r["op"] != "write":
+                continue
+            b = buckets.setdefault(int((r["t"] - t0) / BUCKET_S), {"ok": 0, "lat": []})
+            if r["ok"]:
+                b["ok"] += 1
+                b["lat"].append(r["lat_ms"])
 
-    buckets: dict[int, dict] = {}
-    for r in ops:
-        if r["op"] != "write":
-            continue
-        b = buckets.setdefault(int((r["t"] - t0) / BUCKET_S), {"ok": 0, "lat": []})
-        if r["ok"]:
-            b["ok"] += 1
-            b["lat"].append(r["lat_ms"])
+        # every second up to the last observed op gets a point: a second with no
+        # attempted writes is an outage and must graph as 0, not as a gap the
+        # line bridges over (hung clients stop *attempting*, see plan §9)
+        last_sec = int((max(r["t"] for r in ops) - t0) / BUCKET_S)
+        for sec in range(last_sec + 1):
+            b = buckets.get(sec)
+            series.append(
+                {
+                    "s": sec,
+                    "wps": b["ok"] if b else 0,
+                    "p99": round(percentile(sorted(b["lat"]), 99), 2)
+                    if b and b["lat"]
+                    else None,
+                }
+            )
 
-    series = [
-        {
-            "s": sec,
-            "wps": b["ok"],
-            "p99": round(percentile(sorted(b["lat"]), 99), 2) if b["lat"] else None,
-        }
-        for sec, b in sorted(buckets.items())
-    ]
-
-    faults = []
-    events_path = run_dir / "events.jsonl"
-    if events_path.exists():
-        for line in events_path.read_text().splitlines():
-            ev = json.loads(line)
-            if ev["type"] == "fault.injected":
-                faults.append(
-                    {"s": round(ev["ts"] - t0, 1), "label": ev["data"]["worker"]}
-                )
+        events_path = run_dir / "events.jsonl"
+        if events_path.exists():
+            for line in events_path.read_text().splitlines():
+                ev = json.loads(line)
+                if ev["type"] == "fault.injected":
+                    faults.append(
+                        {"s": round(ev["ts"] - t0, 1), "label": ev["data"]["worker"]}
+                    )
 
     return {
         "label": f"{summary['experiment']} ({summary['run_id']})",
@@ -77,6 +83,11 @@ def find_group_runs(group: str, results_root: Path = Path("results")) -> list[Pa
         except json.JSONDecodeError:
             continue
     return dirs
+
+
+def find_all_runs(results_root: Path = Path("results")) -> list[Path]:
+    """Every recorded run, in experiment order (numbered prefixes sort)."""
+    return [p.parent for p in sorted(results_root.glob("*/*/summary.json"))]
 
 
 def render(runs: list[dict], title: str, out: Path) -> Path:

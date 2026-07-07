@@ -88,11 +88,25 @@ operator chart) live in the tech driver; core `InfraManager` only owns **common*
 (SeaweedFS, monitoring) and drivers delegate those entries to it. Future: per-tech Python
 dependencies declared in the tech dir (uv extras) — not needed yet.
 
+## D16 — Network faults wrap Chaos Mesh; one CR template per action
+Per D4: tc/iptables-level injection inside a pod's netns is genuinely hard, so `network_partition`
+/ `network_loss` / `network_delay` are thin workers that render a NetworkChaos CR into the run
+namespace — same `Worker` interface as the built-ins, so experiments only swap the `worker:` name.
+Chaos Mesh (Apache 2.0, pinned chart) is a **common infra** entry (`chaos-mesh`) since any
+technology can use it; the daemon attaches to the node's containerd socket. Faults carry a
+required `duration` (Chaos Mesh auto-heals) plus a cleanup that deletes the CR, so an aborted run
+can't leave a partition behind. Each action gets its own complete template file (D-templates rule)
+rather than one template mutated in Python. Workers now receive the whole `FaultSpec`, not just
+the target — duration and worker-specific `params` (loss %, latency) ride along.
+
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
 Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
 in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap
-between consecutive successful writes within a window around the fault — both ends of the gap
-are on the same clock, and skew merely shifts the window. Fault targets resolve at injection
+between consecutive successful writes *starting* within a window around the fault — both ends of
+the gap are on the same clock, and skew merely shifts the window. The gap's far end is unbounded
+(an outage longer than the window must be reported at full length, not truncated — the partition
+arms proved this the hard way), and a gap still open at the last recorded op is counted up to
+that op as a censored lower bound. Fault targets resolve at injection
 time, not run start: after a failover, "primary" is a different pod. Cluster-level fault
 mutations (cordons) return cleanup callables run at teardown — a namespace delete won't undo
 them.

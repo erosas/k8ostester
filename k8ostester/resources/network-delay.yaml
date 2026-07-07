@@ -1,0 +1,17 @@
+# Added latency: delay packets to and from the target pod by ${LATENCY}
+# (±${JITTER}) for ${DURATION} — the cross-zone / saturated-link fault.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: '${NAME}'
+  namespace: '${NAMESPACE}'
+spec:
+  action: delay
+  mode: all
+  selector:
+    pods: ${PODS}
+  direction: both
+  delay:
+    latency: '${LATENCY}'
+    jitter: '${JITTER}'
+  duration: '${DURATION}'

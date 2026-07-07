@@ -1,0 +1,50 @@
+# Same architecture as 10-cnpg-ha-pooler-storm-partition; ONLY the failover
+# detection parameters differ (the config under test is the tuning):
+#   liveness probe: 10s period / 3 failures (default derives ~30s from
+#     livenessProbeTimeout) → 2s period / 3 failures ≈ 6s detection
+#   isolationCheck on with 1s timeouts: a primary that cannot reach the API
+#     server self-fences instead of serving a doomed timeline
+# PgBouncer keeps the tuned failover-path parameters from the pod_kill arms.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  postgresql:
+    synchronous:
+      method: any
+      number: 1
+  probes:
+    liveness:
+      periodSeconds: 2
+      timeoutSeconds: 2
+      failureThreshold: 3
+      isolationCheck:
+        enabled: true
+        connectionTimeout: 1000
+        requestTimeout: 1000
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler
+spec:
+  cluster:
+    name: pg
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"
+      server_login_retry: "1"
+      server_connect_timeout: "3"
+      server_fast_close: "1"
+      query_wait_timeout: "30"

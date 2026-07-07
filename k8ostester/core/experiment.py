@@ -78,6 +78,8 @@ class FaultSpec(BaseModel):
     at: str  # offset from load start, e.g. "3m"
     worker: str  # worker name, e.g. "pod_kill"
     target: dict[str, Any] = {}
+    duration: str | None = None  # how long the fault holds (network_* workers); instant faults omit it
+    params: dict[str, Any] = {}  # worker-specific knobs, e.g. {loss: "50"} or {latency: "100ms"}
 
     @property
     def at_s(self) -> float:
@@ -87,6 +89,13 @@ class FaultSpec(BaseModel):
     @classmethod
     def _valid_at(cls, v: str) -> str:
         parse_duration(v)
+        return v
+
+    @field_validator("duration")
+    @classmethod
+    def _valid_duration(cls, v: str | None) -> str | None:
+        if v is not None:
+            parse_duration(v)
         return v
 
 

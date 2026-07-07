@@ -45,17 +45,27 @@ def _ok_write_ts(ops: list[dict]) -> list[float]:
 
 def _rto(ops: list[dict], fault_events: list[dict]) -> tuple[float, str]:
     """Max outage across faults; outage = largest gap between consecutive
-    successful writes in a window around the fault."""
+    successful writes *starting* in a window around the fault. The gap's far
+    end is unbounded: an outage longer than the window must be reported at
+    full length, not silently truncated to the pre-fault noise."""
     if not fault_events:
         return 0.0, "no faults injected"
     ts = _ok_write_ts(ops)
     worst, details = 0.0, []
     for fault in fault_events:
         ft = fault["ts"]
-        window = [t for t in ts if ft - FAULT_WINDOW_BEFORE_S <= t <= ft + FAULT_WINDOW_AFTER_S]
-        if len(window) < 2:
+        starts = [
+            i for i, t in enumerate(ts)
+            if ft - FAULT_WINDOW_BEFORE_S <= t <= ft + FAULT_WINDOW_AFTER_S
+        ]
+        if not starts:
             return float("inf"), "no successful writes around the fault — total outage"
-        gap = max(b - a for a, b in zip(window, window[1:]))
+        gaps = [ts[i + 1] - ts[i] for i in starts if i + 1 < len(ts)]
+        if starts[-1] == len(ts) - 1:
+            # no success after this one — the outage is censored by the end of
+            # the data; count time up to the last op of any kind (lower bound)
+            gaps.append(max(r["t"] for r in ops) - ts[starts[-1]])
+        gap = max(gaps)
         worst = max(worst, gap)
         details.append(f"{gap:.1f}s")
     return worst, f"outage per fault: {', '.join(details)}"

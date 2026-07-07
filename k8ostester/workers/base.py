@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from k8ostester.core.events import EventLog
+from k8ostester.core.experiment import FaultSpec
 from k8ostester.core.k8s import ClusterClient
 from k8ostester.drivers.base import TechnologyDriver
 
@@ -33,7 +34,7 @@ class Worker:
         self.namespace = namespace
         self.events = events
 
-    def execute(self, target: dict[str, Any]) -> Callable[[], None] | None:
+    def execute(self, fault: FaultSpec) -> Callable[[], None] | None:
         raise NotImplementedError
 
     def resolve_pod(self, target: dict[str, Any]) -> str:

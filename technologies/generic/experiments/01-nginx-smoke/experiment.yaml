@@ -1,0 +1,8 @@
+# Framework smoke test: proves the run lifecycle (namespace → deploy → ready →
+# teardown) against a real cluster with a trivial stateless app.
+name: 01-nginx-smoke
+technology: generic
+cluster:
+  context: docker-desktop
+config:
+  manifests: ./manifests

@@ -35,6 +35,7 @@ def validate(path: Path) -> None:
 def report(
     runs: list[Path] = typer.Argument(None, help="Run directories to compare"),
     group: str = typer.Option(None, "--group", "-g", help="Include every run recorded with this group"),
+    all_runs: bool = typer.Option(False, "--all", help="Include every recorded run"),
     out: Path = typer.Option(Path("results/report.html"), "--out", "-o"),
     title: str = typer.Option(None, "--title"),
     open_browser: bool = typer.Option(False, "--open", help="Open the report in the browser"),
@@ -47,11 +48,13 @@ def report(
     dirs = list(runs or [])
     if group:
         dirs += [d for d in report_mod.find_group_runs(group) if d not in dirs]
+    if all_runs:
+        dirs += [d for d in report_mod.find_all_runs() if d not in dirs]
     if not dirs:
-        console.print("[red]no runs selected[/red] — pass run directories or --group")
+        console.print("[red]no runs selected[/red] — pass run directories, --group or --all")
         raise typer.Exit(1)
     data = [report_mod.gather_run(d) for d in dirs]
-    path = report_mod.render(data, title or group or "K8osTester comparison", out)
+    path = report_mod.render(data, title or group or ("all runs" if all_runs else "K8osTester comparison"), out)
     console.print(f"[green]✔[/green] report with {len(data)} run(s): {path}")
     if open_browser:
         webbrowser.open(path.resolve().as_uri())

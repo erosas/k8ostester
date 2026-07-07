@@ -1,0 +1,17 @@
+# Packet loss: drop ${LOSS}% of packets to and from the target pod for
+# ${DURATION} — the degraded-network fault (flaky link, congested switch).
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: '${NAME}'
+  namespace: '${NAMESPACE}'
+spec:
+  action: loss
+  mode: all
+  selector:
+    pods: ${PODS}
+  direction: both
+  loss:
+    loss: '${LOSS}'
+    correlation: '0'
+  duration: '${DURATION}'

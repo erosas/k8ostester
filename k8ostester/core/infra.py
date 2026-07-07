@@ -22,11 +22,15 @@ KPS_CHART_VERSION = "87.10.1"  # kube-prometheus-stack (prometheus-operator 0.92
 KPS_REPO = "https://prometheus-community.github.io/helm-charts"
 PERSES_CHART_VERSION = "0.22.0"  # Perses 0.53 (Apache 2.0 dashboards, D7)
 PERSES_REPO = "https://perses.github.io/helm-charts"
+CHAOS_MESH_CHART_VERSION = "2.8.3"  # network fault engine (Apache 2.0, D16)
+CHAOS_MESH_REPO = "https://charts.chaos-mesh.org"
 
 INFRA_NAMESPACE = "k8ost-infra"
 MONITORING_NAMESPACE = "k8ost-monitoring"
+CHAOS_NAMESPACE = "k8ost-chaos"
 SEAWEEDFS_MANIFESTS = Path("infra/seaweedfs/manifests")
 MONITORING_DIR = Path("infra/monitoring")
+CHAOS_MESH_DIR = Path("infra/chaos-mesh")
 BACKUP_BUCKET = "backups"
 
 
@@ -36,7 +40,7 @@ class InfraManager:
         self.events = events
 
     def handles(self, entry: str | dict[str, Any]) -> bool:
-        return entry in ("seaweedfs", "monitoring")
+        return entry in ("seaweedfs", "monitoring", "chaos-mesh")
 
     def ensure(self, infra: list[str | dict[str, Any]]) -> None:
         for entry in infra:
@@ -44,8 +48,24 @@ class InfraManager:
                 self._ensure_seaweedfs()
             elif entry == "monitoring":
                 self._ensure_monitoring()
+            elif entry == "chaos-mesh":
+                self._ensure_chaos_mesh()
             else:
                 raise ValueError(f"not common infra: {entry!r} (does the tech driver handle it?)")
+
+    def _ensure_chaos_mesh(self) -> None:
+        """Chaos Mesh: the engine behind the network_* fault workers (D16)."""
+        chaos_dir = CHAOS_MESH_DIR.resolve()
+        if not chaos_dir.is_dir():
+            raise FileNotFoundError(f"{chaos_dir} not found — run from the repository root")
+        self.events.emit("infra.chaos-mesh", f"ensuring chaos-mesh {CHAOS_MESH_CHART_VERSION}")
+        helm = Helm(self.k8s.context)
+        helm.repo_add("chaos-mesh", CHAOS_MESH_REPO)
+        helm.upgrade_install(
+            "chaos-mesh", "chaos-mesh/chaos-mesh", CHAOS_NAMESPACE,
+            version=CHAOS_MESH_CHART_VERSION, values_file=chaos_dir / "values.yaml",
+        )
+        self.events.emit("infra.chaos-mesh", "chaos-mesh ready")
 
     def _ensure_monitoring(self) -> None:
         """Prometheus stack (Grafana disabled — AGPL, D7) + Perses dashboards."""

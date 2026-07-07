@@ -56,18 +56,19 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `core/capabilities.py` | cluster probe: nodes, storage classes, snapshot CRDs, operators (by CRD), helm — used to skip/flag goals a cluster can't exercise |
 | `core/events.py` | append-only JSONL event log |
 | `core/metrics.py` | append-only JSONL metric store + percentile helper (authoritative tier for goal verdicts) |
-| `core/infra.py` | shared prerequisites, installed idempotently: CNPG operator (pinned chart 0.28.3 / app 1.29.1), SeaweedFS + backup bucket |
+| `core/infra.py` | COMMON prerequisites, installed idempotently (D15): SeaweedFS + backup bucket, monitoring stack, chaos-mesh (D16); tech-specific pins live in each driver |
 | `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, run_load, ensure_backup, verify |
 | `drivers/__init__.py` | driver discovery (D15): nearest `driver.py` above the experiment dir, loaded dynamically; built-ins as fallback |
 | `drivers/generic.py` | built-in deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
 | `technologies/postgres-cnpg/driver.py` | tech-owned CNPG driver: operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
 | `technologies/postgres-cnpg/loadgen.py` | the in-cluster load generator (ships via ConfigMap, D12) |
-| `technologies/<tech>/experiments/` | each technology's experiments live beside its driver (D15) |
+| `technologies/<tech>/experiments/` | each technology's experiments live beside its driver (D15); directories (and `name:`) carry a numeric prefix (`01-cnpg-baseline`, …) so the progression reads in order — dashes, not underscores, because the name becomes part of the run namespace (DNS label) |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
-| `workers/` | fault workers: `pod_kill` (grace 0), `node_drain` (cordon + evict run pods, uncordon cleanup); targets resolve at injection time via driver topology |
+| `workers/` | fault workers: `pod_kill` (grace 0), `node_drain` (cordon + evict run pods, uncordon cleanup), `network_partition`/`network_loss`/`network_delay` (NetworkChaos CRs via Chaos Mesh, D16); targets resolve at injection time via driver topology |
 | `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |
 | `infra/monitoring/` | kube-prometheus-stack 87.10.1 (Grafana disabled, D7) + Perses 0.22.0 with provisioned Prometheus datasource; PodMonitor discovery is cluster-wide |
 | `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |
+| `infra/chaos-mesh/` | Chaos Mesh 2.8.3 values (containerd socket, dashboard/DNS server off) — engine for the `network_*` workers (D16), installed via the `chaos-mesh` infra entry into `k8ost-chaos` |
 | `experiments/` | experiment directories (the configs being validated) |
 | `infra/` | shared cluster prerequisites (operator pins, SeaweedFS, monitoring) — phase 2+ |
 

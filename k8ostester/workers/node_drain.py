@@ -9,16 +9,17 @@ The harder variant (kill kubelet via `kubectl debug` nsenter, D1) comes later.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Callable
 
+from k8ostester.core.experiment import FaultSpec
 from k8ostester.workers.base import Worker
 
 
 class NodeDrainWorker(Worker):
     name = "node_drain"
 
-    def execute(self, target: dict[str, Any]) -> Callable[[], None] | None:
-        node = self.resolve_node(target)
+    def execute(self, fault: FaultSpec) -> Callable[[], None] | None:
+        node = self.resolve_node(fault.target)
         self.k8s.core.patch_node(node, {"spec": {"unschedulable": True}})
         victims = [
             p.metadata.name

@@ -1,0 +1,35 @@
+# The FULL target architecture: quorum-sync cluster (any 1 of 2 replicas)
+# behind the tuned 2x PgBouncer pooler. Same replica kill, load, and goals
+# as 08-cnpg-replica-down (same group) — replica loss must stay a non-event
+# with the pooler in the path.
+name: 09-cnpg-replica-down-pooled
+technology: postgres-cnpg
+group: replica-resilience
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: pg-pooler
+  clients: {count: 10, mode: persistent}
+  phases:
+    - {duration: 150s, rate: 30/s, mix: {read: 0.4, write: 0.6}}
+
+faults:
+  - at: 60s
+    worker: pod_kill
+    target: {role: replica}
+
+verify:
+  - integrity
+
+goals:
+  - {metric: rto, max: 3s}
+  - {metric: rpo, max: 0}
+  - {metric: availability, min: 99.9%}
+  - {metric: write_latency_p99, max: 150ms}

@@ -146,7 +146,7 @@ class Runner:
 
     def _check_capabilities(self, k8s: ClusterClient) -> None:
         caps = probe(self.context)
-        needs_nodes = any(f.worker == "node_fail" for f in self.spec.faults)
+        needs_nodes = any(f.worker == "node_drain" for f in self.spec.faults)
         if needs_nodes and not caps.multi_node:
             self.events.emit(
                 "capability.warn",
@@ -162,7 +162,7 @@ class Runner:
             if delay > 0:
                 time.sleep(delay)
             worker = get_worker(fault.worker)(k8s, driver, self.namespace, self.events)
-            cleanup = worker.execute(fault.target)
+            cleanup = worker.execute(fault)
             if cleanup:
                 self._cleanups.append(cleanup)
             event = self.events.emit(

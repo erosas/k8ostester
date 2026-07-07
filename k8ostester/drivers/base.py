@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from k8ostester.core.events import EventLog
+from k8ostester.core.exceptions import K8osConfigError, K8osDriverError
 from k8ostester.core.experiment import ExperimentSpec
 from k8ostester.core.k8s import ClusterClient
 
@@ -36,7 +37,7 @@ class TechnologyDriver:
         """Install cluster-level prerequisites (operators, object store).
         Must be idempotent; shared across experiments, not torn down per run."""
         if self.spec.infra:
-            raise NotImplementedError(f"{type(self).__name__} does not support infra")
+            raise K8osConfigError(f"{type(self).__name__} does not support infra")
 
     def deploy(self) -> None:
         """Apply the config under test into the run namespace."""
@@ -49,22 +50,22 @@ class TechnologyDriver:
 
     def topology(self) -> dict[str, Any]:
         """Role → pod mapping for fault targeting (e.g. {'primary': 'pg-1'})."""
-        raise NotImplementedError
+        raise K8osDriverError(f"{type(self).__name__} has no topology resolver")
 
     def run_load(self, run_dir: Path) -> None:
         """Run the experiment's load plan to completion, writing metrics.jsonl
         and journal.jsonl into run_dir."""
-        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+        raise K8osDriverError(f"{type(self).__name__} has no load generator")
 
     def start_load(self, run_dir: Path) -> None:
-        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+        raise K8osDriverError(f"{type(self).__name__} has no load generator")
 
     def wait_load_started(self, timeout: float = 300) -> float:
         """Block until ops are flowing; returns the fault-timeline zero point."""
-        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+        raise K8osDriverError(f"{type(self).__name__} has no load generator")
 
     def wait_load_done(self) -> None:
-        raise NotImplementedError(f"{type(self).__name__} has no load generator")
+        raise K8osDriverError(f"{type(self).__name__} has no load generator")
 
     @property
     def op_records(self) -> list[dict]:
@@ -73,8 +74,8 @@ class TechnologyDriver:
 
     def ensure_backup(self) -> None:
         """Take a base backup now (before load, so PITR can replay forward)."""
-        raise NotImplementedError(f"{type(self).__name__} has no backup support")
+        raise K8osDriverError(f"{type(self).__name__} has no backup support")
 
     def verify(self, check: str, config: dict) -> dict:
         """Run a verify step; returns {check, passed, detail}."""
-        raise NotImplementedError(f"{type(self).__name__} has no '{check}' verification")
+        raise K8osDriverError(f"{type(self).__name__} has no '{check}' verification")

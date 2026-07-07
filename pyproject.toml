@@ -11,6 +11,13 @@ dependencies = [
     "PyYAML>=6.0",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["k8ostester"]
+
 [project.scripts]
 k8ost = "k8ostester.cli:app"
 

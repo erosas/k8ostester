@@ -15,9 +15,9 @@ from kubernetes import client
 
 from k8ostester.core.events import EventLog
 from k8ostester.core.helm import Helm, HelmError
+from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
 from k8ostester.core.k8s import ClusterClient
-
-# Pinned versions of COMMON infra (tech-specific pins live in each driver).
+from k8ostester.core.resources import PACKAGED_RESOURCES
 CHAOS_MESH_CHART_VERSION = "2.8.3"  # network fault engine (Apache 2.0, D16)
 CHAOS_MESH_REPO = "https://charts.chaos-mesh.org"
 
@@ -28,7 +28,7 @@ BACKUP_BUCKET = "backups"
 # framework-owned defaults (shipped in the package); a config repo can
 # override either by placing the same relative path under its own CWD
 # (e.g. infra/chaos-mesh/values.yaml with a different runtime socket)
-_PACKAGED = Path(__file__).parent.parent / "resources" / "infra"
+_PACKAGED = PACKAGED_RESOURCES / "infra"
 
 
 def _infra_path(override: str, packaged: str) -> Path:
@@ -51,7 +51,7 @@ class InfraManager:
             elif entry == "chaos-mesh":
                 self._ensure_chaos_mesh()
             else:
-                raise ValueError(f"not common infra: {entry!r} (does the tech driver handle it?)")
+                raise K8osConfigError(f"not common infra: {entry!r} (does the tech driver handle it?)")
 
     def _ensure_chaos_mesh(self) -> None:
         """Chaos Mesh: the engine behind the network_* fault workers (D16)."""
@@ -102,5 +102,5 @@ class InfraManager:
         )
         # existing bucket is fine — creation is idempotent for our purposes
         if "error" in out.lower() and "already exists" not in out.lower():
-            raise RuntimeError(f"bucket creation failed: {out.strip()}")
+            raise K8osInfraError(f"bucket creation failed: {out.strip()}")
         self.events.emit("infra.seaweedfs", f"bucket '{bucket}' ready")

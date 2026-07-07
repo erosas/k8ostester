@@ -15,6 +15,7 @@ from functools import cached_property
 from pathlib import Path
 
 from kubernetes import client, config
+from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
 
 
 class ClusterClient:
@@ -92,6 +93,18 @@ class ClusterClient:
 
     # -- manifests -----------------------------------------------------------
 
+    def _check_kubectl(self) -> str:
+        kubectl = shutil.which("kubectl")
+        if not kubectl:
+            raise K8osInfraError("kubectl not found on PATH")
+        return kubectl
+
+    def _check_helm(self) -> str:
+        helm = shutil.which("helm")
+        if not helm:
+            raise K8osInfraError("helm not found on PATH")
+        return helm
+
     def apply_manifests(
         self, path: Path, namespace: str, variables: dict[str, str] | None = None
     ) -> str:
@@ -100,9 +113,7 @@ class ClusterClient:
         With `variables`, every ${NAME} occurrence in the YAML text is
         substituted first (used for per-run values like the namespace in
         backup destination paths)."""
-        kubectl = shutil.which("kubectl")
-        if not kubectl:
-            raise RuntimeError("kubectl not found on PATH")
+        kubectl = self._check_kubectl()
         cmd = [kubectl, "apply", "-n", namespace]
         if self.context:
             cmd += ["--context", self.context]
@@ -122,7 +133,7 @@ class ClusterClient:
             cmd, capture_output=True, text=True, timeout=300, input=stdin
         )
         if result.returncode != 0:
-            raise RuntimeError(f"kubectl apply failed:\n{result.stderr.strip()}")
+            raise K8osInfraError(f"kubectl apply failed:\n{result.stderr.strip()}")
         return result.stdout.strip()
 
     def exec_pod(
@@ -134,9 +145,7 @@ class ClusterClient:
         timeout: int = 120,
     ) -> str:
         """Run a command in a pod via kubectl exec; returns stdout."""
-        kubectl = shutil.which("kubectl")
-        if not kubectl:
-            raise RuntimeError("kubectl not found on PATH")
+        kubectl = self._check_kubectl()
         cmd = [kubectl, "exec", "-n", namespace, pod]
         if self.context:
             cmd += ["--context", self.context]
@@ -145,7 +154,7 @@ class ClusterClient:
         cmd += ["--", *command]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         if result.returncode != 0:
-            raise RuntimeError(
+            raise K8osInfraError(
                 f"exec in {pod} failed: {' '.join(command)}\n{result.stderr.strip()}"
             )
         return result.stdout

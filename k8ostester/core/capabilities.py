@@ -47,6 +47,7 @@ class Capabilities(BaseModel):
     snapshot_classes: list[str]
     operators: dict[str, bool]
     helm_version: str | None
+    kubectl_version: str | None
 
     @property
     def worker_count(self) -> int:
@@ -100,6 +101,28 @@ def _helm_version() -> str | None:
     return out.stdout.strip() if out.returncode == 0 else None
 
 
+def _kubectl_version() -> str | None:
+    kubectl = shutil.which("kubectl")
+    if not kubectl:
+        return None
+    out = subprocess.run(
+        [kubectl, "version", "--client", "--short"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    # version --short might be removed in newer kubectl versions, fallback to full version if needed
+    if out.returncode != 0:
+        out = subprocess.run(
+            [kubectl, "version", "--client"], capture_output=True, text=True, timeout=15
+        )
+    if out.returncode == 0:
+        # Client Version: v1.31.1 -> v1.31.1
+        line = out.stdout.splitlines()[0]
+        return line.split(":")[-1].strip()
+    return None
+
+
 def probe(context: str | None = None) -> Capabilities:
     k8s = ClusterClient(context)
     version = k8s.version.get_code()
@@ -125,4 +148,5 @@ def probe(context: str | None = None) -> Capabilities:
         snapshot_classes=_snapshot_classes(k8s) if snapshot_crds else [],
         operators={name: k8s.has_crd(crd) for name, crd in OPERATOR_CRDS.items()},
         helm_version=_helm_version(),
+        kubectl_version=_kubectl_version(),
     )

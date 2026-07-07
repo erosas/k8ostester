@@ -6,7 +6,7 @@ dumb — append during the run, load fully for evaluation afterwards; runs are
 minutes long, not weeks.
 """
 
-from __future__ import annotations
+from k8ostester.core.exceptions import K8osConfigError
 
 import json
 from pathlib import Path
@@ -42,6 +42,6 @@ class MetricStore:
 def percentile(sorted_values: list[float], p: float) -> float:
     """Nearest-rank percentile; values must be pre-sorted."""
     if not sorted_values:
-        raise ValueError("no values")
+        raise K8osConfigError("no values to calculate percentile")
     k = max(0, min(len(sorted_values) - 1, round(p / 100 * len(sorted_values)) - 1))
     return sorted_values[k]

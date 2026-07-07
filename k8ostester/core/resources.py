@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+PACKAGED_RESOURCES = Path(__file__).parent.parent / "resources"
+
 
 def load_resource(path: Path, variables: dict[str, str] | None = None) -> Any:
     text = path.read_text()

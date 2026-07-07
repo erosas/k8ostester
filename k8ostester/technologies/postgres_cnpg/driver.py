@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from k8ostester.core.exceptions import K8osConfigError
 from k8ostester.core.experiment import parse_rate
 from k8ostester.core.helm import Helm, HelmError
 from k8ostester.core.infra import InfraManager
@@ -158,6 +159,40 @@ class CnpgDriver(TechnologyDriver):
         self.wait_load_done()
 
     def start_load(self, run_dir: Path) -> None:
+        """The pgbench runner has no acked-write journal and its clients abort
+        on connection loss — reject experiments that need either, up front."""
+        if self.spec.load and self.spec.load.runner == "pgbench":
+            if self.spec.faults:
+                raise K8osConfigError(
+                    "runner 'pgbench' cannot run fault timelines (pgbench clients abort "
+                    "on connection loss) — use the journal runner for fault experiments"
+                )
+            if len(self.spec.load.phases) != 1:
+                raise K8osConfigError("runner 'pgbench' takes exactly one load phase")
+            if self.spec.load.workers != 1:
+                raise K8osConfigError(
+                    "runner 'pgbench' supports workers: 1 (one pod drives thousands of clients)"
+                )
+            verify_names = {
+                v if isinstance(v, str) else next(iter(v)) for v in self.spec.verify
+            }
+            if bad := verify_names & {"integrity", "pitr"}:
+                raise K8osConfigError(
+                    f"runner 'pgbench' has no acked-write journal — cannot verify: {sorted(bad)}"
+                )
+            for g in self.spec.goals:
+                metric_ok = (
+                    g.metric is None
+                    or g.metric == "tps"
+                    or g.metric.startswith("write_latency_")
+                )
+                check_ok = g.check in (None, "backup")
+                if not (metric_ok and check_ok):
+                    raise K8osConfigError(
+                        f"goal {g.metric or g.check!r} needs the journal runner — "
+                        "pgbench supports tps, write_latency_*, and the backup check"
+                    )
+
         spec = self.spec.load
         assert spec is not None
         if spec.runner == "pgbench":

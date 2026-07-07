@@ -223,6 +223,11 @@ def env_check(
         caps.helm_version or "not found on PATH",
     )
     verdict(
+        caps.kubectl_version is not None,
+        "kubectl",
+        caps.kubectl_version or "not found on PATH",
+    )
+    verdict(
         caps.operators.get("cloudnative-pg", False),
         "cloudnative-pg operator",
         "installed" if caps.operators.get("cloudnative-pg") else "will be installed by postgres experiments",

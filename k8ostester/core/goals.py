@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import re
 
+from k8ostester.core.exceptions import K8osConfigError
 from k8ostester.core.experiment import GoalSpec, parse_duration, parse_rate
 from k8ostester.core.metrics import percentile
 
 # how far around a fault we look for its outage gap
-FAULT_WINDOW_BEFORE_S = 30
-FAULT_WINDOW_AFTER_S = 180
+# (RTO calculation: we find the largest gap between successful writes
+# that starts within this window of the fault injection time)
+RTO_SCAN_WINDOW_BEFORE_S = 30
+RTO_SCAN_WINDOW_AFTER_S = 180
 
 _LATENCY_RE = re.compile(r"^(write|read|connect)_latency_p(\d{2})$")
 
@@ -28,7 +31,7 @@ def _threshold(goal: GoalSpec) -> tuple[float, str]:
     raw = goal.max if goal.max is not None else goal.min
     kind = "max" if goal.max is not None else "min"
     if raw is None:
-        raise ValueError(f"goal {goal.metric!r} needs 'max' or 'min'")
+        raise K8osConfigError(f"goal {goal.metric!r} needs 'max' or 'min'")
     if isinstance(raw, (int, float)):
         return float(raw), kind
     s = str(raw).strip()
@@ -58,7 +61,7 @@ def _rto(ops: list[dict], fault_events: list[dict]) -> tuple[float, str]:
         ft = fault["ts"]
         starts = [
             i for i, t in enumerate(ts)
-            if ft - FAULT_WINDOW_BEFORE_S <= t <= ft + FAULT_WINDOW_AFTER_S
+            if ft - RTO_SCAN_WINDOW_BEFORE_S <= t <= ft + RTO_SCAN_WINDOW_AFTER_S
         ]
         if not starts:
             return float("inf"), "no successful writes around the fault — total outage"
@@ -107,7 +110,7 @@ def evaluate_goals(
         elif metric == "rpo":
             integrity = next((v for v in verifications if v["check"] == "integrity"), None)
             if integrity is None:
-                raise ValueError("rpo goal requires 'integrity' in verify steps")
+                raise K8osConfigError("rpo goal requires 'integrity' in verify steps")
             value = float(integrity.get("missing", 0 if integrity["passed"] else float("inf")))
             detail = integrity["detail"]
             display = f"{int(value)} lost writes"
@@ -179,7 +182,7 @@ def evaluate_goals(
             detail = f"{sum(not r['ok'] for r in pool)}/{len(pool)} ops failed"
             display = f"{value:.2f}%"
         else:
-            raise ValueError(f"unknown goal metric {metric!r}")
+            raise K8osConfigError(f"unknown goal metric {metric!r}")
 
         passed = value <= limit if kind == "max" else value >= limit
         unit = {"rto": "s", "rpo": "", "tps": "/s", "downtime_total": "s"}.get(

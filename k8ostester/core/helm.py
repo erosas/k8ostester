@@ -9,15 +9,17 @@ import subprocess
 from pathlib import Path
 
 
-class HelmError(RuntimeError):
+class HelmError(Exception):
     pass
+
+
+from k8ostester.core.exceptions import K8osInfraError
 
 
 class Helm:
     def __init__(self, context: str | None = None):
-        self.helm = shutil.which("helm")
-        if not self.helm:
-            raise HelmError("helm not found on PATH (brew install helm)")
+        from k8ostester.core.k8s import ClusterClient
+        self.helm = ClusterClient(context)._check_helm()
         self.context = context
 
     def _run(self, *args: str, timeout: int = 600) -> str:

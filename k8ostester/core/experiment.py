@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
+from k8ostester.core.exceptions import K8osConfigError
 
 _DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)(ms|s|m|h)$")
 _DURATION_UNITS = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
@@ -116,7 +117,7 @@ class GoalSpec(BaseModel):
     @classmethod
     def _metric_or_check(cls, v: str | None, info) -> str | None:
         if v is None and info.data.get("metric") is None:
-            raise ValueError("goal needs either 'metric' or 'check'")
+            raise K8osConfigError("goal needs either 'metric' or 'check'")
         return v
 
 
@@ -134,34 +135,6 @@ class ExperimentSpec(BaseModel):
 
     # populated by the loader; excluded from (de)serialization of the yaml itself
     dir: Path = Field(default=Path("."), exclude=True)
-
-    @model_validator(mode="after")
-    def _runner_supports_goals(self) -> "ExperimentSpec":
-        """The pgbench runner has no acked-write journal and its clients abort
-        on connection loss — reject experiments that need either, up front."""
-        if not self.load or self.load.runner != "pgbench":
-            return self
-        if self.faults:
-            raise ValueError(
-                "runner 'pgbench' cannot run fault timelines (pgbench clients abort "
-                "on connection loss) — use the journal runner for fault experiments"
-            )
-        if len(self.load.phases) != 1:
-            raise ValueError("runner 'pgbench' takes exactly one load phase")
-        if self.load.workers != 1:
-            raise ValueError("runner 'pgbench' supports workers: 1 (one pod drives thousands of clients)")
-        verify_names = {v if isinstance(v, str) else next(iter(v)) for v in self.verify}
-        if bad := verify_names & {"integrity", "pitr"}:
-            raise ValueError(f"runner 'pgbench' has no acked-write journal — cannot verify: {sorted(bad)}")
-        for g in self.goals:
-            metric_ok = g.metric is None or g.metric == "tps" or g.metric.startswith("write_latency_")
-            check_ok = g.check in (None, "backup")
-            if not (metric_ok and check_ok):
-                raise ValueError(
-                    f"goal {g.metric or g.check!r} needs the journal runner — "
-                    "pgbench supports tps, write_latency_*, and the backup check"
-                )
-        return self
 
     @property
     def manifests_dir(self) -> Path:

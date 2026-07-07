@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from k8ostester.core.capabilities import probe
+from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
 from k8ostester.core.events import EventLog
 from k8ostester.core.experiment import ExperimentSpec
 from k8ostester.core.goals import evaluate_goals
@@ -109,13 +110,13 @@ class Runner:
                 # timeline and pauses the cluster VM — verdicts would be fiction.
                 hole = (time.time() - wall0) - (time.monotonic() - mono0)
                 if hole > 5:
-                    raise RuntimeError(
+                    raise K8osInfraError(
                         f"host slept ~{hole:.0f}s during the measurement window — "
                         "verdicts would be invalid. Re-run with the machine awake "
                         "(macOS: prefix with 'caffeinate -i')"
                     )
             elif self.spec.faults:
-                raise ValueError("faults require a load plan (the timeline is relative to load start)")
+                raise K8osConfigError("faults require a load plan (the timeline is relative to load start)")
 
             for step in self.spec.verify:
                 name = step if isinstance(step, str) else next(iter(step))
@@ -166,7 +167,7 @@ class Runner:
             for ns in k8s.core.list_namespace(label_selector=RUN_LABEL).items
         ]
         if others and not self.allow_concurrent:
-            raise RuntimeError(
+            raise K8osInfraError(
                 f"another experiment already occupies this cluster: {', '.join(others)} "
                 "— wait for it (or delete a --keep namespace), or pass --allow-concurrent "
                 "if you accept cross-contaminated results"

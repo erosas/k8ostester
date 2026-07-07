@@ -109,17 +109,30 @@ class Pool:
         self.slots = asyncio.Semaphore(size)
 
     async def acquire(self):
+        """Bounded end-to-end by ACQUIRE_TIMEOUT — after an outage the idle
+        stack is full of dead connections and each failed validation costs up
+        to VALIDATE_TIMEOUT; without a total deadline one acquire could chew
+        through dozens of them and stall a client far past the phase end."""
         t0 = time.time()
+        deadline = t0 + ACQUIRE_TIMEOUT
         try:
             await asyncio.wait_for(self.slots.acquire(), ACQUIRE_TIMEOUT)
         except TimeoutError:
             record("connect", self.phase_i, t0, False, err="PoolTimeout")
             return None
         while self.idle:
+            if time.time() >= deadline:
+                self.slots.release()
+                record("connect", self.phase_i, t0, False, err="PoolTimeout")
+                return None
             conn, last_used = self.idle.pop()
             if time.time() - last_used < ALIVE_BYPASS or await self._valid(conn):
                 return conn
             await safe_close(conn)
+        if time.time() >= deadline:
+            self.slots.release()
+            record("connect", self.phase_i, t0, False, err="PoolTimeout")
+            return None
         conn = await connect(self.phase_i)  # journals the real connect
         if conn is None:
             self.slots.release()
@@ -227,8 +240,7 @@ def shard(phase):
     return sharded
 
 
-async def run_phase(i, phase):
-    deadline = time.time() + phase["duration_s"]
+async def run_phase(i, phase, deadline):
     pool = Pool(phase["clients"], i) if phase["mode"] == "persistent" else None
     tasks = [
         asyncio.create_task(
@@ -241,7 +253,7 @@ async def run_phase(i, phase):
     # bounded: one straggler must not stall the phase plan (the instrument
     # once sat 150s in gather() and graphed it as a database outage)
     grace = ACQUIRE_TIMEOUT + OP_TIMEOUT + 5
-    done, pending = await asyncio.wait(tasks, timeout=phase["duration_s"] + grace)
+    done, pending = await asyncio.wait(tasks, timeout=max(deadline - time.time(), 0) + grace)
     for t in pending:
         t.cancel()
     if pending:
@@ -265,16 +277,33 @@ async def main():
     await conn.close()
     out(kind="start", t=time.time(), phases=len(PHASES))
 
+    # phases start at their SCHEDULED offsets, not when the previous phase's
+    # teardown finishes: a straggler stuck in cancellation (e.g. psycopg trying
+    # to cancel a query on a partitioned server) must wind down concurrently
+    # with the next phase's traffic, or the demand gap graphs as a fake outage
+    t_start = time.time()
+    offset, phase_tasks = 0.0, []
     for i, phase in enumerate(PHASES):
-        local = shard(phase)
-        if INDEX == 0:  # one pod narrates the (global) plan
-            out(kind="phase", phase=i, t=time.time(), **phase)
-        if not local["rate"] or not local["clients"]:
-            await asyncio.sleep(local["duration_s"])  # pause phase / no slice
-            continue
-        await run_phase(i, local)
+        phase_tasks.append(
+            asyncio.create_task(run_phase_at(t_start + offset, i, phase))
+        )
+        offset += phase["duration_s"]
+    await asyncio.gather(*phase_tasks)
 
     out(kind="done", t=time.time(), max_id=known_max_id)
+
+
+async def run_phase_at(start_at, i, phase):
+    delay = start_at - time.time()
+    if delay > 0:
+        await asyncio.sleep(delay)
+    local = shard(phase)
+    if INDEX == 0:  # one pod narrates the (global) plan
+        out(kind="phase", phase=i, t=time.time(), **phase)
+    if not local["rate"] or not local["clients"]:
+        await asyncio.sleep(local["duration_s"])  # pause phase / no slice
+        return
+    await run_phase(i, local, start_at + local["duration_s"])
 
 
 if __name__ == "__main__":

@@ -358,8 +358,8 @@ A custom run-browser UI stays deferred — nothing in the design blocks it.
 - **Investigate: single-instance CNPG lost 12 acked writes under `kill -9`** (cnpg-single run
   20260705-232309). Suspects: storage-stack fsync honesty (local-path in the Docker Desktop VM)
   vs commit settings. Sync-rep HA lost none, which points at local storage.
-- Availability measured by op-count is soft when clients back off during outages (few attempts
-  → few failures). Consider a time-bucketed availability metric (fraction of seconds with ≥1
-  successful op). **Now urgent:** with pooled clients the effect is total — arm 10's re-run
-  scored 100.00% availability across a 40.6s outage (clients that can't get a connection never
-  attempt an op; every failure lands in connect_error_rate instead).
+- ~~Availability measured by op-count is soft when clients back off during outages~~
+  **Resolved (D18):** the `uptime` goal metric (% of seconds with ≥1 successful op) replaces
+  op-count availability in every fault-bearing experiment; op-count availability remains for
+  fault-free load tests. Partition-class SLOs recalibrated alongside (rto ≤ 25s, uptime ≥ 88%,
+  connect_error_rate dropped — a whole-run ratio only counts the outage retry storm).

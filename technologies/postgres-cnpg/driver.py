@@ -103,9 +103,9 @@ class CnpgDriver(TechnologyDriver):
         )
 
     def _wait_cluster_healthy(self, name: str, timeout: float) -> None:
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         last = ""
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             status = self._cluster(name).get("status", {})
             phase = status.get("phase", "(no status)")
             ready = status.get("readyInstances", 0)
@@ -255,8 +255,8 @@ class CnpgDriver(TechnologyDriver):
         """Block until the loadgen emits its 'start' record (schema created,
         ops flowing). Returns the framework-clock timestamp — the zero point
         for the fault timeline."""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
             if status.failed:
                 raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
@@ -273,8 +273,8 @@ class CnpgDriver(TechnologyDriver):
         raise TimeoutError("loadgen did not start emitting ops in time")
 
     def wait_load_done(self) -> None:
-        deadline = time.time() + self._load_total_s + 300  # pull + pip headroom
-        while time.time() < deadline:
+        deadline = time.monotonic() + self._load_total_s + 300  # pull + pip headroom
+        while time.monotonic() < deadline:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
             if (status.succeeded or 0) >= self._workers:
                 break
@@ -424,8 +424,8 @@ class CnpgDriver(TechnologyDriver):
                 {"BACKUP_NAME": self._backup_name, "CLUSTER_NAME": self.cluster_name},
             ),
         )
-        deadline = time.time() + 600
-        while time.time() < deadline:
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
             backup = self.k8s.custom.get_namespaced_custom_object(
                 CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
             )

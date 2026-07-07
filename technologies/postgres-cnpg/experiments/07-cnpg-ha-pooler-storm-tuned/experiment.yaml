@@ -35,5 +35,5 @@ goals:
   - {metric: rto, max: 10s}
   - {metric: rpo, max: 0}
   - {metric: connect_error_rate, max: 1%}
-  - {metric: availability, min: 98%}
+  - {metric: uptime, min: 98%}
   - {metric: write_latency_p99, max: 200ms, window: steady-state}

@@ -112,6 +112,19 @@ report graphs are runner-agnostic. Future drivers follow the pattern (Kafka:
 `kafka-producer-perf-test`; ES: rally) — journaled runner for fault/loss experiments,
 ecosystem benchmark for throughput credibility.
 
+## D18 — SLOs are calibrated per fault class; uptime replaces op-count availability under faults
+Goals must be achievable by a well-tuned config or they measure nothing: the partition arms
+inherited the pod_kill arms' SLOs (rto 10s, connect_error_rate 1%) and every config failed them,
+including the best possible one. Partition detection via the operator has a floor (~15-20s tuned:
+readiness probe expiry + status propagation + promotion), so partition-class goals are rto ≤ 25s
+and uptime ≥ 88%; connect_error_rate is dropped there because a whole-run ratio just counts the
+retry storm during the outage (80-90% regardless of config — no discrimination). **uptime** is the
+time-bucketed availability from plan §9: % of seconds with ≥1 successful op. It replaces op-count
+availability in every fault-bearing experiment because pooled clients that cannot get a connection
+attempt nothing — op-count availability scored 100.00% across a 40.6s outage. Op-count
+availability remains for fault-free load tests (04/05), where attempts never stop. Historical
+runs keep the verdicts of the goals they ran under; recalibration applies from re-run onward.
+
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
 Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
 in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap

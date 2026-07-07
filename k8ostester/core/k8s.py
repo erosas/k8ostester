@@ -77,8 +77,10 @@ class ClusterClient:
             raise
         if not wait:
             return
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        # monotonic: wall-clock deadlines get bankrupted when the machine
+        # sleeps mid-wait (two runs were marked error by exactly this)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             try:
                 self.core.read_namespace(name)
             except client.ApiException as e:
@@ -161,7 +163,7 @@ class ClusterClient:
     def wait_workloads_ready(self, namespace: str, timeout: float = 300) -> None:
         """Wait until every Deployment and StatefulSet in the namespace has all
         desired replicas ready. No-op if the namespace has neither."""
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         while True:
             pending = []
             for d in self.apps.list_namespaced_deployment(namespace).items:
@@ -174,7 +176,7 @@ class ClusterClient:
                     pending.append(f"statefulset/{s.metadata.name}")
             if not pending:
                 return
-            if time.time() > deadline:
+            if time.monotonic() > deadline:
                 raise TimeoutError(f"not ready after {timeout}s: {', '.join(pending)}")
             time.sleep(2)
 

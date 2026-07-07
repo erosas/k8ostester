@@ -99,10 +99,21 @@ class Runner:
                 driver.ensure_backup()
 
             if self.spec.load and self.spec.load.phases:
+                wall0, mono0 = time.time(), time.monotonic()
                 driver.start_load(self.run_dir)
                 t0 = driver.wait_load_started()
                 self._inject_faults(k8s, driver, t0, result)
                 driver.wait_load_done()
+                # host suspend detector: wall advances through a sleep, monotonic
+                # doesn't. A sleep inside the measurement window shifts the fault
+                # timeline and pauses the cluster VM — verdicts would be fiction.
+                hole = (time.time() - wall0) - (time.monotonic() - mono0)
+                if hole > 5:
+                    raise RuntimeError(
+                        f"host slept ~{hole:.0f}s during the measurement window — "
+                        "verdicts would be invalid. Re-run with the machine awake "
+                        "(macOS: prefix with 'caffeinate -i')"
+                    )
             elif self.spec.faults:
                 raise ValueError("faults require a load plan (the timeline is relative to load start)")
 

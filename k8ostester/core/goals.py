@@ -116,6 +116,20 @@ def evaluate_goals(
             value = 100.0 * sum(r["ok"] for r in considered) / len(considered) if considered else 0.0
             detail = f"{sum(r['ok'] for r in considered)}/{len(considered)} ops succeeded"
             display = f"{value:.2f}%"
+        elif metric == "uptime":
+            # time-bucketed availability: fraction of seconds (over the whole
+            # op stream) with ≥1 successful op. Immune to the op-count metric's
+            # blindspot — pooled clients that can't get a connection attempt
+            # nothing, which op-count availability scores as 100% (plan §9)
+            if not ops:
+                value, detail = 0.0, "no ops recorded"
+            else:
+                t0 = min(r["t"] for r in ops)
+                total = int(max(r["t"] for r in ops) - t0) + 1
+                up = len({int(r["t"] - t0) for r in ops if r["ok"]})
+                value = 100.0 * up / total
+                detail = f"{up}/{total} seconds had ≥1 successful op"
+            display = f"{value:.2f}%"
         elif m := _LATENCY_RE.match(metric):
             op_kind, pct = m.group(1), int(m.group(2))
             pool = [r for r in ops if r["op"] == op_kind and r["ok"]]

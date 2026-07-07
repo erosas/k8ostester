@@ -23,9 +23,17 @@ CHAOS_MESH_REPO = "https://charts.chaos-mesh.org"
 
 INFRA_NAMESPACE = "k8ost-infra"
 CHAOS_NAMESPACE = "k8ost-chaos"
-SEAWEEDFS_MANIFESTS = Path("infra/seaweedfs/manifests")
-CHAOS_MESH_DIR = Path("infra/chaos-mesh")
 BACKUP_BUCKET = "backups"
+
+# framework-owned defaults (shipped in the package); a config repo can
+# override either by placing the same relative path under its own CWD
+# (e.g. infra/chaos-mesh/values.yaml with a different runtime socket)
+_PACKAGED = Path(__file__).parent.parent / "resources" / "infra"
+
+
+def _infra_path(override: str, packaged: str) -> Path:
+    local = Path(override)
+    return local.resolve() if local.exists() else _PACKAGED / packaged
 
 
 class InfraManager:
@@ -47,26 +55,20 @@ class InfraManager:
 
     def _ensure_chaos_mesh(self) -> None:
         """Chaos Mesh: the engine behind the network_* fault workers (D16)."""
-        chaos_dir = CHAOS_MESH_DIR.resolve()
-        if not chaos_dir.is_dir():
-            raise FileNotFoundError(f"{chaos_dir} not found — run from the repository root")
+        values = _infra_path("infra/chaos-mesh/values.yaml", "chaos-mesh/values.yaml")
         self.events.emit("infra.chaos-mesh", f"ensuring chaos-mesh {CHAOS_MESH_CHART_VERSION}")
         helm = Helm(self.k8s.context)
         helm.repo_add("chaos-mesh", CHAOS_MESH_REPO)
         helm.upgrade_install(
             "chaos-mesh", "chaos-mesh/chaos-mesh", CHAOS_NAMESPACE,
-            version=CHAOS_MESH_CHART_VERSION, values_file=chaos_dir / "values.yaml",
+            version=CHAOS_MESH_CHART_VERSION, values_file=values,
         )
         self.events.emit("infra.chaos-mesh", "chaos-mesh ready")
 
     def _ensure_seaweedfs(self) -> None:
         self.events.emit("infra.seaweedfs", "ensuring SeaweedFS object store")
         self._ensure_namespace(INFRA_NAMESPACE)
-        manifests = SEAWEEDFS_MANIFESTS.resolve()
-        if not manifests.is_dir():
-            raise FileNotFoundError(
-                f"{manifests} not found — run from the repository root"
-            )
+        manifests = _infra_path("infra/seaweedfs", "seaweedfs")
         self.k8s.apply_manifests(manifests, INFRA_NAMESPACE)
         self.k8s.wait_workloads_ready(INFRA_NAMESPACE, timeout=300)
         self._ensure_bucket(BACKUP_BUCKET)

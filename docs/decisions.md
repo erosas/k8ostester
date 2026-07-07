@@ -141,6 +141,18 @@ experiences is the verdict that matters, and the journal already captures it. `i
 the `monitoring` infra entry and `k8ost dashboard` are gone; live-view during a run, if ever
 needed, is whatever observability the target cluster already has.
 
+## D20 — Built-in technologies ship inside the framework; a config repo is just experiments
+Evolves D15. The CNPG driver, loadgen (+Dockerfile), job/backup/PITR templates and the common
+infra defaults (chaos-mesh values, SeaweedFS manifests) live inside the `k8ostester` package and
+resolve by technology name from the built-in registry — so a user's entire contribution is a
+directory with `experiment.yaml` + `manifests/`, runnable from anywhere with the framework
+installed. Two escape hatches survive: a `driver.py` found by walking up from the experiment
+directory still overrides the built-in (custom/forked drivers live beside their experiments,
+D15's original mechanism), and an `infra/...` path under the CWD overrides the packaged infra
+defaults (e.g. a different containerd socket for chaos-mesh). The repo's
+`technologies/<tech>/experiments/` directories remain as the framework's example and regression
+suite.
+
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window
 Fault timestamps live on the framework clock, op records on the loadgen pod's clock. Mixing them
 in arithmetic would bake host↔pod clock skew into RTO. So the evaluator finds the largest gap

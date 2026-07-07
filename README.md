@@ -30,6 +30,6 @@ for reporting.
 ## Layout
 
 - `k8ostester/` — the framework core (CLI `k8ost`): runner, workers, goals, reports, common infra
-- `technologies/<tech>/` — each technology owns its `driver.py` and its `experiments/` (D15)
+- `technologies/<tech>/experiments/` — the example/regression suite; built-in drivers ship inside `k8ostester/` (D20), so your own config repo needs only experiment directories
 - `infra/` — common cluster prerequisites (object store, monitoring)
 - `results/` — per-run artifacts (gitignored)

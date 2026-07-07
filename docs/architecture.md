@@ -60,16 +60,14 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, run_load, ensure_backup, verify |
 | `drivers/__init__.py` | driver discovery (D15): nearest `driver.py` above the experiment dir, loaded dynamically; built-ins as fallback |
 | `drivers/generic.py` | built-in deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
-| `technologies/postgres-cnpg/driver.py` | tech-owned CNPG driver: operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
-| `technologies/postgres-cnpg/loadgen.py` | the journal load runner (ships via ConfigMap, D12): HikariCP-style pooled clients, bounded timeouts, `load.workers` Indexed pod pool; `load.image`/`load.pull_secret` for private clusters (prebuilt via `loadgen.Dockerfile`) |
-| `technologies/postgres-cnpg/resources/pgbench-job.yaml` | the pgbench load runner (D17): `load.runner: pgbench` for industry-comparable tps on tuning experiments; per-transaction log parsed into the shared op-record stream |
-| `technologies/<tech>/experiments/` | each technology's experiments live beside its driver (D15); directories (and `name:`) carry a numeric prefix (`01-cnpg-baseline`, …) so the progression reads in order — dashes, not underscores, because the name becomes part of the run namespace (DNS label) |
+| `k8ostester/technologies/postgres_cnpg/driver.py` | built-in CNPG driver (D20): operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
+| `k8ostester/technologies/postgres_cnpg/loadgen.py` | the journal load runner (ships via ConfigMap, D12): HikariCP-style pooled clients, bounded timeouts, `load.workers` Indexed pod pool; `load.image`/`load.pull_secret` for private clusters (prebuilt via `loadgen.Dockerfile`) |
+| `k8ostester/technologies/postgres_cnpg/resources/` | pgbench runner Job (D17), loadgen Job, backup + PITR templates |
+| `technologies/<tech>/experiments/` | the framework's example/regression experiment suite; a config repo holds only such directories (D20) — numeric prefixes order the progression; a custom `driver.py` beside experiments overrides the built-in (D15) |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
 | `workers/` | fault workers: `pod_kill` (grace 0), `process_kill` (kill -9 PID 1 — in-place container crash, scoped stand-in for node loss), `node_drain` (cordon + evict run pods, uncordon cleanup), `network_partition`/`network_loss`/`network_delay` (NetworkChaos CRs via Chaos Mesh, D16); targets resolve at injection time via driver topology |
 | `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |
-| `infra/seaweedfs/` | SeaweedFS manifests (S3 store for Barman backups/WAL, D6/D7) |
-| `infra/chaos-mesh/` | Chaos Mesh 2.8.3 values (containerd socket, dashboard/DNS server off) — engine for the `network_*` workers (D16), installed via the `chaos-mesh` infra entry into `k8ost-chaos` |
-| `experiments/` | experiment directories (the configs being validated) |
+| `k8ostester/resources/infra/` | packaged common-infra defaults: SeaweedFS manifests (D6/D7), chaos-mesh 2.8.3 values (D16) — overridable via `infra/...` under the CWD (D20) |
 
 ## The driver contract
 

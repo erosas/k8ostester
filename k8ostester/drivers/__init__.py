@@ -1,9 +1,10 @@
 """Driver resolution.
 
-Technologies own their drivers (D15): a tech directory contains `driver.py`
-plus its experiments, so drivers are discovered by walking up from the
-experiment directory. Built-ins (generic) remain in the core registry as a
-fallback for experiments without a tech-local driver.
+Built-in technologies ship inside the framework (D20) and are resolved by
+name from the registry — a config repo needs nothing but experiment
+directories. A `driver.py` found by walking up from the experiment directory
+still takes precedence (D15's escape hatch for custom/forked drivers living
+beside their experiments).
 """
 
 from __future__ import annotations
@@ -14,9 +15,11 @@ from pathlib import Path
 
 from k8ostester.drivers.base import TechnologyDriver
 from k8ostester.drivers.generic import GenericDriver
+from k8ostester.technologies.postgres_cnpg.driver import CnpgDriver
 
 _BUILTINS: dict[str, type[TechnologyDriver]] = {
     "generic": GenericDriver,
+    "postgres-cnpg": CnpgDriver,
 }
 
 

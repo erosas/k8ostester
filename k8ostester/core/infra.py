@@ -1,4 +1,4 @@
-"""COMMON cluster prerequisites (object store, monitoring).
+"""COMMON cluster prerequisites (object store).
 
 Installed idempotently before a run, never torn down per run (D8). Core only
 owns infra any technology can use; technology-specific prerequisites (e.g. the

@@ -22,7 +22,6 @@ k8ost env check                              # what can this cluster do?
 k8ost run technologies/postgres-cnpg/experiments/02-cnpg-single
 k8ost runs                                   # list recorded runs
 k8ost report --group pooling --open          # comparison graphs for a run group
-k8ost dashboard                              # live metrics (Perses; needs monitoring infra)
 ```
 
 Runs write artifacts to `results/<experiment>/<run-id>/` (events timeline, journal, metrics,
@@ -33,5 +32,5 @@ for reporting.
 
 - `k8ostester/` — the framework core (CLI `k8ost`): runner, workers, goals, reports, common infra
 - `technologies/<tech>/experiments/` — the example/regression suite; built-in drivers ship inside `k8ostester/` (D20), so your own config repo needs only experiment directories
-- `infra/` — common cluster prerequisites (object store, monitoring)
+- `infra/` — common cluster prerequisites (object store)
 - `results/` — per-run artifacts (gitignored)

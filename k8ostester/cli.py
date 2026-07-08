@@ -232,11 +232,6 @@ def env_check(
         "cloudnative-pg operator",
         "installed" if caps.operators.get("cloudnative-pg") else "will be installed by postgres experiments",
     )
-    verdict(
-        caps.operators.get("prometheus-operator", False),
-        "monitoring stack",
-        "installed" if caps.operators.get("prometheus-operator") else "install via infra/monitoring (phase 4)",
-    )
     console.print()
 
 

@@ -13,6 +13,8 @@ backup/PITR, and get a pass/fail verdict per goal.
 
 ## Quick start
 
+Requires Python >= 3.14.
+
 ```bash
 uv pip install -e . -p .venv/bin/python
 

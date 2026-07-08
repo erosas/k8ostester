@@ -117,7 +117,7 @@ class Pool:
         deadline = t0 + ACQUIRE_TIMEOUT
         try:
             await asyncio.wait_for(self.slots.acquire(), ACQUIRE_TIMEOUT)
-        except TimeoutError:
+        except (asyncio.TimeoutError, TimeoutError):
             record("connect", self.phase_i, t0, False, err="PoolTimeout")
             return None
         while self.idle:

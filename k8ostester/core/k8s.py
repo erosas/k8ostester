@@ -13,9 +13,35 @@ import subprocess
 import time
 from functools import cached_property
 from pathlib import Path
+from typing import Callable, TypeVar
 
 from kubernetes import client, config
 from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
+
+T = TypeVar("T")
+
+
+def wait_until(
+    check: Callable[[], T],
+    timeout: float,
+    interval: float = 2.0,
+    desc: str | Callable[[], str] = "condition not met",
+) -> T:
+    """Poll `check` until it returns a truthy value, which is then returned.
+
+    Deadlines use time.monotonic: wall-clock deadlines get bankrupted when the
+    machine sleeps mid-wait (two runs were marked error by exactly this).
+    On timeout raises TimeoutError from `desc` (a string or a callable, for
+    messages that need the last observed state)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        result = check()
+        if result:
+            return result
+        if time.monotonic() >= deadline:
+            msg = desc() if callable(desc) else desc
+            raise TimeoutError(f"{msg} after {timeout}s")
+        time.sleep(interval)
 
 
 class ClusterClient:
@@ -78,18 +104,17 @@ class ClusterClient:
             raise
         if not wait:
             return
-        # monotonic: wall-clock deadlines get bankrupted when the machine
-        # sleeps mid-wait (two runs were marked error by exactly this)
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+
+        def gone() -> bool:
             try:
                 self.core.read_namespace(name)
+                return False
             except client.ApiException as e:
                 if e.status == 404:
-                    return
+                    return True
                 raise
-            time.sleep(2)
-        raise TimeoutError(f"namespace {name} still terminating after {timeout}s")
+
+        wait_until(gone, timeout, desc=f"namespace {name} still terminating")
 
     # -- manifests -----------------------------------------------------------
 
@@ -172,9 +197,10 @@ class ClusterClient:
     def wait_workloads_ready(self, namespace: str, timeout: float = 300) -> None:
         """Wait until every Deployment and StatefulSet in the namespace has all
         desired replicas ready. No-op if the namespace has neither."""
-        deadline = time.monotonic() + timeout
-        while True:
-            pending = []
+        pending: list[str] = []
+
+        def all_ready() -> bool:
+            pending.clear()
             for d in self.apps.list_namespaced_deployment(namespace).items:
                 desired = d.spec.replicas or 0
                 if (d.status.ready_replicas or 0) < desired:
@@ -183,11 +209,9 @@ class ClusterClient:
                 desired = s.spec.replicas or 0
                 if (s.status.ready_replicas or 0) < desired:
                     pending.append(f"statefulset/{s.metadata.name}")
-            if not pending:
-                return
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"not ready after {timeout}s: {', '.join(pending)}")
-            time.sleep(2)
+            return not pending
+
+        wait_until(all_ready, timeout, desc=lambda: f"not ready: {', '.join(pending)}")
 
 
 def available_contexts() -> tuple[list[str], str | None]:

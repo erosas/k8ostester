@@ -2,8 +2,10 @@ import pytest
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch, ANY
+from k8ostester.core.events import EventLog
+from k8ostester.core.exceptions import K8osConfigError, K8osInfraError
 from k8ostester.core.runner import Runner, RunResult
-from k8ostester.core.experiment import ExperimentSpec, LoadSpec, FaultSpec, ClusterSpec
+from k8ostester.core.experiment import ExperimentSpec, GoalSpec, LoadSpec, FaultSpec, ClusterSpec
 
 @pytest.fixture
 def dummy_spec(tmp_path):
@@ -106,6 +108,125 @@ def test_runner_keep_namespace(mock_probe, mock_get_driver, mock_k8s_cls, dummy_
     runner.run()
     
     mock_k8s.delete_namespace.assert_not_called()
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_verify_and_goals(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+    dummy_spec.verify = ["integrity", {"pitr": {"anchor": "pause"}}]
+    dummy_spec.goals = [GoalSpec(metric="availability", min="50%")]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_driver = mock_get_driver.return_value.return_value
+    mock_driver.verify.return_value = {"check": "integrity", "passed": True, "detail": "all good"}
+    mock_driver.op_records = [{"op": "write", "ok": True, "t": 1.0}]
+
+    res = Runner(dummy_spec, results_root=tmp_path).run()
+
+    assert res.status == "passed"
+    mock_driver.verify.assert_any_call("integrity", {})
+    mock_driver.verify.assert_any_call("pitr", {"anchor": "pause"})  # config dict form
+    assert res.goals[0]["passed"] is True
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_failed_verification_fails_run(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+    dummy_spec.verify = ["integrity"]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_driver = mock_get_driver.return_value.return_value
+    mock_driver.verify.return_value = {"check": "integrity", "passed": False, "detail": "2 writes lost"}
+
+    res = Runner(dummy_spec, results_root=tmp_path).run()
+    assert res.status == "failed"
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_backup_taken_before_load(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+    dummy_spec.verify = ["backup"]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_driver = mock_get_driver.return_value.return_value
+    mock_driver.verify.return_value = {"check": "backup", "passed": True, "detail": "ok"}
+
+    Runner(dummy_spec, results_root=tmp_path).run()
+    mock_driver.ensure_backup.assert_called_once()
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_faults_require_load(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+    dummy_spec.faults = [FaultSpec(at="0s", worker="pod_kill", target={"pod": "x"})]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+
+    with pytest.raises(K8osConfigError, match="faults require a load plan"):
+        Runner(dummy_spec, results_root=tmp_path).run()
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_fault_cleanup_failure_is_logged_not_fatal(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path, fake_clock):
+    dummy_spec.load = LoadSpec(phases=[{"duration": "1s", "rate": "10/s"}])
+    # at 1s from load start: the runner sleeps up to the fault offset
+    dummy_spec.faults = [FaultSpec(at="1s", worker="pod_kill", target={"pod": "x"})]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_driver = mock_get_driver.return_value.return_value
+    mock_driver.wait_load_started.return_value = time.time()
+
+    def bad_cleanup():
+        raise RuntimeError("uncordon failed")
+
+    with patch("k8ostester.core.runner.get_worker") as mock_get_worker:
+        mock_get_worker.return_value.return_value.execute.return_value = bad_cleanup
+        res = Runner(dummy_spec, results_root=tmp_path).run()
+
+    assert res.status == "passed"  # cleanup failure must not fail the verdict
+    events = EventLog.read(res.run_dir / "events.jsonl")
+    assert any(e["type"] == "teardown.error" for e in events)
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_warns_single_node_for_node_faults(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+    dummy_spec.faults = [FaultSpec(at="0s", worker="node_drain", target={"node_of": "primary"})]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_probe.return_value.multi_node = False
+    mock_probe.return_value.worker_count = 1
+
+    runner_obj = Runner(dummy_spec, results_root=tmp_path)
+    with pytest.raises(K8osConfigError):  # faults still need a load plan
+        runner_obj.run()
+
+    events = EventLog.read(runner_obj.run_dir / "events.jsonl")
+    assert any(e["type"] == "capability.warn" for e in events)
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_detects_host_suspend(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path, fake_clock):
+    """Wall clock advancing past monotonic during the measurement window means
+    the host slept — the verdict would be fiction, so the run errors out."""
+    dummy_spec.load = LoadSpec(phases=[{"duration": "1s", "rate": "10/s"}])
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_driver = mock_get_driver.return_value.return_value
+    mock_driver.wait_load_started.return_value = fake_clock.time()
+    mock_driver.wait_load_done.side_effect = lambda: fake_clock.suspend(10)
+
+    with pytest.raises(K8osInfraError, match="host slept"):
+        Runner(dummy_spec, results_root=tmp_path).run()
 
 def test_runner_error_handling(dummy_spec, tmp_path):
     with patch("k8ostester.core.runner.ClusterClient") as mock_k8s_cls, \

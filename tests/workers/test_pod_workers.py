@@ -6,13 +6,6 @@ from k8ostester.workers.node_drain import NodeDrainWorker
 from k8ostester.workers.process_kill import ProcessKillWorker
 from k8ostester.core.experiment import FaultSpec
 
-@pytest.fixture
-def mock_context():
-    k8s = MagicMock()
-    driver = MagicMock()
-    events = MagicMock()
-    return k8s, driver, events, "test-ns"
-
 def test_worker_resolve_pod_direct(mock_context):
     k8s, driver, events, ns = mock_context
     worker = Worker(k8s, driver, ns, events)
@@ -113,3 +106,24 @@ def test_process_kill_worker_exec_fails(mock_context):
     
     k8s.exec_pod.assert_called_with(ns, "my-pod", ["sh", "-c", "kill -9 1"], container=None)
     events.emit.assert_called_with("fault.process_kill", "kill -9 pid 1 in my-pod", pod="my-pod", container=None)
+
+def test_worker_execute_not_implemented(mock_context):
+    k8s, driver, events, ns = mock_context
+    with pytest.raises(NotImplementedError):
+        Worker(k8s, driver, ns, events).execute(FaultSpec(at="0s", worker="x"))
+
+def test_worker_resolve_pod_unknown_role(mock_context):
+    k8s, driver, events, ns = mock_context
+    driver.topology.return_value = {"primary": "pod-1", "replicas": []}
+    with pytest.raises(ValueError, match="unknown role"):
+        Worker(k8s, driver, ns, events).resolve_pod({"role": "leader"})
+
+def test_worker_resolve_pod_invalid_target(mock_context):
+    k8s, driver, events, ns = mock_context
+    with pytest.raises(ValueError, match="target needs"):
+        Worker(k8s, driver, ns, events).resolve_pod({"foo": "bar"})
+
+def test_worker_resolve_node_invalid_target(mock_context):
+    k8s, driver, events, ns = mock_context
+    with pytest.raises(ValueError, match="target needs"):
+        Worker(k8s, driver, ns, events).resolve_node({"foo": "bar"})

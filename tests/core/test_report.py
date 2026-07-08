@@ -22,6 +22,7 @@ def mock_run_dir(tmp_path):
     metrics = [
         {"kind": "op", "t": 100.0, "ok": True, "op": "write", "lat_ms": 10},
         {"kind": "op", "t": 101.0, "ok": True, "op": "write", "lat_ms": 11},
+        {"kind": "op", "t": 101.5, "ok": False, "op": "write", "err": "OSError"},
     ]
     (run_dir / "metrics.jsonl").write_text("\n".join(json.dumps(m) for m in metrics))
     
@@ -54,6 +55,22 @@ def test_find_all_runs(tmp_path):
     assert len(runs) == 2
     assert runs[0] == run1
     assert runs[1] == run2
+
+def test_find_group_runs(tmp_path):
+    in_group = tmp_path / "01-exp" / "run1"
+    in_group.mkdir(parents=True)
+    (in_group / "summary.json").write_text(json.dumps({"group": "g1"}))
+
+    other_group = tmp_path / "02-exp" / "run2"
+    other_group.mkdir(parents=True)
+    (other_group / "summary.json").write_text(json.dumps({"group": "g2"}))
+
+    corrupt = tmp_path / "03-exp" / "run3"
+    corrupt.mkdir(parents=True)
+    (corrupt / "summary.json").write_text("{not json")
+
+    from k8ostester.core.report import find_group_runs
+    assert find_group_runs("g1", results_root=tmp_path) == [in_group]
 
 def test_render(tmp_path):
     runs = [

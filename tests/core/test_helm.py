@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 from k8ostester.core.helm import Helm, HelmError
 
@@ -21,9 +22,10 @@ def test_helm_upgrade_install(mock_k8s):
         mock_run.return_value.returncode = 0
         helm.upgrade_install(
             "my-release", "my-chart", "my-ns",
-            version="1.2.3", set_values={"foo": "bar"}
+            version="1.2.3", set_values={"foo": "bar"},
+            values_file=Path("/tmp/values.yaml"),
         )
-        
+
         mock_run.assert_called_once()
         cmd = mock_run.call_args[0][0]
         assert "upgrade" in cmd
@@ -33,6 +35,8 @@ def test_helm_upgrade_install(mock_k8s):
         assert "my-ns" in cmd
         assert "--version" in cmd
         assert "1.2.3" in cmd
+        assert "--values" in cmd
+        assert "/tmp/values.yaml" in cmd
         assert "--set" in cmd
         assert "foo=bar" in cmd
         assert "--kube-context" in cmd

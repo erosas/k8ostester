@@ -19,6 +19,7 @@ from k8ostester.core.exceptions import K8osConfigError
 from k8ostester.core.experiment import parse_rate
 from k8ostester.core.helm import Helm, HelmError
 from k8ostester.core.infra import InfraManager
+from k8ostester.core.k8s import wait_until
 from k8ostester.core.resources import load_resource
 from k8ostester.drivers.base import TechnologyDriver
 
@@ -121,9 +122,10 @@ class CnpgDriver(TechnologyDriver):
         )
 
     def _wait_cluster_healthy(self, name: str, timeout: float) -> None:
-        deadline = time.monotonic() + timeout
         last = ""
-        while time.monotonic() < deadline:
+
+        def healthy() -> bool:
+            nonlocal last
             status = self._cluster(name).get("status", {})
             phase = status.get("phase", "(no status)")
             ready = status.get("readyInstances", 0)
@@ -131,10 +133,12 @@ class CnpgDriver(TechnologyDriver):
             if phase != last:
                 self.events.emit("cnpg.phase", f"{name}: {phase} ({ready}/{instances} ready)")
                 last = phase
-            if phase == "Cluster in healthy state" and ready == instances:
-                return
-            time.sleep(3)
-        raise TimeoutError(f"cluster {name} not healthy after {timeout}s (last: {last})")
+            return phase == "Cluster in healthy state" and ready == instances
+
+        wait_until(
+            healthy, timeout, interval=3,
+            desc=lambda: f"cluster {name} not healthy (last: {last})",
+        )
 
     def topology(self) -> dict[str, Any]:
         status = self._cluster(self.cluster_name).get("status", {})
@@ -313,34 +317,32 @@ class CnpgDriver(TechnologyDriver):
         """Block until the loadgen emits its 'start' record (schema created,
         ops flowing). Returns the framework-clock timestamp — the zero point
         for the fault timeline."""
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+        def started() -> bool:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
             if status.failed:
                 raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
-            if status.active or status.succeeded:
-                try:
-                    # every worker pod must be flowing before the fault clock starts
-                    started = self._loadgen_logs().count('"kind": "start"') >= self._workers
-                except Exception:
-                    started = False  # pod still ContainerCreating / not listed yet
-                if started:
-                    self.events.emit("load.started", "loadgen is emitting ops")
-                    return time.time()
-            time.sleep(3)
-        raise TimeoutError("loadgen did not start emitting ops in time")
+            if not (status.active or status.succeeded):
+                return False
+            try:
+                # every worker pod must be flowing before the fault clock starts
+                return self._loadgen_logs().count('"kind": "start"') >= self._workers
+            except Exception:
+                return False  # pod still ContainerCreating / not listed yet
+
+        wait_until(started, timeout, interval=3, desc="loadgen did not start emitting ops")
+        self.events.emit("load.started", "loadgen is emitting ops")
+        return time.time()
 
     def wait_load_done(self) -> None:
-        deadline = time.monotonic() + self._load_total_s + 300  # pull + pip headroom
-        while time.monotonic() < deadline:
+        def finished() -> bool:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
-            if (status.succeeded or 0) >= self._workers:
-                break
             if status.failed:
                 raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
-            time.sleep(5)
-        else:
-            raise TimeoutError("loadgen job did not finish in time")
+            return (status.succeeded or 0) >= self._workers
+
+        # pull + pip headroom on top of the phase plan
+        wait_until(finished, self._load_total_s + 300, interval=5,
+                   desc="loadgen job did not finish")
 
         logs = self._loadgen_logs()
         (self._run_dir / "loadgen.log").write_text(logs)  # raw dump survives any parse failure
@@ -482,21 +484,19 @@ class CnpgDriver(TechnologyDriver):
                 {"BACKUP_NAME": self._backup_name, "CLUSTER_NAME": self.cluster_name},
             ),
         )
-        deadline = time.monotonic() + 600
-        while time.monotonic() < deadline:
+        def completed() -> bool:
             backup = self.k8s.custom.get_namespaced_custom_object(
                 CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
             )
             phase = backup.get("status", {}).get("phase")
-            if phase == "completed":
-                self.events.emit("backup.ok", f"base backup {self._backup_name} completed")
-                return
             if phase == "failed":
                 raise RuntimeError(
                     f"backup failed: {backup['status'].get('error', '(no error detail)')}"
                 )
-            time.sleep(5)
-        raise TimeoutError("backup not completed after 600s")
+            return phase == "completed"
+
+        wait_until(completed, 600, interval=5, desc="backup not completed")
+        self.events.emit("backup.ok", f"base backup {self._backup_name} completed")
 
     def verify_backup(self) -> VerifyResult:
         if not self._backup_name:

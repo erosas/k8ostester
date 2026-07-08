@@ -68,8 +68,11 @@ def test_probe_and_node_info(mock_client_cls):
     sc.metadata.annotations = {"storageclass.kubernetes.io/is-default-class": "true"}
     mock_k8s.storage.list_storage_class.return_value.items = [sc]
     
-    mock_k8s.has_crd.return_value = False
-    
+    mock_k8s.has_crd.return_value = True  # snapshot CRD present → classes probed
+    mock_k8s.custom.list_cluster_custom_object.return_value = {
+        "items": [{"metadata": {"name": "snapclass-1"}}]
+    }
+
     with patch("k8ostester.core.capabilities._helm_version", return_value="v3.15.0"), \
          patch("k8ostester.core.capabilities._kubectl_version", return_value="v1.31.0"):
         caps = probe("my-ctx")
@@ -78,3 +81,26 @@ def test_probe_and_node_info(mock_client_cls):
         assert len(caps.nodes) == 1
         assert caps.nodes[0].name == "node-1"
         assert caps.storage_classes[0].is_default is True
+        assert caps.snapshot_classes == ["snapclass-1"]
+
+@patch("k8ostester.core.capabilities.ClusterClient")
+def test_probe_snapshot_classes_absent(mock_client_cls):
+    mock_k8s = mock_client_cls.return_value
+    mock_k8s.version.get_code.return_value = MagicMock(git_version="v1.31.0")
+    mock_k8s.core.list_node.return_value.items = []
+    mock_k8s.storage.list_storage_class.return_value.items = []
+    mock_k8s.has_crd.return_value = True
+    # CRD present but listing the classes fails → treated as none installed
+    mock_k8s.custom.list_cluster_custom_object.side_effect = Exception("404")
+
+    with patch("k8ostester.core.capabilities._helm_version", return_value=None), \
+         patch("k8ostester.core.capabilities._kubectl_version", return_value=None):
+        caps = probe(None)
+        assert caps.snapshot_classes == []
+        assert caps.snapshots_supported is False
+
+@patch("shutil.which", return_value="/usr/local/bin/kubectl")
+@patch("subprocess.run")
+def test_kubectl_version_both_forms_fail(mock_run, mock_which):
+    mock_run.return_value = MagicMock(returncode=1, stderr="broken")
+    assert _kubectl_version() is None

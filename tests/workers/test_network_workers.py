@@ -5,13 +5,6 @@ from kubernetes import client
 from k8ostester.workers.network import NetworkPartitionWorker, NetworkLossWorker, NetworkDelayWorker
 from k8ostester.core.experiment import FaultSpec
 
-@pytest.fixture
-def mock_context():
-    k8s = MagicMock()
-    driver = MagicMock()
-    events = MagicMock()
-    return k8s, driver, events, "test-ns"
-
 @patch("k8ostester.workers.network.load_resource")
 def test_network_partition_worker(mock_load, mock_context):
     k8s, driver, events, ns = mock_context
@@ -103,3 +96,16 @@ def test_network_chaos_cleanup_404(mock_context):
     
     # Should not raise
     cleanup()
+
+def test_network_chaos_cleanup_other_error_raises(mock_context):
+    k8s, driver, events, ns = mock_context
+    worker = NetworkPartitionWorker(k8s, driver, ns, events)
+    fault = FaultSpec(at="1s", worker="network_partition", target={"pod": "my-pod"}, duration="30s")
+
+    k8s.has_crd.return_value = True
+    with patch("k8ostester.workers.network.load_resource", return_value={"metadata": {"name": "x"}}):
+        cleanup = worker.execute(fault)
+
+    k8s.custom.delete_namespaced_custom_object.side_effect = client.ApiException(status=500)
+    with pytest.raises(client.ApiException):
+        cleanup()

@@ -61,12 +61,12 @@ def test_base_driver_abstract_methods(mock_context):
     with pytest.raises(K8osDriverError, match="has no 'check' verification"):
         driver.verify("check", {})
 
-def test_generic_driver(mock_context):
+def test_generic_driver_ignores_infra(mock_context):
+    # unlike the base class, GenericDriver accepts (and ignores) infra entries
     k8s, events, spec, ns = mock_context
-    driver = GenericDriver(k8s, spec, ns, events)
-    
-    # install_prereqs should pass even if spec.infra is set? 
-    # Wait, the base class raises error if spec.infra is set. 
-    # GenericDriver overrides it to pass, but doesn't check infra.
-    driver.install_prereqs() 
-    assert True # Just checking it doesn't raise
+    spec.infra = ["chaos-mesh"]
+    GenericDriver(k8s, spec, ns, events).install_prereqs()  # must not raise
+
+def test_base_driver_op_records_default_empty(mock_context):
+    k8s, events, spec, ns = mock_context
+    assert TechnologyDriver(k8s, spec, ns, events).op_records == []

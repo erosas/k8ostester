@@ -37,22 +37,7 @@ def test_rto_no_faults():
     assert "no faults" in detail
 
 def test_rto_total_outage():
-    ops = [
-        {"op": "write", "ok": True, "t": 100},
-        {"kind": "op", "op": "write", "ok": False, "t": 100} # last op for censoring
-    ]
-    fault_events = [{"ts": 10}] # No writes around T=10
-    rto, detail = _rto(ops, fault_events)
-    # ft=10. window starts at 10-30= -20.
-    # ops has write at T=100.
-    # starts will find T=100 as being in [-20, 190].
-    # But wait, starts only looks at successful writes.
-    # T=100 is a successful write.
-    # So starts = [0]. gaps will be calculated.
-    # since starts[-1] == 0 and len(ts) == 1, gaps will append (max(t)-ts[0])
-    # max(t) is 100, ts[0] is 100. gap = 0.
-    
-    # If I want total outage, I need NO successful writes around the fault.
+    # no successful writes anywhere near the fault → censored as total outage
     rto, detail = _rto([], [{"ts": 10}])
     assert rto == float("inf")
     assert "total outage" in detail
@@ -140,6 +125,31 @@ def test_evaluate_goals_unknown_metric():
     with pytest.raises(K8osConfigError, match="unknown goal metric"):
         evaluate_goals(goals, [], [], [])
 
+def test_threshold_requires_max_or_min():
+    with pytest.raises(K8osConfigError, match="needs 'max' or 'min'"):
+        _threshold(GoalSpec(metric="rto"))
+
+def test_evaluate_goals_steady_state_without_faults_uses_all_ops():
+    goals = [GoalSpec(metric="write_latency_p99", max="100ms", window="steady-state")]
+    ops = [{"op": "write", "ok": True, "t": 1, "lat_ms": 10}]
+    results = evaluate_goals(goals, ops, [], [])
+    assert results[0]["passed"] is True
+
+def test_evaluate_goals_latency_no_ops_in_window():
+    goals = [GoalSpec(metric="read_latency_p95", max="100ms")]
+    results = evaluate_goals(goals, [], [], [])
+    assert results[0]["passed"] is False
+    assert results[0]["value"] == "n/a"
+
+def test_evaluate_goals_no_ops_recorded():
+    goals = [
+        GoalSpec(metric="uptime", min="99%"),
+        GoalSpec(metric="downtime_total", max="10s"),
+    ]
+    results = evaluate_goals(goals, [], [], [])
+    assert results[0]["detail"] == "no ops recorded"  # uptime: vacuous 0%
+    assert results[1]["passed"] is False  # downtime: no evidence → infinite
+
 def test_evaluate_goals_tps():
     goals = [GoalSpec(metric="tps", min=10)]
     ops = [
@@ -155,3 +165,13 @@ def test_evaluate_goals_rpo_missing_integrity():
     goals = [GoalSpec(metric="rpo", max=0)]
     with pytest.raises(K8osConfigError, match="requires 'integrity'"):
         evaluate_goals(goals, [], [], [])
+
+def test_evaluate_goals_rto():
+    goals = [GoalSpec(metric="rto", max="30s")]
+    ops = [
+        {"op": "write", "ok": True, "t": 10},
+        {"op": "write", "ok": True, "t": 14},  # 4s gap over the fault
+    ]
+    results = evaluate_goals(goals, ops, [{"ts": 12}], [])
+    assert results[0]["passed"] is True
+    assert results[0]["value"] == "4.0s"

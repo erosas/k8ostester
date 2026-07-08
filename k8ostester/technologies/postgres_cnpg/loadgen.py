@@ -38,12 +38,22 @@ import time
 
 import psycopg
 
-DSN = os.environ["K8OST_DSN"]
-PHASES = json.loads(os.environ["K8OST_PHASES"])
+# populated from the environment at startup (main), not at import, so the
+# module imports cleanly outside the Job (tests, tooling)
+DSN = ""
+PHASES: list = []
 # worker pool sharding (Indexed Job): this pod runs its slice of the global
 # client count, with rate scaled to its share so per-client pacing is unchanged
-WORKERS = int(os.environ.get("K8OST_WORKERS", "1"))
-INDEX = int(os.environ.get("JOB_COMPLETION_INDEX") or 0)
+WORKERS = 1
+INDEX = 0
+
+
+def read_env_config():
+    global DSN, PHASES, WORKERS, INDEX
+    DSN = os.environ["K8OST_DSN"]
+    PHASES = json.loads(os.environ["K8OST_PHASES"])
+    WORKERS = int(os.environ.get("K8OST_WORKERS", "1"))
+    INDEX = int(os.environ.get("JOB_COMPLETION_INDEX") or 0)
 
 CONNECT_TIMEOUT = 3  # s — TCP+auth for one connection attempt
 ACQUIRE_TIMEOUT = 5  # s — Hikari connectionTimeout (default 30s, tightened)
@@ -51,6 +61,9 @@ OP_TIMEOUT = 10  # s — statement bound; a hung query is a failed op, not a han
 VALIDATE_TIMEOUT = 2  # s — checkout validation query
 ALIVE_BYPASS = 0.5  # s — Hikari aliveBypassWindow: recently-used conns skip validation
 CLOSE_TIMEOUT = 2  # s — closing a broken conn must not block teardown
+# bounded phase teardown: one straggler must not stall the phase plan (the
+# instrument once sat 150s in gather() and graphed it as a database outage)
+STRAGGLER_GRACE = ACQUIRE_TIMEOUT + OP_TIMEOUT + 5  # s
 
 SCHEMA = """
 create table if not exists k8ost_ops (
@@ -250,10 +263,9 @@ async def run_phase(i, phase, deadline):
         )
         for c in range(phase["clients"])
     ]
-    # bounded: one straggler must not stall the phase plan (the instrument
-    # once sat 150s in gather() and graphed it as a database outage)
-    grace = ACQUIRE_TIMEOUT + OP_TIMEOUT + 5
-    done, pending = await asyncio.wait(tasks, timeout=max(deadline - time.time(), 0) + grace)
+    done, pending = await asyncio.wait(
+        tasks, timeout=max(deadline - time.time(), 0) + STRAGGLER_GRACE
+    )
     for t in pending:
         t.cancel()
     if pending:
@@ -264,6 +276,7 @@ async def run_phase(i, phase, deadline):
 
 
 async def main():
+    read_env_config()
     conn = None
     for attempt in range(30):
         conn = await connect(-1)

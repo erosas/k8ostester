@@ -8,6 +8,7 @@ def test_metric_store(tmp_path):
     store = MetricStore(path)
     
     store.record("test", 123.456, foo="bar")
+    store._file.write("\n")  # blank line: reader must skip it
     store.record("op", 124.0, op="write", ok=True)
     store.flush()
     store.close()
@@ -24,18 +25,12 @@ def test_metric_store(tmp_path):
     assert op_recs[0]["op"] == "write"
 
 def test_percentile():
+    # nearest-rank on sorted values: index = round(p/100 * len) - 1,
+    # using Python's banker's rounding (round(2.5) == 2)
     values = [10, 20, 30, 40, 50]
-    # Nearest rank: round(p/100 * N)
-    # p=50: round(0.5 * 5) = round(2.5) = 3 -> index 2 (value 30)
-    # k8ostester uses round(p/100 * len) - 1
-    # Actually, round(0.5 * 5) is 2 in some python versions (round to even), or 3 in others.
-    # In Python 3, round(2.5) is 2.
-    # len=5, p=50: 50/100 * 5 = 2.5. round(2.5) = 2. index = 2 - 1 = 1. values[1] = 20.
     assert percentile(values, 50) == 20
     assert percentile(values, 0) == 10
     assert percentile(values, 100) == 50
-    
-    # p=99 on 5 values: 0.99 * 5 = 4.95. round(4.95) = 5. index = 5 - 1 = 4 -> 50
     assert percentile(values, 99) == 50
 
 def test_percentile_empty():

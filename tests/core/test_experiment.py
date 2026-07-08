@@ -31,3 +31,32 @@ def test_experiment_spec_manifests_dir(tmp_path):
     (d / "manifests").mkdir()
     spec = ExperimentSpec(name="test", technology="pg", dir=d)
     assert spec.manifests_dir == (d / "manifests").resolve()
+
+def test_parse_rate_none_and_numbers():
+    assert parse_rate(None) == 0.0
+    assert parse_rate(5) == 5.0
+
+def test_parse_duration_bare_number():
+    assert parse_duration(30) == 30.0
+
+def test_goal_needs_metric_or_check():
+    from k8ostester.core.exceptions import K8osConfigError
+    with pytest.raises(K8osConfigError, match="either 'metric' or 'check'"):
+        GoalSpec(check=None)
+
+def test_load_experiment(tmp_path):
+    from k8ostester.core.experiment import load_experiment
+    d = tmp_path / "exp"
+    d.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="no experiment.yaml"):
+        load_experiment(d)
+
+    (d / "experiment.yaml").write_text("name: t\ntechnology: generic\n")
+    with pytest.raises(FileNotFoundError, match="manifests directory not found"):
+        load_experiment(d)
+
+    (d / "manifests").mkdir()
+    spec = load_experiment(d)
+    assert spec.name == "t"
+    assert spec.dir == d.resolve()

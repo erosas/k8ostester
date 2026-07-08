@@ -86,6 +86,13 @@ class CnpgDriver(TechnologyDriver):
                 raise
             self.events.emit("infra.cnpg", "chart repo unreachable — using the installed release")
 
+    def _resolve_resource(self, name: str) -> Path:
+        """Experiment manifests/ dir takes precedence over packaged templates."""
+        override = self.spec.manifests_dir / name
+        if override.exists():
+            return override
+        return RESOURCES / name
+
     def deploy(self) -> None:
         out = self.k8s.apply_manifests(
             self.spec.manifests_dir,
@@ -240,7 +247,7 @@ class CnpgDriver(TechnologyDriver):
             },
         )
         job = load_resource(
-            RESOURCES / "loadgen-job.yaml",
+            self._resolve_resource("loadgen-job.yaml"),
             {
                 "IMAGE": spec.image or LOADGEN_IMAGE,
                 "PSYCOPG_PIN": PSYCOPG_PIN,
@@ -289,7 +296,7 @@ class CnpgDriver(TechnologyDriver):
             raise RuntimeError("cannot determine cluster image for the pgbench runner")
 
         job = load_resource(
-            RESOURCES / "pgbench-job.yaml",
+            self._resolve_resource("pgbench-job.yaml"),
             {
                 "IMAGE": image,
                 "DSN": dsn,
@@ -480,7 +487,7 @@ class CnpgDriver(TechnologyDriver):
         self.k8s.custom.create_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, self.namespace, "backups",
             load_resource(
-                RESOURCES / "backup.yaml",
+                self._resolve_resource("backup.yaml"),
                 {"BACKUP_NAME": self._backup_name, "CLUSTER_NAME": self.cluster_name},
             ),
         )
@@ -532,7 +539,7 @@ class CnpgDriver(TechnologyDriver):
         self.k8s.custom.create_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters",
             load_resource(
-                RESOURCES / "pitr-cluster.yaml",
+                self._resolve_resource("pitr-cluster.yaml"),
                 {
                     "RESTORE_NAME": restore_name,
                     "TARGET_TIME": target,

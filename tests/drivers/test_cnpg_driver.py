@@ -435,6 +435,24 @@ def test_cnpg_verify_backup_no_backup(mock_context):
     assert res["passed"] is False
     assert "no backup was taken" in res["detail"]
 
+def test_cnpg_resolve_resource_override(mock_context, tmp_path):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    # create an override manifest in the experiment dir
+    manifests = spec.dir / "manifests"
+    manifests.mkdir(exist_ok=True)
+    override = manifests / "pitr-cluster.yaml"
+    override.write_text("kind: Override")
+
+    resolved = driver._resolve_resource("pitr-cluster.yaml")
+    assert resolved == override
+    assert resolved.read_text() == "kind: Override"
+
+    # verify fallback for non-overridden resource
+    resolved_fallback = driver._resolve_resource("backup.yaml")
+    assert "k8ostester/technologies/postgres_cnpg/resources/backup.yaml" in str(resolved_fallback)
+
+
 def test_cnpg_wait_cluster_healthy_timeout(mock_context, fake_clock):
     k8s, events, spec, ns = mock_context
     driver = CnpgDriver(k8s, spec, ns, events)

@@ -9,6 +9,7 @@ dependencies = [
     "kubernetes>=31.0",
     "pydantic>=2.9",
     "PyYAML>=6.0",
+    "textual>=8.2.8",
 ]
 
 [dependency-groups]

@@ -14,6 +14,24 @@ from k8ostester.cli.live import LiveRunView
 from k8ostester.core.experiment import load_experiment
 
 
+def verdict_table(result) -> Table:
+    """The end-of-run verdict: verification and goal outcomes."""
+    table = Table(title="Verdict", title_justify="left")
+    for col in ("", "Goal / check", "Value", "Threshold", "Detail"):
+        table.add_column(col)
+    for v in result.verifications:
+        table.add_row(
+            "[green]✔[/green]" if v["passed"] else "[red]✘[/red]",
+            f"verify:{v['check']}", "", "", v["detail"],
+        )
+    for g in result.goals:
+        table.add_row(
+            "[green]✔[/green]" if g["passed"] else "[red]✘[/red]",
+            g["goal"], str(g["value"]), str(g["threshold"]), g["detail"],
+        )
+    return table
+
+
 def find_experiments(root: Path = Path(".")) -> list[Path]:
     """Experiment directories (holding experiment.yaml) under root, skipping
     hidden trees and run artifacts."""
@@ -82,6 +100,7 @@ def run(
         help="Run even if another experiment occupies the cluster (results may cross-contaminate)",
     ),
     plain: bool = typer.Option(False, "--plain", help="Line-by-line event output instead of the live view"),
+    tui: bool = typer.Option(False, "--tui", help="Full-screen TUI with drill-in views (metrics, topology, events)"),
 ) -> None:
     """Run an experiment end-to-end."""
     from k8ostester.core.runner import Runner
@@ -89,6 +108,12 @@ def run(
     if path is None:
         path = pick_experiment()
     spec = load_experiment(path)
+
+    if tui:
+        from k8ostester.cli.tui import run_tui
+
+        raise typer.Exit(run_tui(spec, keep=keep, context=context, group=group,
+                                 allow_concurrent=allow_concurrent))
 
     live_view = LiveRunView(spec.name, spec.technology, context or spec.cluster.context) \
         if console.is_terminal and not plain else None
@@ -110,23 +135,7 @@ def run(
         raise typer.Exit(1)
 
     if result.goals or result.verifications:
-        table = Table(title="Verdict", title_justify="left")
-        table.add_column("")
-        table.add_column("Goal / check")
-        table.add_column("Value")
-        table.add_column("Threshold")
-        table.add_column("Detail")
-        for v in result.verifications:
-            table.add_row(
-                "[green]✔[/green]" if v["passed"] else "[red]✘[/red]",
-                f"verify:{v['check']}", "", "", v["detail"],
-            )
-        for g in result.goals:
-            table.add_row(
-                "[green]✔[/green]" if g["passed"] else "[red]✘[/red]",
-                g["goal"], str(g["value"]), str(g["threshold"]), g["detail"],
-            )
-        console.print(table)
+        console.print(verdict_table(result))
 
     console.print(
         f"\n[bold]{'[green]PASSED[/green]' if result.status == 'passed' else '[red]' + result.status.upper() + '[/red]'}[/bold]"

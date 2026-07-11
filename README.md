@@ -20,6 +20,7 @@ uv tool install --editable ./k8ostester-core   # installs the `k8ost` CLI
 
 k8ost env check                              # what can this cluster do?
 k8ost run experiments/postgres-cnpg/02-cnpg-single
+k8ost run --tui                              # pick an experiment, watch it in the TUI
 k8ost runs                                   # list recorded runs
 k8ost report --group pooling --open          # comparison graphs for a run group
 ```

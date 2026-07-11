@@ -229,3 +229,89 @@ def test_env_check_renders_nodes_and_storage(tmp_path):
         assert "n1" in result.output
         assert "standard" in result.output
         assert "not found on PATH" in result.output
+
+def test_find_experiments_skips_hidden_and_results(tmp_path):
+    from k8ostester.cli.run import find_experiments
+    for d in ("experiments/pg/01-a", "experiments/pg/02-b", ".venv/x", "results/exp/r1"):
+        (tmp_path / d).mkdir(parents=True)
+        (tmp_path / d / "experiment.yaml").write_text("name: x\ntechnology: generic\n")
+
+    found = find_experiments(tmp_path)
+    assert [str(d.relative_to(tmp_path)) for d in found] == \
+        ["experiments/pg/01-a", "experiments/pg/02-b"]
+
+def test_run_command_interactive_picker(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    exp_dir = make_exp_dir(tmp_path)
+
+    with patch("k8ostester.core.runner.Runner") as mock_runner_cls:
+        from k8ostester.core.runner import RunResult
+        res = RunResult("r1", tmp_path / "run1")
+        res.status = "passed"
+        mock_runner_cls.return_value.run.return_value = res
+
+        result = runner.invoke(app, ["run"], input="1\n")
+        assert result.exit_code == 0
+        assert "1 experiment(s)" in result.output
+        assert "PASSED" in result.output
+        # the picked directory is what actually ran
+        spec = mock_runner_cls.call_args[0][0]
+        assert spec.name == "dummy"
+
+def test_run_command_no_experiments_found(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["run"])
+    assert result.exit_code == 1
+    assert "no experiments found" in result.output
+
+def test_picker_flags_invalid_experiment(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    make_exp_dir(tmp_path)
+    bad = tmp_path / "broken"
+    bad.mkdir()
+    (bad / "experiment.yaml").write_text("name: broken\ntechnology: generic\n")  # no manifests/
+
+    with patch("k8ostester.core.runner.Runner") as mock_runner_cls:
+        from k8ostester.core.runner import RunResult
+        res = RunResult("r1", tmp_path / "run1")
+        res.status = "passed"
+        mock_runner_cls.return_value.run.return_value = res
+
+        result = runner.invoke(app, ["run"], input="2\n")
+        assert result.exit_code == 0
+        assert "invalid" in result.output  # the broken row is marked, not fatal
+
+def test_live_run_view_renders_header_and_events():
+    from k8ostester.cli.live import LiveRunView
+    from rich.console import Console
+
+    view = LiveRunView("my-exp", "postgres-cnpg", None)
+    view.on_event({"type": "deploy.start", "t_rel": 1.2, "msg": "applying manifests"})
+    view.on_event({"type": "verify.fail", "t_rel": 60.0, "msg": "2 writes lost"})
+
+    console_ = Console(record=True, width=120)
+    console_.print(view)
+    out = console_.export_text()
+    assert "my-exp (postgres-cnpg)" in out
+    assert "deploy.start" in out
+    assert "2 writes lost" in out
+    assert "verify.fail" in out  # current step in the header + alert row
+
+def test_run_command_live_view(tmp_path):
+    from unittest.mock import PropertyMock
+    from rich.console import Console
+
+    exp_dir = make_exp_dir(tmp_path)
+
+    with patch("k8ostester.core.runner.Runner") as mock_runner_cls, \
+         patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True):
+        from k8ostester.core.runner import RunResult
+        res = RunResult("r1", tmp_path / "run1")
+        res.status = "passed"
+        mock_runner_cls.return_value.run.return_value = res
+
+        result = runner.invoke(app, ["run", str(exp_dir)])
+        assert result.exit_code == 0
+        # the live view was wired in as the event sink
+        from k8ostester.cli.live import LiveRunView
+        assert isinstance(mock_runner_cls.call_args[1]["on_event"].__self__, LiveRunView)

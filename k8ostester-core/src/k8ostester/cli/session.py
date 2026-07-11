@@ -17,19 +17,15 @@ import typer
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, DataTable, Footer, ProgressBar, RichLog, Static
+from textual.widgets import Button, DataTable, Footer, ProgressBar, RichLog, Select, Static
 
 from k8ostester.cli.app import app, console
 from k8ostester.cli.run import pick_experiment
 from k8ostester.cli.tui import RunApp
 from k8ostester.core.experiment import load_experiment
 
-FAULT_BUTTONS = {
-    # button id → (worker, target, duration)
-    "kill-primary": ("pod_kill", {"role": "primary"}, None),
-    "kill-replica": ("pod_kill", {"role": "replica"}, None),
-    "partition-primary": ("network_partition", {"role": "primary"}, "30s"),
-}
+AUTO_TARGETS = [("primary (auto)", "role:primary"), ("any replica (auto)", "role:replica")]
+RATE_STEP = 5.0
 
 
 class SessionApp(RunApp):
@@ -41,14 +37,16 @@ class SessionApp(RunApp):
         ("q", "leave", "Quit + teardown"),
         ("plus", "scale(1)", "Load +1 pod"),
         ("minus", "scale(-1)", "Load -1 pod"),
-        ("k", "fault('kill-primary')", "Kill primary"),
-        ("r", "fault('kill-replica')", "Kill replica"),
-        ("p", "fault('partition-primary')", "Partition 30s"),
+        ("right_square_bracket", "rate(1)", "Rate +"),
+        ("left_square_bracket", "rate(-1)", "Rate −"),
+        ("k", "fault('pod_kill')", "Kill target"),
+        ("p", "fault('network_partition')", "Partition target 30s"),
     ]
     CSS = RunApp.CSS + """
     #controls { height: 5; margin: 0 1; border: round $surface-lighten-2; }
-    #controls Button { margin: 0 1 0 0; min-width: 12; }
-    #pods { width: 16; content-align: center middle; }
+    #controls Button { margin: 0 1 0 0; min-width: 10; }
+    #pods { width: 18; content-align: center middle; }
+    #target { width: 24; margin: 0 1 0 0; }
     """
 
     def __init__(self, spec, context, session):
@@ -74,9 +72,12 @@ class SessionApp(RunApp):
             yield Button("load −", id="scale-down")
             yield Static(id="pods")
             yield Button("load +", id="scale-up", variant="success")
-            yield Button("kill primary", id="kill-primary", variant="error")
-            yield Button("kill replica", id="kill-replica", variant="warning")
-            yield Button("partition 30s", id="partition-primary", variant="warning")
+            yield Button("rate −", id="rate-down")
+            yield Button("rate +", id="rate-up", variant="success")
+            yield Select(AUTO_TARGETS, id="target", allow_blank=False,
+                         value="role:primary")
+            yield Button("kill", id="kill", variant="error")
+            yield Button("partition 30s", id="partition", variant="warning")
         events_log = RichLog(id="e-log", markup=False, highlight=False)
         events_log.border_title = "events"
         yield events_log
@@ -127,10 +128,22 @@ class SessionApp(RunApp):
     def action_scale(self, delta: int) -> None:
         self.session.scale(delta)
 
-    def action_fault(self, button_id: str) -> None:
-        worker, target, duration = FAULT_BUTTONS[button_id]
+    def action_rate(self, direction: int) -> None:
+        self.session.set_rate(direction * RATE_STEP)
+        self.notify(f"per-pod rate {'+' if direction > 0 else '−'}{RATE_STEP:g} ops/s "
+                    "— pool re-rolls at the new rate", timeout=5)
+
+    def _selected_target(self) -> dict:
+        value = self.query_one("#target", Select).value
+        kind, _, name = str(value).partition(":")
+        return {kind: name} if kind in ("role", "pod") else {"role": "primary"}
+
+    def action_fault(self, worker: str) -> None:
+        target = self._selected_target()
+        duration = "30s" if worker == "network_partition" else None
         self.session.inject(worker, target, duration)
-        self.notify(f"{worker} on {target.get('role', '?')} requested", timeout=4)
+        label = target.get("pod") or f"{target.get('role')} (auto)"
+        self.notify(f"{worker} on {label} requested", timeout=4)
 
     def action_leave(self) -> None:
         if self._ended_status is None:
@@ -146,21 +159,45 @@ class SessionApp(RunApp):
             self.session.scale(1)
         elif button_id == "scale-down":
             self.session.scale(-1)
-        elif button_id in FAULT_BUTTONS:
-            self.action_fault(button_id)
+        elif button_id == "rate-up":
+            self.action_rate(1)
+        elif button_id == "rate-down":
+            self.action_rate(-1)
+        elif button_id == "kill":
+            self.action_fault("pod_kill")
+        elif button_id == "partition":
+            self.action_fault("network_partition")
 
     # -- ingestion additions ------------------------------------------------------
 
     def _ingest(self, event: dict) -> None:
         super()._ingest(event)
-        if event["type"] == "load.scale":
+        if event["type"] in ("load.scale", "load.rate"):
             self._show_pods(event.get("data", {}).get("pods", self.session.pods))
+        elif event["type"] == "topology":
+            self._update_targets(event.get("data", {}))
 
     def _show_pods(self, pods: int) -> None:
         self.query_one("#pods", Static).update(Text.assemble(
-            (str(pods), "bold"), (" load pod(s)", "dim"),
-            (f"\n≈{pods * self.session.rate:g} ops/s", "dim"),
+            (f"{pods} pod(s)", "bold"), (f" × {self.session.rate:g} ops/s", "dim"),
+            (f"\n≈{pods * self.session.rate:g} ops/s total", "dim"),
         ))
+
+    def _update_targets(self, data: dict) -> None:
+        """Keep the fault-target dropdown in step with the live topology, so a
+        specific instance (pg-2, not just 'a replica') can be targeted."""
+        instances = [n for n in data.get("nodes", [])
+                     if n.get("role") in ("primary", "replica")]
+        options = AUTO_TARGETS + [
+            (f"{n['id']} ({n['role']})", f"pod:{n['id']}") for n in instances
+        ]
+        select = self.query_one("#target", Select)
+        current = select.value
+        select.set_options(options)
+        if any(value == current for _, value in options):
+            select.value = current
+        else:
+            select.value = "role:primary"  # the selected pod is gone
 
     def _tick(self) -> None:
         running = self._ended_status is None

@@ -133,32 +133,51 @@ class FakeSession:
     def scale(self, delta):
         self.calls.append(("scale", delta))
 
+    def set_rate(self, delta):
+        self.calls.append(("rate", delta))
+
     def inject(self, worker, target, duration=None):
-        self.calls.append(("fault", worker, target.get("role"), duration))
+        self.calls.append(("fault", worker, target, duration))
 
     def stop(self):
         self._stop.set()
 
 
 async def test_session_app_controls(spec):
-    from textual.widgets import Static
+    from textual.widgets import Select, Static
     from k8ostester.cli.session import SessionApp
 
     fake = FakeSession()
     app = SessionApp(spec, "docker-desktop", fake)
 
-    async with app.run_test(size=(120, 40)) as pilot:
+    async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("plus")
         await pilot.press("minus")
-        await pilot.press("k")
-        await pilot.press("r")
-        await pilot.press("p")
+        await pilot.press("right_square_bracket")
+        await pilot.press("left_square_bracket")
+        await pilot.press("k")   # kill the selected target (default: primary auto)
+        await pilot.press("p")   # partition the selected target
         assert fake.calls == [
             ("scale", 1), ("scale", -1),
-            ("fault", "pod_kill", "primary", None),
-            ("fault", "pod_kill", "replica", None),
-            ("fault", "network_partition", "primary", "30s"),
+            ("rate", 5.0), ("rate", -5.0),
+            ("fault", "pod_kill", {"role": "primary"}, None),
+            ("fault", "network_partition", {"role": "primary"}, "30s"),
         ]
+        fake.calls.clear()
+
+        # topology feeds the target dropdown with the live instances
+        app._ingest({"type": "topology", "t_rel": 30.0, "msg": "primary pg-1",
+                     "data": {"primary": "pg-1", "replicas": ["pg-2"],
+                              "nodes": [{"id": "pg-1", "role": "primary"},
+                                        {"id": "pg-2", "role": "replica"}],
+                              "edges": []}})
+        select = app.query_one("#target", Select)
+        assert ("pg-2 (replica)", "pod:pg-2") in list(select._options)
+
+        # picking a specific instance targets exactly that pod
+        select.value = "pod:pg-2"
+        await pilot.press("k")
+        assert fake.calls == [("fault", "pod_kill", {"pod": "pg-2"}, None)]
 
         # a load.scale event updates the pods indicator
         app._ingest({"type": "load.scale", "t_rel": 5.0, "msg": "3 load pod(s)",
@@ -219,3 +238,22 @@ def test_session_command_wiring(tmp_path):
         assert mock_session_cls.call_args[1]["pods"] == 2
         assert mock_session_cls.call_args[1]["rate"] == 50.0
         assert mock_session_cls.call_args[1]["clients"] == 8
+
+
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_rate_change(mock_k8s_cls, mock_get_driver, spec, tmp_path):
+    mock_k8s_cls.return_value.core.list_namespace.return_value.items = []
+    driver = mock_get_driver.return_value.return_value
+    driver.stop_load_session.return_value = ""
+
+    session = make_session(spec, tmp_path, pods=2, rate=20.0, clients=5)
+    session.set_rate(5.0)
+    session.set_rate(-100.0)  # clamps at 1 ops/s
+    session.stop()
+    session.start()
+
+    assert driver.set_load_rate.call_args_list[0][0] == (25.0, 5)
+    assert driver.set_load_rate.call_args_list[1][0] == (1.0, 5)
+    events = EventLog.read(session.run_dir / "events.jsonl")
+    assert sum(e["type"] == "load.rate" for e in events) == 2

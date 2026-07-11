@@ -68,6 +68,9 @@ class Session:
     def scale(self, delta: int) -> None:
         self._commands.put(("scale", delta))
 
+    def set_rate(self, delta: float) -> None:
+        self._commands.put(("rate", delta))
+
     def inject(self, worker: str, target: dict, duration: str | None = None) -> None:
         self._commands.put(("fault", worker, target, duration))
 
@@ -129,6 +132,15 @@ class Session:
                         "load.scale",
                         f"{self.pods} load pod(s) ≈ {self.pods * self.rate:g} ops/s",
                         pods=self.pods,
+                    )
+                elif command[0] == "rate":
+                    self.rate = max(1.0, self.rate + command[1])
+                    driver.set_load_rate(self.rate, self.clients)
+                    self.events.emit(
+                        "load.rate",
+                        f"{self.rate:g} ops/s per pod — pool re-rolling "
+                        f"(≈ {self.pods * self.rate:g} ops/s total)",
+                        rate=self.rate, pods=self.pods,
                     )
                 elif command[0] == "fault":
                     _, worker_name, target, duration = command

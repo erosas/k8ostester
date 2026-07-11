@@ -823,3 +823,44 @@ def test_cnpg_scale_and_stop_load_session(mock_context):
     with patch.object(driver, "_loadgen_logs", return_value="journal lines"):
         assert driver.stop_load_session() == "journal lines"
     k8s.apps.delete_namespaced_deployment.assert_called_once_with("k8ost-loadgen", ns)
+
+def test_cnpg_set_load_rate_rolls_the_pool(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    driver.set_load_rate(35.0, 5)
+
+    patch_body = k8s.apps.patch_namespaced_deployment.call_args[0][2]
+    env = patch_body["spec"]["template"]["spec"]["containers"][0]["env"]
+    phases = json.loads(env[0]["value"])
+    assert phases[0]["rate"] == 35.0
+    assert phases[0]["clients"] == 5
+
+def test_cnpg_replication_lag(mock_context):
+    from k8ostester.technologies.postgres_cnpg.driver import _format_lag
+    assert _format_lag(0.001, 1000) == ""          # caught up
+    assert _format_lag(0.31, 0) == "+300ms"
+    assert _format_lag(2.14, 0) == "+2.1s"
+    assert _format_lag(45.0, 0) == "+45s"
+    assert _format_lag(0.0, 5e7) == "+50MB"        # replay_lag null, bytes streaming
+
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    out = "pg-2|quorum|0.002|1024\npg-3|async|2.14|9000000\n"
+    with patch.object(driver, "_psql", return_value=out):
+        states = driver._replication_states("pg-1")
+    assert states["pg-2"] == {"state": "quorum", "lag": ""}
+    assert states["pg-3"] == {"state": "async", "lag": "+2.1s"}
+
+def test_cnpg_topology_graph_edge_lag(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    stub_clusters(k8s, "pg")
+    stub_cluster_status(k8s, currentPrimary="pg-1", instanceNames=["pg-1", "pg-2"])
+
+    with patch.object(driver, "_psql", return_value="pg-2|async|3.5|0\n"):
+        graph = driver.topology_graph()
+    edge = next(e for e in graph["edges"] if e["target"] == "pg-2")
+    assert edge["detail"] == "async"
+    assert edge["lag"] == "+3.5s"

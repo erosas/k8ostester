@@ -382,3 +382,12 @@ def test_topology_text_legacy_flat_form():
     from k8ostester.cli.live import topology_text
     out = topology_text({"primary": "pg-1", "replicas": ["pg-2"]}).plain
     assert "pg-1" in out and "primary" in out and "pg-2" in out
+
+def test_topology_text_renders_replication_lag():
+    from k8ostester.cli.live import topology_text
+    graph = {
+        "nodes": [{"id": "pg-1", "role": "primary"}, {"id": "pg-2", "role": "replica"}],
+        "edges": [{"source": "pg-1", "target": "pg-2", "detail": "async", "lag": "+2.1s"}],
+    }
+    out = topology_text(graph).plain
+    assert "async +2.1s" in out

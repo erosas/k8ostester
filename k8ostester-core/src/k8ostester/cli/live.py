@@ -77,6 +77,8 @@ def topology_text(data: dict) -> Text:
             line.append("└─" if last else "├─", style="dim")
             if label:
                 line.append(label, style=_edge_style(label))
+            if lag := via.get("lag"):
+                line.append(f" {lag}", style="yellow")  # replication trailing
             line.append("─▶ ", style="dim")
         line.append(NODE_ICONS.get(role, "•") + " ", style=_node_style(node))
         line.append(node_id, style="bold" if role == "primary" else "")

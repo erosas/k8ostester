@@ -35,6 +35,22 @@ LOADGEN_IMAGE = "python:3.12-slim"
 PSYCOPG_PIN = "psycopg[binary]==3.2.*"
 
 
+def _format_lag(seconds: float, bytes_: float) -> str:
+    """Coarse, stable buckets: steady replication reads '' (no lag shown), a
+    catching-up replica reads e.g. '+300ms' / '+2.1s' / '+45MB'. Coarseness
+    keeps the topology dedup quiet in steady state while lag transitions
+    (join, post-failover catch-up) still stream as fresh events."""
+    if seconds >= 10:
+        return f"+{seconds:.0f}s"
+    if seconds >= 1:
+        return f"+{seconds:.1f}s"
+    if seconds >= 0.05:
+        return f"+{round(seconds, 1) * 1000:.0f}ms"
+    if bytes_ >= 1e6:  # replay_lag can be null while WAL bytes still stream
+        return f"+{bytes_ / 1e6:.0f}MB"
+    return ""  # caught up
+
+
 class VerifyResult(dict):
     @classmethod
     def make(cls, check: str, passed: bool, detail: str) -> "VerifyResult":
@@ -201,8 +217,12 @@ class CnpgDriver(TechnologyDriver):
             role = "primary" if name == primary else "replica"
             nodes.append({"id": name, "role": role, "detail": health.get(name, "")})
             if role == "replica" and primary:
-                edges.append({"source": primary, "target": name,
-                              "detail": replication.get(name, "detached")})
+                stream = replication.get(name)
+                edges.append({
+                    "source": primary, "target": name,
+                    "detail": stream["state"] if stream else "detached",
+                    **({"lag": stream["lag"]} if stream and stream["lag"] else {}),
+                })
         return {
             "primary": primary,
             "replicas": [i for i in instances if i != primary],
@@ -210,22 +230,31 @@ class CnpgDriver(TechnologyDriver):
             "edges": edges,
         }
 
-    def _replication_states(self, primary: str | None) -> dict[str, str]:
-        """replica pod → sync_state as the primary reports it (CNPG sets
-        application_name to the instance name). Empty when unreachable —
-        graph edges then read 'detached', which is the honest answer."""
+    def _replication_states(self, primary: str | None) -> dict[str, dict]:
+        """replica pod → {state, lag} as the primary reports it (CNPG sets
+        application_name to the instance name). replay_lag is how far the
+        replica's applied WAL trails the primary — the real-time replication
+        picture. Empty when unreachable — graph edges then read 'detached',
+        which is the honest answer."""
         if not primary:
             return {}
         try:
             out = self._psql(
-                "select application_name, sync_state from pg_stat_replication",
+                "select application_name, sync_state,"
+                " coalesce(extract(epoch from replay_lag), 0),"
+                " coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), 0)"
+                " from pg_stat_replication",
                 pod=primary,
             )
-            return {
-                parts[0]: parts[1]
-                for line in out.splitlines()
-                if len(parts := line.strip().split("|")) >= 2
-            }
+            states = {}
+            for line in out.splitlines():
+                parts = line.strip().split("|")
+                if len(parts) < 2:
+                    continue
+                seconds = float(parts[2]) if len(parts) > 2 and parts[2] else 0.0
+                bytes_ = float(parts[3]) if len(parts) > 3 and parts[3] else 0.0
+                states[parts[0]] = {"state": parts[1], "lag": _format_lag(seconds, bytes_)}
+            return states
         except Exception:
             return {}
 
@@ -403,6 +432,24 @@ class CnpgDriver(TechnologyDriver):
             "k8ost-loadgen", self.namespace, {"spec": {"replicas": replicas}}
         )
 
+    def set_load_rate(self, rate: float, clients: int) -> None:
+        """Change the per-pod load unit: patch the pod template's phase plan —
+        Kubernetes rolls the pool, and every pod comes back at the new rate."""
+        phase = {
+            "duration_s": self.SESSION_PHASE_S,
+            "rate": rate,
+            "mix": {"read": 0.5, "write": 0.5},
+            "clients": clients,
+            "mode": "persistent",
+        }
+        self.k8s.apps.patch_namespaced_deployment(
+            "k8ost-loadgen", self.namespace,
+            {"spec": {"template": {"spec": {"containers": [
+                {"name": "loadgen",
+                 "env": [{"name": "K8OST_PHASES", "value": json.dumps([phase])}]}
+            ]}}}},
+        )
+
     def stop_load_session(self) -> str:
         """Tear down the load pool; returns the pool's collected logs (the
         journal-so-far) for the session artifacts."""
@@ -500,7 +547,7 @@ class CnpgDriver(TechnologyDriver):
             if graph != self._last_topology:
                 self._last_topology = graph
                 replication = " · ".join(
-                    f"{e['target']} {e.get('detail', '')}".strip()
+                    " ".join(filter(None, (e["target"], e.get("detail"), e.get("lag"))))
                     for e in graph["edges"]
                     if e["source"] == graph.get("primary")
                 )

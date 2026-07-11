@@ -106,6 +106,9 @@ class TechnologyDriver:
     def scale_load(self, replicas: int) -> None:
         raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
 
+    def set_load_rate(self, rate: float, clients: int) -> None:
+        raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
+
     def stop_load_session(self) -> str:
         raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
 

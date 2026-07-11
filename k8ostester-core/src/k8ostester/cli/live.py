@@ -24,9 +24,24 @@ ALERT_TYPES = ("run.error", "verify.fail", "goal.fail", "teardown.error", "capab
 # folded into the metrics/topology panes instead of the event tail
 PANE_TYPES = ("load.sample", "topology")
 
+# shape says role, color says status: green = healthy/streaming,
+# yellow = transitioning, red = broken, plain = no health information
 NODE_ICONS = {"client": "▷", "proxy": "◆", "primary": "●", "replica": "○"}
-NODE_STYLES = {"client": "cyan", "proxy": "magenta", "primary": "bold green", "replica": "cyan"}
-EDGE_STYLES = {"sync": "bold yellow", "quorum": "bold yellow", "detached": "bold red"}
+NODE_STATUS_STYLES = {
+    "healthy": "green", "replicating": "yellow", "failed": "bold red",
+}
+REPLICATION_STREAMING = {"sync", "async", "quorum"}
+EDGE_STATUS_STYLES = {"detached": "bold red", "potential": "yellow"}
+
+
+def _node_style(node: dict) -> str:
+    return NODE_STATUS_STYLES.get(node.get("detail", ""), "")
+
+
+def _edge_style(label: str) -> str:
+    if label in REPLICATION_STREAMING:
+        return "green"
+    return EDGE_STATUS_STYLES.get(label, "dim")
 
 
 def topology_text(data: dict) -> Text:
@@ -60,14 +75,14 @@ def topology_text(data: dict) -> Text:
             label = via.get("detail") or ""
             line.append("└─" if last else "├─", style="dim")
             if label:
-                line.append(label, style=EDGE_STYLES.get(label, "dim"))
+                line.append(label, style=_edge_style(label))
             line.append("─▶ ", style="dim")
-        line.append(NODE_ICONS.get(role, "•") + " ", style=NODE_STYLES.get(role, ""))
+        line.append(NODE_ICONS.get(role, "•") + " ", style=_node_style(node))
         line.append(node_id, style="bold" if role == "primary" else "")
         if role:
             line.append(f"  {role}", style="dim")
         if detail := node.get("detail"):
-            line.append(f"  {detail}", style="red" if detail == "failed" else "dim")
+            line.append(f"  {detail}", style=_node_style(node) or "dim")
         lines.append(line)
         child_prefix = prefix if via is None else prefix + ("   " if last else "│  ")
         outgoing = children.get(node_id, [])

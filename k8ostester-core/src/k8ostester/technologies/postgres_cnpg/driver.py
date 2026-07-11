@@ -105,7 +105,8 @@ class CnpgDriver(TechnologyDriver):
             self.events.emit("manifest.applied", line)
 
     def wait_ready(self, timeout: float = 600) -> None:
-        self._wait_cluster_healthy(self.cluster_name, timeout)
+        # telemetry during bootstrap: the topology view shows replicas joining
+        self._wait_cluster_healthy(self.cluster_name, timeout, telemetry=True)
         # anything else in the manifests (e.g. a PgBouncer Pooler deployment)
         self.k8s.wait_workloads_ready(self.namespace, timeout=300)
 
@@ -130,11 +131,13 @@ class CnpgDriver(TechnologyDriver):
             CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters", name
         )
 
-    def _wait_cluster_healthy(self, name: str, timeout: float) -> None:
+    def _wait_cluster_healthy(self, name: str, timeout: float, telemetry: bool = False) -> None:
         last = ""
 
         def healthy() -> bool:
             nonlocal last
+            if telemetry:
+                self.emit_live_telemetry()
             status = self._cluster(name).get("status", {})
             phase = status.get("phase", "(no status)")
             ready = status.get("readyInstances", 0)
@@ -173,7 +176,9 @@ class CnpgDriver(TechnologyDriver):
 
         nodes: list[dict] = []
         edges: list[dict] = []
-        if self.spec.load and primary:
+        # the client path exists once the loadgen job has been created
+        # (_run_dir is set by start_load) — bootstrap topology has no client
+        if self.spec.load and primary and getattr(self, "_run_dir", None):
             clients = self.spec.load.clients
             nodes.append({"id": "loadgen", "role": "client",
                           "detail": f"{clients.count} clients, {clients.mode}"})

@@ -4,7 +4,7 @@ same event stream a real run produces."""
 from pathlib import Path
 from unittest.mock import patch
 
-from textual.widgets import DataTable, RichLog, Sparkline, TabbedContent
+from textual.widgets import DataTable, RichLog, Sparkline, Static
 
 from k8ostester.cli.tui import RunApp
 from k8ostester.core.experiment import ExperimentSpec, GoalSpec
@@ -87,30 +87,18 @@ async def test_tui_full_run_flow(tmp_path, monkeypatch):
         assert str(table.get_row("rto")[2]) == "1.6s"
         assert str(table.get_row("verify:integrity")[2]) == "pass"
 
-        # drill-in bindings switch tabs
-        tabs = app.query_one(TabbedContent)
-        assert tabs.active == "tab-overview"
-        await pilot.press("m")
-        assert tabs.active == "tab-metrics"
-        await pilot.press("t")
-        assert tabs.active == "tab-topology"
-
-        # topology history recorded both primaries + the fault (RichLog only
-        # renders its buffer once the tab is visible)
-        await pilot.pause()
+        # single-page dashboard: topology history is visible alongside
+        # everything else — both primaries plus the fault are recorded
         history = app.query_one("#t-history", RichLog)
         assert len(history.lines) >= 3
 
         # the current pane renders the connection tree with replication modes
-        from textual.widgets import Static
         current = str(app.query_one("#t-current", Static).content)
         assert "loadgen" in current and "pg-2" in current
         assert "detached" in current and "async" in current
 
-        await pilot.press("e")
-        assert tabs.active == "tab-events"
-        await pilot.press("o")
-        assert tabs.active == "tab-overview"
+        # events log is on the same page and populated
+        assert len(app.query_one("#e-log", RichLog).lines) > 0
 
         await pilot.press("q")
 

@@ -1,11 +1,11 @@
-"""Full-screen TUI for `k8ost run --tui`.
+"""Full-screen dashboard for `k8ost run` (the default on a terminal).
 
-The live panel grown into an app with drill-in views — Overview, Metrics,
-Topology, Events — switched with key bindings while the run executes on a
-worker thread. The runner feeds the app through the same event stream as the
-plain and live outputs; when the run finishes the app stays open for
-inspection and `q` exits with the run's exit code (0 passed / 1 error /
-2 failed).
+Everything on one page: header with the current step, load progress, metrics
+(ops/s sparkline, rates, live goal scores) beside the live topology tree and
+its change history, and the full event log underneath. The run executes on a
+worker thread and feeds the app through the same event stream as the plain
+and live outputs; when it finishes the dashboard stays open for inspection
+and `q` exits with the run's exit code (0 passed / 1 error / 2 failed).
 """
 
 from __future__ import annotations
@@ -15,10 +15,9 @@ from typing import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, VerticalScroll
+from textual.containers import Horizontal, Vertical
 from textual.widgets import (
     DataTable, Footer, ProgressBar, RichLog, Sparkline, Static,
-    TabbedContent, TabPane,
 )
 
 from k8ostester.cli.live import ALERT_TYPES, PANE_TYPES, topology_text
@@ -40,27 +39,23 @@ def _event_line(event: dict) -> Text:
 
 
 class RunApp(App):
-    """One experiment run, live."""
+    """One experiment run, live, on a single page."""
 
     TITLE = "k8ost run"
-    BINDINGS = [
-        ("o", "show_tab('tab-overview')", "Overview"),
-        ("m", "show_tab('tab-metrics')", "Metrics"),
-        ("t", "show_tab('tab-topology')", "Topology"),
-        ("e", "show_tab('tab-events')", "Events"),
-        ("q", "leave", "Quit"),
-    ]
+    BINDINGS = [("q", "leave", "Quit")]
     CSS = """
     #header { height: 1; padding: 0 1; background: $panel; }
     #load-progress { margin: 0 1; }
-    #ov-panes { height: auto; }
-    #ov-metrics, #ov-topology { width: 1fr; padding: 0 1; }
-    #ov-tail { height: 1fr; padding: 0 1; }
-    #ov-verdict { padding: 0 1; }
-    #ops-spark { height: 3; margin: 0 1; }
-    #m-rates { padding: 0 1; }
-    #t-current { padding: 1; }
-    TabPane { padding: 0; }
+    #panes { height: 45%; min-height: 14; }
+    #metrics-pane, #topology-pane {
+        width: 1fr; padding: 0 1; border: round $surface-lighten-2;
+    }
+    #ops-spark { height: 3; }
+    #m-rates { height: 1; }
+    #m-goals { height: 1fr; }
+    #t-current { height: auto; }
+    #t-history { height: 1fr; border-top: dashed $surface-lighten-2; }
+    #e-log { height: 1fr; margin: 0 1; border: round $surface-lighten-2; }
     """
 
     def __init__(self, spec: ExperimentSpec, context: str | None,
@@ -78,31 +73,24 @@ class RunApp(App):
         self.ops_history: list[float] = []
         self.load_total_s: float | None = None
         self.load_started_at: float | None = None
-        self._tail_events: list[dict] = []
         self._exit_code = 1  # interrupted before a verdict counts as an error
-
-    # -- layout ------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         yield Static(id="header")
-        with TabbedContent(initial="tab-overview"):
-            with TabPane("Overview", id="tab-overview"):
-                yield ProgressBar(id="load-progress", show_eta=False)
-                with Horizontal(id="ov-panes"):
-                    yield Static(id="ov-metrics")
-                    yield Static(id="ov-topology")
-                yield Static(id="ov-verdict")
-                with VerticalScroll(id="ov-tail-scroll"):
-                    yield Static(id="ov-tail")
-            with TabPane("Metrics", id="tab-metrics"):
+        yield ProgressBar(id="load-progress", show_eta=False)
+        with Horizontal(id="panes"):
+            with Vertical(id="metrics-pane") as metrics:
+                metrics.border_title = "metrics"
                 yield Sparkline([], summary_function=max, id="ops-spark")
                 yield Static(id="m-rates")
                 yield DataTable(id="m-goals", cursor_type="row")
-            with TabPane("Topology", id="tab-topology"):
+            with Vertical(id="topology-pane") as topology:
+                topology.border_title = "topology"
                 yield Static(id="t-current")
                 yield RichLog(id="t-history", markup=False, highlight=False)
-            with TabPane("Events", id="tab-events"):
-                yield RichLog(id="e-log", markup=False, highlight=False)
+        events_log = RichLog(id="e-log", markup=False, highlight=False)
+        events_log.border_title = "events"
+        yield events_log
         yield Footer()
 
     def on_mount(self) -> None:
@@ -145,7 +133,6 @@ class RunApp(App):
         if etype not in PANE_TYPES:
             self.current_step = etype
             self.query_one("#e-log", RichLog).write(_event_line(event))
-            self._append_tail(event)
         if etype == "load.start":
             self.load_total_s = data.get("total_s")
             self.load_started_at = time.time()
@@ -160,12 +147,6 @@ class RunApp(App):
         elif etype == "fault.injected":
             self.query_one("#t-history", RichLog).write(_event_line(event))
 
-    def _append_tail(self, event: dict) -> None:
-        self._tail_events = (self._tail_events + [event])[-10:]
-        self.query_one("#ov-tail", Static).update(
-            Text("\n").join(_event_line(e) for e in self._tail_events)
-        )
-
     def _update_metrics(self) -> None:
         s = self.sample or {}
         rates = Text.assemble(
@@ -175,7 +156,6 @@ class RunApp(App):
              f"{s.get('failed', 0)} failed", "dim"),
         )
         self.query_one("#m-rates", Static).update(rates)
-        self.query_one("#ov-metrics", Static).update(rates)
         table = self.query_one("#m-goals", DataTable)
         for g in s.get("goals", []):
             self._set_goal_row(table, g)
@@ -191,9 +171,7 @@ class RunApp(App):
             pass  # a goal the seed didn't anticipate — skip rather than crash
 
     def _update_topology(self, event: dict) -> None:
-        rendered = topology_text(event.get("data", {}))
-        self.query_one("#t-current", Static).update(rendered)
-        self.query_one("#ov-topology", Static).update(rendered)
+        self.query_one("#t-current", Static).update(topology_text(event.get("data", {})))
         self.query_one("#t-history", RichLog).write(Text.assemble(
             (f"{event['t_rel']:>8.1f}s ", "dim"), (event["msg"], ""),
         ))
@@ -204,7 +182,6 @@ class RunApp(App):
         self.result = result
         self.status = result.status
         self._exit_code = {"passed": 0, "failed": 2}.get(result.status, 1)
-        self.query_one("#ov-verdict", Static).update(verdict_table(result))
         table = self.query_one("#m-goals", DataTable)
         for v in result.verifications:
             self._set_goal_row(table, {"goal": v["check"], "check": True, "passed": v["passed"],
@@ -212,6 +189,11 @@ class RunApp(App):
                                        "detail": v["detail"]})
         for g in result.goals:
             self._set_goal_row(table, g)
+        log = self.query_one("#e-log", RichLog)
+        if result.goals or result.verifications:
+            log.write(verdict_table(result))
+        log.write(Text(f"run {result.status} — results: {result.run_dir}",
+                       style=STATUS_STYLE.get(result.status, "")))
         self._tick()
         self.notify(f"run {result.status} — results: {result.run_dir}",
                     severity="information" if result.status == "passed" else "error",
@@ -222,7 +204,6 @@ class RunApp(App):
         self.status = "error"
         self._exit_code = 1
         self.query_one("#e-log", RichLog).write(Text(f"run error: {message}", style="bold red"))
-        self.query_one("#ov-verdict", Static).update(Text(f"run error: {message}", style="bold red"))
         self._tick()
         self.notify(f"run error: {message}", severity="error", timeout=10)
 
@@ -235,8 +216,8 @@ class RunApp(App):
             (f"{self.spec.name} ({self.spec.technology})", "bold"),
             (f"  context {self.context}", "dim"),
             (f"  {elapsed:6.1f}s  " if running else "  ", "dim"),
-            (self.status if not running else self.current_step,
-             STATUS_STYLE.get(self.status, "cyan") if not running else "cyan"),
+            (self.current_step if running else self.status,
+             "cyan" if running else STATUS_STYLE.get(self.status, "cyan")),
             ("  (q to quit)" if not running else "", "dim"),
         ))
         if running and self.load_total_s and self.load_started_at:
@@ -244,9 +225,6 @@ class RunApp(App):
                 total=self.load_total_s,
                 progress=min(time.time() - self.load_started_at, self.load_total_s),
             )
-
-    def action_show_tab(self, tab: str) -> None:
-        self.query_one(TabbedContent).active = tab
 
     def action_leave(self) -> None:
         self.exit(self._exit_code)

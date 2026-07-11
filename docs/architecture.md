@@ -50,7 +50,7 @@ Framework paths are relative to the package root `k8ostester-core/src/k8ostester
 
 | Path | Role |
 |---|---|
-| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run + experiment picker), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app; `live.py` the in-terminal live run panel; `tui.py` the full-screen app with drill-in views (overview / metrics / topology / events) — the default on a terminal, `--view live|plain` for the inline panel or log lines |
+| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run + experiment picker), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app; `live.py` the in-terminal live run panel; `tui.py` the full-screen single-page dashboard (metrics + topology + events together) — the default on a terminal, `--view live|plain` for the inline panel or log lines |
 | `core/experiment.py` | pydantic models for `experiment.yaml` + loader; durations like `2m`/`30s` validated up front |
 | `core/runner.py` | lifecycle orchestration; technology-blind — all specifics go through the driver |
 | `core/k8s.py` | `ClusterClient`: kubeconfig-context-bound API access, namespace lifecycle, `kubectl apply` shell-out, workload readiness polling |

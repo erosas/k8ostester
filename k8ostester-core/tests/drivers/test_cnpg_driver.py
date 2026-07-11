@@ -686,6 +686,7 @@ def test_cnpg_topology_graph_full_path(mock_context):
     k8s, events, spec, ns = mock_context
     spec.load = LoadSpec(endpoint="pooler-rw", phases=[{"duration": "10s"}])
     driver = CnpgDriver(k8s, spec, ns, events)
+    driver._run_dir = spec.dir  # load has started
 
     stub_clusters(k8s, "pg")
     stub_cluster_status(
@@ -721,6 +722,7 @@ def test_cnpg_topology_graph_direct_endpoint(mock_context):
     k8s, events, spec, ns = mock_context
     spec.load = LoadSpec(endpoint="auto", phases=[{"duration": "10s"}])
     driver = CnpgDriver(k8s, spec, ns, events)
+    driver._run_dir = spec.dir  # load has started
 
     stub_clusters(k8s, "pg")
     stub_cluster_status(k8s, currentPrimary="pg-1", instanceNames=["pg-1"])
@@ -737,3 +739,33 @@ def test_cnpg_replication_states_unreachable_primary(mock_context):
     with patch.object(driver, "_psql", side_effect=RuntimeError("pod is gone")):
         assert driver._replication_states("pg-1") == {}
     assert driver._replication_states(None) == {}
+
+def test_cnpg_topology_graph_no_client_before_load_starts(mock_context):
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="auto", phases=[{"duration": "10s"}])
+    driver = CnpgDriver(k8s, spec, ns, events)  # start_load not called
+
+    stub_clusters(k8s, "pg")
+    stub_cluster_status(k8s, currentPrimary="pg-1", instanceNames=["pg-1"])
+
+    with patch.object(driver, "_psql", return_value=""):
+        graph = driver.topology_graph()
+    assert {n["id"] for n in graph["nodes"]} == {"pg-1"}
+
+def test_cnpg_wait_ready_emits_bootstrap_telemetry(mock_context, fake_clock):
+    """During cluster bootstrap the topology view sees replicas joining."""
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    stub_clusters(k8s, "my-cluster")
+    k8s.custom.get_namespaced_custom_object.return_value = {
+        "status": {"phase": "Cluster in healthy state", "instances": 2, "readyInstances": 2,
+                   "currentPrimary": "pg-1", "instanceNames": ["pg-1", "pg-2"]}
+    }
+
+    with patch.object(driver, "_psql", return_value="pg-2|quorum\n"):
+        driver.wait_ready()
+
+    topo_calls = [c for c in events.emit.call_args_list if c[0][0] == "topology"]
+    assert topo_calls, "readiness polling should emit topology telemetry"
+    assert topo_calls[0][1]["primary"] == "pg-1"

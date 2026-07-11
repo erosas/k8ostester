@@ -11,7 +11,7 @@ test plus an `experiment.yaml` describing load, faults, verification steps, and 
 framework runs it end-to-end and emits a per-goal pass/fail verdict.
 
 ```
-experiments/<tech>/<name>/          k8ostester/ (framework)              results/<name>/<run-id>/
+experiments/<tech>/<name>/          k8ostester-core/ (framework)         results/<name>/<run-id>/
 ┌─────────────────────┐            ┌──────────────────────────┐         ┌──────────────────┐
 │ experiment.yaml     │──validate──▶ core/experiment.py       │         │ experiment.json  │
 │ manifests/*.yaml    │            │ core/runner.py ──────────┼─writes──▶ events.jsonl     │
@@ -46,9 +46,11 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 
 ## Components
 
+Framework paths are relative to the package root `k8ostester-core/src/k8ostester/`.
+
 | Path | Role |
 |---|---|
-| `k8ostester/cli.py` | typer CLI (`k8ost`): `validate`, `run [--keep] [--context]`, `env check`, `env contexts` |
+| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app |
 | `core/experiment.py` | pydantic models for `experiment.yaml` + loader; durations like `2m`/`30s` validated up front |
 | `core/runner.py` | lifecycle orchestration; technology-blind — all specifics go through the driver |
 | `core/k8s.py` | `ClusterClient`: kubeconfig-context-bound API access, namespace lifecycle, `kubectl apply` shell-out, workload readiness polling |
@@ -60,14 +62,15 @@ load spec → capability check → install prereqs (idempotent, cluster-level)
 | `drivers/base.py` | `TechnologyDriver` contract: prereqs, deploy, readiness, topology, run_load, ensure_backup, verify |
 | `drivers/__init__.py` | driver discovery (D15): nearest `driver.py` above the experiment dir, loaded dynamically; built-ins as fallback |
 | `drivers/generic.py` | built-in deploy-anything driver; smoke tests now, seed of the test-your-own-app mode later |
-| `k8ostester/technologies/postgres_cnpg/driver.py` | built-in CNPG driver (D20): operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
-| `k8ostester/technologies/postgres_cnpg/loadgen.py` | the journal load runner (ships via ConfigMap, D12): HikariCP-style pooled clients, bounded timeouts, `load.workers` Indexed pod pool; `load.image`/`load.pull_secret` for private clusters (prebuilt via `loadgen.Dockerfile`) |
-| `k8ostester/technologies/postgres_cnpg/resources/` | pgbench runner Job (D17), loadgen Job, backup + PITR templates |
-| `technologies/<tech>/experiments/` | the framework's example/regression experiment suite; a config repo holds only such directories (D20) — numeric prefixes order the progression; a custom `driver.py` beside experiments overrides the built-in (D15) |
+| `technologies/postgres_cnpg/driver.py` | built-in CNPG driver (D20): operator pin + install, Cluster CR lifecycle, topology, loadgen Job, integrity/backup/PITR verification |
+| `technologies/postgres_cnpg/loadgen.py` | the journal load runner (ships via ConfigMap, D12): HikariCP-style pooled clients, bounded timeouts, `load.workers` Indexed pod pool; `load.image`/`load.pull_secret` for private clusters (prebuilt via `loadgen.Dockerfile`) |
+| `technologies/postgres_cnpg/resources/` | pgbench runner Job (D17), loadgen Job, backup + PITR templates |
+| `experiments/<tech>/` (repo top level) | the framework's example/regression experiment suite — outside the platform project, exactly the shape of an end user's config repo (D20); numeric prefixes order the progression; a custom `driver.py` beside experiments overrides the built-in (D15) |
+| `k8ostester-core/tests/` | the framework test suite, mirroring the source layout |
 | `core/goals.py` | goal evaluators: rto (gap-based, D14), rpo (from integrity reconciliation), availability, latency percentiles, connect error rate, procedural checks |
 | `workers/` | fault workers: `pod_kill` (grace 0), `process_kill` (kill -9 PID 1 — in-place container crash, scoped stand-in for node loss), `node_drain` (cordon + evict run pods, uncordon cleanup), `network_partition`/`network_loss`/`network_delay` (NetworkChaos CRs via Chaos Mesh, D16); targets resolve at injection time via driver topology |
 | `core/report.py` | `k8ost report`: self-contained HTML comparing runs — goal matrix + overlaid per-second throughput/latency graphs with fault markers, crosshair tooltips, light/dark |
-| `k8ostester/resources/infra/` | packaged common-infra defaults: SeaweedFS manifests (D6/D7), chaos-mesh 2.8.3 values (D16) — overridable via `infra/...` under the CWD (D20) |
+| `resources/infra/` | packaged common-infra defaults: SeaweedFS manifests (D6/D7), chaos-mesh 2.8.3 values (D16) — overridable via `infra/...` under the CWD (D20) |
 
 ## The driver contract
 

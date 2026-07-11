@@ -63,7 +63,7 @@ def test_report_command(tmp_path):
 
 def test_env_check(tmp_path):
     with patch("k8ostester.core.capabilities.probe") as mock_probe, \
-         patch("k8ostester.cli.available_contexts") as mock_contexts:
+         patch("k8ostester.cli.env.available_contexts") as mock_contexts:
         mock_contexts.return_value = (["ctx1"], "ctx1")
 
         from k8ostester.core.capabilities import Capabilities
@@ -168,7 +168,7 @@ def test_run_command_error_exits_1(tmp_path):
         assert "run error:" in result.output
 
 def test_env_contexts(tmp_path):
-    with patch("k8ostester.cli.available_contexts") as mock_contexts:
+    with patch("k8ostester.cli.env.available_contexts") as mock_contexts:
         mock_contexts.return_value = (["ctx1", "ctx2"], "ctx1")
         result = runner.invoke(app, ["env", "contexts"])
         assert result.exit_code == 0

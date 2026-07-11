@@ -21,7 +21,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.coverage.run]
@@ -35,4 +35,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["k8ostester"]
+packages = ["src/k8ostester"]

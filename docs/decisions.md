@@ -86,7 +86,8 @@ before the pause must be in the restored cluster, nothing after it — an exact 
 immune to client/server clock skew and commit-vs-statement timestamp gaps at the boundary.
 
 ## D15 — Technologies own their directory: driver + experiments + prerequisites
-`technologies/<tech>/` contains `driver.py` (+ helpers like `loadgen.py`) and `experiments/`.
+(Layout since revised: built-in drivers live in the package under `technologies/<tech>/`, and
+the example experiments at repo-top-level `experiments/<tech>/` — see D20.)
 Drivers are discovered by walking up from the experiment directory to the nearest `driver.py`
 (loaded dynamically; `DRIVER` attr or the single TechnologyDriver subclass); built-ins (generic)
 remain a core fallback. Tech-specific prerequisites and their version pins (e.g. the CNPG
@@ -156,7 +157,7 @@ installed. Two escape hatches survive: a `driver.py` found by walking up from th
 directory still overrides the built-in (custom/forked drivers live beside their experiments,
 D15's original mechanism), and an `infra/...` path under the CWD overrides the packaged infra
 defaults (e.g. a different containerd socket for chaos-mesh). The repo's
-`technologies/<tech>/experiments/` directories remain as the framework's example and regression
+`experiments/<tech>/` directories remain as the framework's example and regression
 suite.
 
 ## D14 — RTO is a gap between loadgen timestamps; fault events only locate the window

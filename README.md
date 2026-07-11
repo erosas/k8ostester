@@ -16,10 +16,10 @@ backup/PITR, and get a pass/fail verdict per goal.
 Requires Python >= 3.14.
 
 ```bash
-uv pip install -e . -p .venv/bin/python
+uv tool install --editable ./k8ostester-core   # installs the `k8ost` CLI
 
 k8ost env check                              # what can this cluster do?
-k8ost run technologies/postgres-cnpg/experiments/02-cnpg-single
+k8ost run experiments/postgres-cnpg/02-cnpg-single
 k8ost runs                                   # list recorded runs
 k8ost report --group pooling --open          # comparison graphs for a run group
 ```
@@ -28,9 +28,19 @@ Runs write artifacts to `results/<experiment>/<run-id>/` (events timeline, journ
 summary). Add `--keep` to leave the run namespace up for inspection, `--group` to group runs
 for reporting.
 
+To develop the framework itself: `cd k8ostester-core && uv run pytest`.
+
 ## Layout
 
-- `k8ostester/` — the framework core (CLI `k8ost`): runner, workers, goals, reports, common infra
-- `technologies/<tech>/experiments/` — the example/regression suite; built-in drivers ship inside `k8ostester/` (D20), so your own config repo needs only experiment directories
-- `infra/` — common cluster prerequisites (object store)
+Platform code and experiments are strictly separated: `k8ostester-core/` is the framework
+(what gets installed), `experiments/` is what an end user's config repo looks like.
+
+- `k8ostester-core/` — the platform, a self-contained Python project:
+  - `src/k8ostester/` — the source: CLI (`k8ost`), runner, workers, goals, reports, common
+    infra, built-in technology drivers (D20)
+  - `tests/` — the framework test suite, mirroring the source layout
+- `experiments/<tech>/<experiment>/` — the example/regression experiment suite; each experiment
+  is a directory with `experiment.yaml` + `manifests/`. A user config repo needs nothing else —
+  built-in drivers resolve by the `technology:` name, and a custom `driver.py` placed above an
+  experiment overrides them (D15)
 - `results/` — per-run artifacts (gitignored)

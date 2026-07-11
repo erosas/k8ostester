@@ -190,7 +190,7 @@ class Runner:
             # sleep toward the offset in short slices so the live view keeps
             # getting samples while the fault clock runs down
             while (remaining := t0 + fault.at_s - time.time()) > 0:
-                time.sleep(min(remaining, 5))
+                time.sleep(min(remaining, 3))
                 driver.emit_live_telemetry()
             worker = get_worker(fault.worker)(k8s, driver, self.namespace, self.events)
             cleanup = worker.execute(fault)

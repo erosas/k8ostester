@@ -266,5 +266,5 @@ def test_runner_samples_telemetry_while_waiting_for_fault(mock_probe, mock_get_d
     with patch("k8ostester.core.runner.get_worker"):
         Runner(dummy_spec, results_root=tmp_path).run()
 
-    # 12s offset in <=5s slices: telemetry sampled on each slice (5+5+2)
-    assert mock_driver.emit_live_telemetry.call_count == 3
+    # 12s offset in <=3s slices: telemetry sampled on each slice (3+3+3+3)
+    assert mock_driver.emit_live_telemetry.call_count == 4

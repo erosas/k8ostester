@@ -74,3 +74,17 @@ def test_base_driver_op_records_default_empty(mock_context):
 def test_base_driver_live_telemetry_is_noop(mock_context):
     k8s, events, spec, ns = mock_context
     TechnologyDriver(k8s, spec, ns, events).emit_live_telemetry()  # must not raise
+
+def test_base_driver_topology_graph_defaults_from_topology(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = TechnologyDriver(k8s, spec, ns, events)
+    with patch.object(TechnologyDriver, "topology",
+                      return_value={"primary": "a", "replicas": ["b"]}):
+        graph = driver.topology_graph()
+    assert {n["id"] for n in graph["nodes"]} == {"a", "b"}
+    assert graph["edges"] == [{"source": "a", "target": "b"}]
+
+def test_base_driver_topology_graph_empty_without_topology(mock_context):
+    k8s, events, spec, ns = mock_context
+    # base topology() raises K8osDriverError → graph degrades to empty
+    assert TechnologyDriver(k8s, spec, ns, events).topology_graph() == {"nodes": [], "edges": []}

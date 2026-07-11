@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 
 import typer
@@ -12,6 +13,13 @@ from rich.table import Table
 from k8ostester.cli.app import app, console
 from k8ostester.cli.live import LiveRunView
 from k8ostester.core.experiment import load_experiment
+
+
+class RunUI(str, Enum):
+    auto = "auto"
+    tui = "tui"
+    live = "live"
+    plain = "plain"
 
 
 def verdict_table(result) -> Table:
@@ -99,8 +107,11 @@ def run(
         False, "--allow-concurrent",
         help="Run even if another experiment occupies the cluster (results may cross-contaminate)",
     ),
-    plain: bool = typer.Option(False, "--plain", help="Line-by-line event output instead of the live view"),
-    tui: bool = typer.Option(False, "--tui", help="Full-screen TUI with drill-in views (metrics, topology, events)"),
+    view: RunUI = typer.Option(
+        RunUI.auto, "--view",
+        help="tui = full-screen with drill-in views, live = inline panel, "
+             "plain = log lines; auto = tui on a terminal, plain elsewhere",
+    ),
 ) -> None:
     """Run an experiment end-to-end."""
     from k8ostester.core.runner import Runner
@@ -109,14 +120,17 @@ def run(
         path = pick_experiment()
     spec = load_experiment(path)
 
-    if tui:
+    if view == RunUI.auto:
+        view = RunUI.tui if console.is_terminal else RunUI.plain
+
+    if view == RunUI.tui:
         from k8ostester.cli.tui import run_tui
 
         raise typer.Exit(run_tui(spec, keep=keep, context=context, group=group,
                                  allow_concurrent=allow_concurrent))
 
     live_view = LiveRunView(spec.name, spec.technology, context or spec.cluster.context) \
-        if console.is_terminal and not plain else None
+        if view == RunUI.live else None
 
     def show(event: dict) -> None:
         console.print(f"[dim]{event['t_rel']:>8.1f}s[/dim]  [bold]{event['type']:<18}[/bold] {event['msg']}")

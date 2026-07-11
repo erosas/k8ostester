@@ -72,6 +72,26 @@ class TechnologyDriver:
         live run view. Called by the runner while it waits out the fault
         timeline (and by drivers from their own wait loops); must never raise."""
 
+    def topology_graph(self) -> dict[str, Any]:
+        """Component graph for the live view: how traffic and replication flow.
+
+        {"nodes": [{"id", "role", "detail"?}], "edges": [{"source", "target",
+        "detail"?}]} — roles: client | proxy | primary | replica. Edge detail
+        carries the relationship (service name, sync/async/quorum, ...).
+        Drivers override this with their own discovery (CR status, database
+        introspection); the default derives a flat primary→replicas graph
+        from topology()."""
+        try:
+            topo = self.topology()
+        except Exception:
+            return {"nodes": [], "edges": []}
+        primary = topo.get("primary")
+        replicas = topo.get("replicas", [])
+        nodes = [{"id": primary, "role": "primary"}] if primary else []
+        nodes += [{"id": r, "role": "replica"} for r in replicas]
+        edges = [{"source": primary, "target": r} for r in replicas if primary]
+        return {**topo, "nodes": nodes, "edges": edges}
+
     @property
     def op_records(self) -> list[dict]:
         """Per-operation records from the completed load run (goal evidence)."""

@@ -24,6 +24,61 @@ ALERT_TYPES = ("run.error", "verify.fail", "goal.fail", "teardown.error", "capab
 # folded into the metrics/topology panes instead of the event tail
 PANE_TYPES = ("load.sample", "topology")
 
+NODE_ICONS = {"client": "▷", "proxy": "◆", "primary": "●", "replica": "○"}
+NODE_STYLES = {"client": "cyan", "proxy": "magenta", "primary": "bold green", "replica": "cyan"}
+EDGE_STYLES = {"sync": "bold yellow", "quorum": "bold yellow", "detached": "bold red"}
+
+
+def topology_text(data: dict) -> Text:
+    """Render a topology event as a connection tree — how traffic and
+    replication flow (`loadgen ─▶ pooler ─▶ primary ─sync─▶ replica`).
+    Accepts the graph form ({nodes, edges}) from `topology_graph()`; falls
+    back to flat primary/replicas bullets for drivers that only have that."""
+    nodes = data.get("nodes")
+    if not nodes:
+        lines = []
+        if primary := data.get("primary"):
+            lines.append(Text.assemble(("● ", "bold green"), (primary, "bold"), ("  primary", "dim")))
+        for replica in data.get("replicas", []):
+            lines.append(Text.assemble(("○ ", "cyan"), replica, ("  replica", "dim")))
+        return Text("\n").join(lines)
+
+    by_id = {n["id"]: n for n in nodes}
+    children: dict[str, list[dict]] = {}
+    has_parent = set()
+    for edge in data.get("edges", []):
+        children.setdefault(edge["source"], []).append(edge)
+        has_parent.add(edge["target"])
+
+    lines: list[Text] = []
+
+    def emit(node_id: str, prefix: str, via: dict | None, last: bool) -> None:
+        node = by_id.get(node_id, {"id": node_id, "role": ""})
+        role = node.get("role", "")
+        line = Text(prefix)
+        if via is not None:
+            label = via.get("detail") or ""
+            line.append("└─" if last else "├─", style="dim")
+            if label:
+                line.append(label, style=EDGE_STYLES.get(label, "dim"))
+            line.append("─▶ ", style="dim")
+        line.append(NODE_ICONS.get(role, "•") + " ", style=NODE_STYLES.get(role, ""))
+        line.append(node_id, style="bold" if role == "primary" else "")
+        if role:
+            line.append(f"  {role}", style="dim")
+        if detail := node.get("detail"):
+            line.append(f"  {detail}", style="red" if detail == "failed" else "dim")
+        lines.append(line)
+        child_prefix = prefix if via is None else prefix + ("   " if last else "│  ")
+        outgoing = children.get(node_id, [])
+        for i, child in enumerate(outgoing):
+            emit(child["target"], child_prefix, child, i == len(outgoing) - 1)
+
+    roots = [n["id"] for n in nodes if n["id"] not in has_parent]
+    for root in roots:
+        emit(root, "", None, True)
+    return Text("\n").join(lines)
+
 
 class LiveRunView:
     def __init__(self, name: str, technology: str, context: str | None, tail: int = 10):
@@ -104,15 +159,8 @@ class LiveRunView:
     def _topology_pane(self) -> RenderableType | None:
         if not self.topology:
             return None
-        grid = Table.grid(padding=(0, 1))
-        primary = self.topology.get("primary")
-        if primary:
-            grid.add_row(Text("●", style="bold green"), Text(primary, style="bold"),
-                         Text("primary", style="dim"))
-        for replica in self.topology.get("replicas", []):
-            grid.add_row(Text("○", style="cyan"), Text(replica), Text("replica", style="dim"))
-        return Panel(grid, title="topology", title_align="left",
-                     border_style="dim", expand=False)
+        return Panel(topology_text(self.topology), title="topology",
+                     title_align="left", border_style="dim", expand=False)
 
     def _tail(self) -> RenderableType:
         grid = Table.grid(padding=(0, 1))

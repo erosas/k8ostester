@@ -50,7 +50,7 @@ Framework paths are relative to the package root `k8ostester-core/src/k8ostester
 
 | Path | Role |
 |---|---|
-| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run + experiment picker), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app; `live.py` the in-terminal live run panel; `tui.py` the full-screen `--tui` app with drill-in views (overview / metrics / topology / events) |
+| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run + experiment picker), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app; `live.py` the in-terminal live run panel; `tui.py` the full-screen app with drill-in views (overview / metrics / topology / events) — the default on a terminal, `--view live|plain` for the inline panel or log lines |
 | `core/experiment.py` | pydantic models for `experiment.yaml` + loader; durations like `2m`/`30s` validated up front |
 | `core/runner.py` | lifecycle orchestration; technology-blind — all specifics go through the driver |
 | `core/k8s.py` | `ClusterClient`: kubeconfig-context-bound API access, namespace lifecycle, `kubectl apply` shell-out, workload readiness polling |
@@ -76,8 +76,12 @@ Framework paths are relative to the package root `k8ostester-core/src/k8ostester
 
 The runner never knows what Postgres is. A driver owns: prerequisite installation (operator,
 object store), deploying the config, readiness, **topology** (role → pod, so faults can target
-"the primary"), the load generator, **integrity checking** (reconcile the loadgen's acked-write
-journal against the database — this is how RPO/data loss is measured), and backup/PITR verbs.
+"the primary") plus **topology_graph** (a nodes/edges component graph for the live view — the
+framework owns the schema and rendering, the driver owns discovery; CNPG combines the Cluster CR
+with `pg_stat_replication` on the primary for per-replica sync/async/quorum state and Pooler CR
+detection for the client path), the load generator, **integrity checking** (reconcile the
+loadgen's acked-write journal against the database — this is how RPO/data loss is measured),
+and backup/PITR verbs.
 New technology = new folder under `drivers/` implementing the same contract; runner, workers,
 goals, metrics, and reports are shared.
 

@@ -158,6 +158,81 @@ class CnpgDriver(TechnologyDriver):
             "replicas": [i for i in instances if i != primary],
         }
 
+    def topology_graph(self) -> dict[str, Any]:
+        """The live connection graph: loadgen → (pooler|rw service) → primary
+        → replicas, with per-replica replication mode straight from the
+        primary's pg_stat_replication (sync/async/quorum — or 'detached' for a
+        replica the primary is not streaming to, e.g. mid-failover)."""
+        status = self._cluster(self.cluster_name).get("status", {})
+        primary = status.get("currentPrimary")
+        instances = status.get("instanceNames", [])
+        health: dict[str, str] = {}
+        for state, names in (status.get("instancesStatus") or {}).items():
+            for name in names:
+                health[name] = state
+
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        if self.spec.load and primary:
+            clients = self.spec.load.clients
+            nodes.append({"id": "loadgen", "role": "client",
+                          "detail": f"{clients.count} clients, {clients.mode}"})
+            endpoint = self.spec.load.endpoint
+            pooler = self._pooler_named(endpoint) if endpoint != "auto" else None
+            if pooler:
+                nodes.append({"id": endpoint, "role": "proxy", "detail": pooler})
+                edges.append({"source": "loadgen", "target": endpoint})
+                edges.append({"source": endpoint, "target": primary})
+            else:
+                service = f"{self.cluster_name}-rw" if endpoint == "auto" else endpoint
+                edges.append({"source": "loadgen", "target": primary, "detail": service})
+
+        replication = self._replication_states(primary)
+        for name in instances:
+            role = "primary" if name == primary else "replica"
+            nodes.append({"id": name, "role": role, "detail": health.get(name, "")})
+            if role == "replica" and primary:
+                edges.append({"source": primary, "target": name,
+                              "detail": replication.get(name, "detached")})
+        return {
+            "primary": primary,
+            "replicas": [i for i in instances if i != primary],
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+    def _replication_states(self, primary: str | None) -> dict[str, str]:
+        """replica pod → sync_state as the primary reports it (CNPG sets
+        application_name to the instance name). Empty when unreachable —
+        graph edges then read 'detached', which is the honest answer."""
+        if not primary:
+            return {}
+        try:
+            out = self._psql(
+                "select application_name, sync_state from pg_stat_replication",
+                pod=primary,
+            )
+            return {
+                parts[0]: parts[1]
+                for line in out.splitlines()
+                if len(parts := line.strip().split("|")) >= 2
+            }
+        except Exception:
+            return {}
+
+    def _pooler_named(self, name: str) -> str | None:
+        """Detail string if a CNPG Pooler CR backs this endpoint, else None."""
+        try:
+            poolers = self.k8s.custom.list_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, self.namespace, "poolers"
+            )["items"]
+        except Exception:
+            return None
+        for pooler in poolers:
+            if pooler["metadata"]["name"] == name:
+                return f"pgbouncer ({pooler.get('spec', {}).get('type', 'rw')})"
+        return None
+
     def _psql(self, sql: str, db: str = "app", pod: str | None = None) -> str:
         pod = pod or self.topology()["primary"]
         return self.k8s.exec_pod(
@@ -355,11 +430,19 @@ class CnpgDriver(TechnologyDriver):
                     f"{sample['ops_s']} ops/s, {sample['failed']} failed",
                     **sample,
                 )
-            topology = self.topology()
-            if topology != self._last_topology:
-                self._last_topology = topology
+            graph = self.topology_graph()
+            if graph != self._last_topology:
+                self._last_topology = graph
+                replication = " · ".join(
+                    f"{e['target']} {e.get('detail', '')}".strip()
+                    for e in graph["edges"]
+                    if e["source"] == graph.get("primary")
+                )
                 self.events.emit(
-                    "topology", f"primary {topology['primary']}", **topology
+                    "topology",
+                    f"primary {graph.get('primary')}"
+                    + (f" · {replication}" if replication else ""),
+                    **graph,
                 )
         except Exception:
             pass
@@ -374,8 +457,9 @@ class CnpgDriver(TechnologyDriver):
                 self.emit_live_telemetry()
             return done
 
-        # pull + pip headroom on top of the phase plan
-        wait_until(finished, self._load_total_s + 300, interval=5,
+        # pull + pip headroom on top of the phase plan; 3s keeps the
+        # live view's samples and topology fresh
+        wait_until(finished, self._load_total_s + 300, interval=3,
                    desc="loadgen job did not finish")
 
         logs = self._loadgen_logs()

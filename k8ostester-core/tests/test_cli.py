@@ -298,23 +298,31 @@ def test_live_run_view_renders_header_and_events():
     assert "verify.fail" in out  # current step in the header + alert row
 
 def test_run_command_live_view(tmp_path):
-    from unittest.mock import PropertyMock
-    from rich.console import Console
-
     exp_dir = make_exp_dir(tmp_path)
 
-    with patch("k8ostester.core.runner.Runner") as mock_runner_cls, \
-         patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True):
+    with patch("k8ostester.core.runner.Runner") as mock_runner_cls:
         from k8ostester.core.runner import RunResult
         res = RunResult("r1", tmp_path / "run1")
         res.status = "passed"
         mock_runner_cls.return_value.run.return_value = res
 
-        result = runner.invoke(app, ["run", str(exp_dir)])
+        result = runner.invoke(app, ["run", str(exp_dir), "--view", "live"])
         assert result.exit_code == 0
         # the live view was wired in as the event sink
         from k8ostester.cli.live import LiveRunView
         assert isinstance(mock_runner_cls.call_args[1]["on_event"].__self__, LiveRunView)
+
+def test_run_command_terminal_defaults_to_tui(tmp_path):
+    from unittest.mock import PropertyMock
+    from rich.console import Console
+
+    exp_dir = make_exp_dir(tmp_path)
+
+    with patch("k8ostester.cli.tui.run_tui", return_value=0) as mock_tui, \
+         patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True):
+        result = runner.invoke(app, ["run", str(exp_dir)])
+        assert result.exit_code == 0
+        mock_tui.assert_called_once()
 
 def test_live_run_view_metrics_topology_and_progress():
     from k8ostester.cli.live import LiveRunView
@@ -341,3 +349,36 @@ def test_live_run_view_metrics_topology_and_progress():
     assert "pg-1" in out and "primary" in out and "pg-3" in out
     assert "/150s" in out  # load progress
     assert "load.sample" not in out  # samples feed panes, not the event tail
+
+def test_topology_text_renders_connection_tree():
+    from k8ostester.cli.live import topology_text
+
+    graph = {
+        "nodes": [
+            {"id": "loadgen", "role": "client", "detail": "5 clients, persistent"},
+            {"id": "pooler-rw", "role": "proxy", "detail": "pgbouncer (rw)"},
+            {"id": "pg-1", "role": "primary", "detail": "healthy"},
+            {"id": "pg-2", "role": "replica", "detail": "healthy"},
+            {"id": "pg-3", "role": "replica", "detail": "failed"},
+        ],
+        "edges": [
+            {"source": "loadgen", "target": "pooler-rw"},
+            {"source": "pooler-rw", "target": "pg-1"},
+            {"source": "pg-1", "target": "pg-2", "detail": "sync"},
+            {"source": "pg-1", "target": "pg-3", "detail": "detached"},
+        ],
+    }
+    out = topology_text(graph).plain
+    lines = out.splitlines()
+    assert "▷ loadgen" in lines[0]
+    assert "◆ pooler-rw" in out and "pgbouncer" in out
+    assert "● pg-1" in out
+    assert "sync─▶ ○ pg-2" in out.replace("├─", "").replace("└─", "")
+    assert "detached" in out and "failed" in out
+    # tree shape: replicas indented under the primary
+    assert lines[-1].startswith("      ")
+
+def test_topology_text_legacy_flat_form():
+    from k8ostester.cli.live import topology_text
+    out = topology_text({"primary": "pg-1", "replicas": ["pg-2"]}).plain
+    assert "pg-1" in out and "primary" in out and "pg-2" in out

@@ -21,7 +21,7 @@ from textual.widgets import (
     TabbedContent, TabPane,
 )
 
-from k8ostester.cli.live import ALERT_TYPES, PANE_TYPES
+from k8ostester.cli.live import ALERT_TYPES, PANE_TYPES, topology_text
 from k8ostester.cli.run import verdict_table
 from k8ostester.core.experiment import ExperimentSpec
 
@@ -191,19 +191,11 @@ class RunApp(App):
             pass  # a goal the seed didn't anticipate — skip rather than crash
 
     def _update_topology(self, event: dict) -> None:
-        data = event.get("data", {})
-        lines = []
-        if data.get("primary"):
-            lines.append(Text.assemble(("● ", "bold green"), (data["primary"], "bold"), ("  primary", "dim")))
-        for replica in data.get("replicas", []):
-            lines.append(Text.assemble(("○ ", "cyan"), replica, ("  replica", "dim")))
-        rendered = Text("\n").join(lines)
+        rendered = topology_text(event.get("data", {}))
         self.query_one("#t-current", Static).update(rendered)
         self.query_one("#ov-topology", Static).update(rendered)
         self.query_one("#t-history", RichLog).write(Text.assemble(
-            (f"{event['t_rel']:>8.1f}s ", "dim"), ("primary → ", ""),
-            (str(data.get("primary")), "bold"),
-            (f"  (replicas: {', '.join(data.get('replicas', [])) or '—'})", "dim"),
+            (f"{event['t_rel']:>8.1f}s ", "dim"), (event["msg"], ""),
         ))
 
     # -- completion -----------------------------------------------------------

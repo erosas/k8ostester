@@ -17,11 +17,25 @@ EVENTS = [
      "data": {"ops_s": 19.8, "err_s": 0.2, "total_ops": 400, "acked_writes": 280, "failed": 2,
               "goals": [{"goal": "uptime", "value": "99.40%", "threshold": "min 98",
                          "passed": True, "detail": "so far"}]}},
-    {"type": "topology", "t_rel": 30.0, "msg": "primary pg-1",
-     "data": {"primary": "pg-1", "replicas": ["pg-2", "pg-3"]}},
+    {"type": "topology", "t_rel": 30.0, "msg": "primary pg-1 · pg-2 sync · pg-3 async",
+     "data": {"primary": "pg-1", "replicas": ["pg-2", "pg-3"],
+              "nodes": [{"id": "loadgen", "role": "client", "detail": "5 clients, persistent"},
+                        {"id": "pg-1", "role": "primary", "detail": "healthy"},
+                        {"id": "pg-2", "role": "replica", "detail": "healthy"},
+                        {"id": "pg-3", "role": "replica", "detail": "healthy"}],
+              "edges": [{"source": "loadgen", "target": "pg-1", "detail": "pg-rw"},
+                        {"source": "pg-1", "target": "pg-2", "detail": "sync"},
+                        {"source": "pg-1", "target": "pg-3", "detail": "async"}]}},
     {"type": "fault.injected", "t_rel": 80.0, "msg": "pod_kill at +60s"},
-    {"type": "topology", "t_rel": 86.0, "msg": "primary pg-2",
-     "data": {"primary": "pg-2", "replicas": ["pg-1", "pg-3"]}},
+    {"type": "topology", "t_rel": 86.0, "msg": "primary pg-2 · pg-1 detached · pg-3 async",
+     "data": {"primary": "pg-2", "replicas": ["pg-1", "pg-3"],
+              "nodes": [{"id": "loadgen", "role": "client", "detail": "5 clients, persistent"},
+                        {"id": "pg-2", "role": "primary", "detail": "healthy"},
+                        {"id": "pg-1", "role": "replica", "detail": "failed"},
+                        {"id": "pg-3", "role": "replica", "detail": "healthy"}],
+              "edges": [{"source": "loadgen", "target": "pg-2", "detail": "pg-rw"},
+                        {"source": "pg-2", "target": "pg-1", "detail": "detached"},
+                        {"source": "pg-2", "target": "pg-3", "detail": "async"}]}},
 ]
 
 
@@ -87,6 +101,12 @@ async def test_tui_full_run_flow(tmp_path, monkeypatch):
         history = app.query_one("#t-history", RichLog)
         assert len(history.lines) >= 3
 
+        # the current pane renders the connection tree with replication modes
+        from textual.widgets import Static
+        current = str(app.query_one("#t-current", Static).content)
+        assert "loadgen" in current and "pg-2" in current
+        assert "detached" in current and "async" in current
+
         await pilot.press("e")
         assert tabs.active == "tab-events"
         await pilot.press("o")
@@ -130,6 +150,6 @@ def test_run_command_tui_flag(tmp_path):
     (exp_dir / "manifests").mkdir()
 
     with patch("k8ostester.cli.tui.run_tui", return_value=2) as mock_tui:
-        result = CliRunner().invoke(cli_app, ["run", str(exp_dir), "--tui"])
+        result = CliRunner().invoke(cli_app, ["run", str(exp_dir), "--view", "tui"])
         assert result.exit_code == 2
         assert mock_tui.call_args[1]["keep"] is False

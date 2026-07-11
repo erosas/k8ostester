@@ -643,7 +643,10 @@ def test_cnpg_wait_load_done_emits_live_telemetry(mock_context, fake_clock):
 
     logs = '{"kind": "op", "op": "write", "ok": true, "t": 100, "id": 1, "checksum": "a"}'
     with patch.object(driver, "_loadgen_logs", return_value=logs), \
-         patch.object(driver, "topology", return_value={"primary": "pg-1", "replicas": ["pg-2"]}):
+         patch.object(driver, "topology_graph", return_value={
+             "primary": "pg-1", "replicas": ["pg-2"],
+             "nodes": [{"id": "pg-1", "role": "primary"}],
+             "edges": [{"source": "pg-1", "target": "pg-2", "detail": "sync"}]}):
         driver.wait_load_done()
 
     sample_calls = [c for c in events.emit.call_args_list if c[0][0] == "load.sample"]
@@ -652,7 +655,9 @@ def test_cnpg_wait_load_done_emits_live_telemetry(mock_context, fake_clock):
     assert sample_calls[0][1]["goals"][0]["goal"] == "error_rate"
 
     topo_calls = [c for c in events.emit.call_args_list if c[0][0] == "topology"]
-    assert topo_calls[0][1] == {"primary": "pg-1", "replicas": ["pg-2"]}
+    assert topo_calls[0][1]["primary"] == "pg-1"
+    assert topo_calls[0][1]["edges"][0]["detail"] == "sync"
+    assert "pg-2 sync" in topo_calls[0][0][1]  # human-readable msg
 
 def test_cnpg_wait_load_done_survives_telemetry_failure(mock_context, fake_clock):
     """Live telemetry is best-effort: a topology/log hiccup must not fail the run."""
@@ -669,5 +674,66 @@ def test_cnpg_wait_load_done_survives_telemetry_failure(mock_context, fake_clock
 
     logs = '{"kind": "op", "op": "write", "ok": true, "t": 1, "id": 1, "checksum": "a"}'
     with patch.object(driver, "_loadgen_logs", return_value=logs), \
-         patch.object(driver, "topology", side_effect=RuntimeError("no primary")):
+         patch.object(driver, "topology_graph", side_effect=RuntimeError("no primary")):
         driver.wait_load_done()  # must not raise
+
+def stub_cluster_status(k8s, **status):
+    k8s.custom.get_namespaced_custom_object.return_value = {"status": status}
+
+def test_cnpg_topology_graph_full_path(mock_context):
+    """loadgen → pooler → primary with per-replica sync state from
+    pg_stat_replication and health from the CR."""
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="pooler-rw", phases=[{"duration": "10s"}])
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    stub_clusters(k8s, "pg")
+    stub_cluster_status(
+        k8s,
+        currentPrimary="pg-1",
+        instanceNames=["pg-1", "pg-2", "pg-3"],
+        instancesStatus={"healthy": ["pg-1", "pg-2"], "failed": ["pg-3"]},
+    )
+    # poolers listing shares the custom.list mock with clusters — route by plural
+    def list_custom(group, version, namespace, plural):
+        if plural == "poolers":
+            return {"items": [{"metadata": {"name": "pooler-rw"}, "spec": {"type": "rw"}}]}
+        return {"items": [{"metadata": {"name": "pg"}}]}
+    k8s.custom.list_namespaced_custom_object.side_effect = list_custom
+
+    with patch.object(driver, "_psql", return_value="pg-2|quorum\n"):
+        graph = driver.topology_graph()
+
+    roles = {n["id"]: n["role"] for n in graph["nodes"]}
+    assert roles == {"loadgen": "client", "pooler-rw": "proxy",
+                     "pg-1": "primary", "pg-2": "replica", "pg-3": "replica"}
+    details = {n["id"]: n.get("detail") for n in graph["nodes"]}
+    assert details["pooler-rw"] == "pgbouncer (rw)"
+    assert details["pg-3"] == "failed"
+
+    edges = {(e["source"], e["target"]): e.get("detail") for e in graph["edges"]}
+    assert ("loadgen", "pooler-rw") in edges
+    assert ("pooler-rw", "pg-1") in edges
+    assert edges[("pg-1", "pg-2")] == "quorum"
+    assert edges[("pg-1", "pg-3")] == "detached"  # not in pg_stat_replication
+
+def test_cnpg_topology_graph_direct_endpoint(mock_context):
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="auto", phases=[{"duration": "10s"}])
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    stub_clusters(k8s, "pg")
+    stub_cluster_status(k8s, currentPrimary="pg-1", instanceNames=["pg-1"])
+
+    with patch.object(driver, "_psql", return_value=""):
+        graph = driver.topology_graph()
+
+    edges = {(e["source"], e["target"]): e.get("detail") for e in graph["edges"]}
+    assert edges[("loadgen", "pg-1")] == "pg-rw"  # via the rw service, no pooler
+
+def test_cnpg_replication_states_unreachable_primary(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    with patch.object(driver, "_psql", side_effect=RuntimeError("pod is gone")):
+        assert driver._replication_states("pg-1") == {}
+    assert driver._replication_states(None) == {}

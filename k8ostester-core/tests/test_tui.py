@@ -4,7 +4,7 @@ same event stream a real run produces."""
 from pathlib import Path
 from unittest.mock import patch
 
-from textual.widgets import DataTable, RichLog, Sparkline, Static
+from textual.widgets import DataTable, RichLog, Static
 
 from k8ostester.cli.tui import RunApp
 from k8ostester.core.experiment import ExperimentSpec, GoalSpec
@@ -78,8 +78,8 @@ async def test_tui_full_run_flow(tmp_path, monkeypatch):
 
         assert app.result.status == "passed"
         assert app.status == "passed"
-        assert app.ops_history == [19.8]
-        assert app.query_one("#ops-spark", Sparkline).data == [19.8]
+        rates = str(app.query_one("#m-rates", Static).content)
+        assert "19.8" in rates and "0.50%" in rates  # 2 failed of 400 ops
 
         # goal table: live + final values landed, rto filled at the end
         table = app.query_one("#m-goals", DataTable)

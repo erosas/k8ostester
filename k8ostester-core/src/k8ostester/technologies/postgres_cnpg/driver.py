@@ -176,21 +176,25 @@ class CnpgDriver(TechnologyDriver):
 
         nodes: list[dict] = []
         edges: list[dict] = []
-        # the client path exists once the loadgen job has been created
-        # (_run_dir is set by start_load) — bootstrap topology has no client
-        if self.spec.load and primary and getattr(self, "_run_dir", None):
+        poolers = self._poolers()
+        if self.spec.load and primary:
             clients = self.spec.load.clients
+            started = getattr(self, "_run_dir", None) is not None
             nodes.append({"id": "loadgen", "role": "client",
-                          "detail": f"{clients.count} clients, {clients.mode}"})
+                          "detail": f"{clients.count} clients, {clients.mode}"
+                                    + ("" if started else " (waiting)")})
             endpoint = self.spec.load.endpoint
-            pooler = self._pooler_named(endpoint) if endpoint != "auto" else None
-            if pooler:
-                nodes.append({"id": endpoint, "role": "proxy", "detail": pooler})
+            if endpoint in poolers:
                 edges.append({"source": "loadgen", "target": endpoint})
-                edges.append({"source": endpoint, "target": primary})
             else:
                 service = f"{self.cluster_name}-rw" if endpoint == "auto" else endpoint
                 edges.append({"source": "loadgen", "target": primary, "detail": service})
+        if primary:
+            # every deployed Pooler is part of the config under test — show it
+            # even when the load plan bypasses it
+            for name, detail in poolers.items():
+                nodes.append({"id": name, "role": "proxy", "detail": detail})
+                edges.append({"source": name, "target": primary})
 
         replication = self._replication_states(primary)
         for name in instances:
@@ -225,18 +229,19 @@ class CnpgDriver(TechnologyDriver):
         except Exception:
             return {}
 
-    def _pooler_named(self, name: str) -> str | None:
-        """Detail string if a CNPG Pooler CR backs this endpoint, else None."""
+    def _poolers(self) -> dict[str, str]:
+        """CNPG Pooler CRs in the run namespace: name → detail string."""
         try:
             poolers = self.k8s.custom.list_namespaced_custom_object(
                 CNPG_GROUP, CNPG_VERSION, self.namespace, "poolers"
             )["items"]
         except Exception:
-            return None
-        for pooler in poolers:
-            if pooler["metadata"]["name"] == name:
-                return f"pgbouncer ({pooler.get('spec', {}).get('type', 'rw')})"
-        return None
+            return {}
+        return {
+            pooler["metadata"]["name"]:
+                f"pgbouncer ({pooler.get('spec', {}).get('type', 'rw')})"
+            for pooler in poolers
+        }
 
     def _psql(self, sql: str, db: str = "app", pod: str | None = None) -> str:
         pod = pod or self.topology()["primary"]

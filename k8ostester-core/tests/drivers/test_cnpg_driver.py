@@ -21,11 +21,16 @@ def mock_context(tmp_path):
     )
     return k8s, events, spec, "test-ns"
 
-def stub_clusters(k8s, *names):
-    """The CNPG Cluster list as the driver sees it."""
-    k8s.custom.list_namespaced_custom_object.return_value = {
-        "items": [{"metadata": {"name": n}} for n in names]
-    }
+def stub_clusters(k8s, *names, poolers=()):
+    """Route custom-object listings by plural: the CNPG Cluster list plus any
+    Pooler CRs the test declares."""
+    def list_custom(group, version, namespace, plural):
+        if plural == "poolers":
+            return {"items": [
+                {"metadata": {"name": n}, "spec": {"type": "rw"}} for n in poolers
+            ]}
+        return {"items": [{"metadata": {"name": n}} for n in names]}
+    k8s.custom.list_namespaced_custom_object.side_effect = list_custom
 
 def stub_app_secret(k8s):
     """The <cluster>-app secret the driver reads DSN credentials from."""
@@ -688,19 +693,13 @@ def test_cnpg_topology_graph_full_path(mock_context):
     driver = CnpgDriver(k8s, spec, ns, events)
     driver._run_dir = spec.dir  # load has started
 
-    stub_clusters(k8s, "pg")
+    stub_clusters(k8s, "pg", poolers=["pooler-rw"])
     stub_cluster_status(
         k8s,
         currentPrimary="pg-1",
         instanceNames=["pg-1", "pg-2", "pg-3"],
         instancesStatus={"healthy": ["pg-1", "pg-2"], "failed": ["pg-3"]},
     )
-    # poolers listing shares the custom.list mock with clusters — route by plural
-    def list_custom(group, version, namespace, plural):
-        if plural == "poolers":
-            return {"items": [{"metadata": {"name": "pooler-rw"}, "spec": {"type": "rw"}}]}
-        return {"items": [{"metadata": {"name": "pg"}}]}
-    k8s.custom.list_namespaced_custom_object.side_effect = list_custom
 
     with patch.object(driver, "_psql", return_value="pg-2|quorum\n"):
         graph = driver.topology_graph()
@@ -740,7 +739,7 @@ def test_cnpg_replication_states_unreachable_primary(mock_context):
         assert driver._replication_states("pg-1") == {}
     assert driver._replication_states(None) == {}
 
-def test_cnpg_topology_graph_no_client_before_load_starts(mock_context):
+def test_cnpg_topology_graph_client_waiting_before_load_starts(mock_context):
     k8s, events, spec, ns = mock_context
     spec.load = LoadSpec(endpoint="auto", phases=[{"duration": "10s"}])
     driver = CnpgDriver(k8s, spec, ns, events)  # start_load not called
@@ -750,7 +749,27 @@ def test_cnpg_topology_graph_no_client_before_load_starts(mock_context):
 
     with patch.object(driver, "_psql", return_value=""):
         graph = driver.topology_graph()
-    assert {n["id"] for n in graph["nodes"]} == {"pg-1"}
+    details = {n["id"]: n.get("detail") for n in graph["nodes"]}
+    assert set(details) == {"loadgen", "pg-1"}  # client visible from the start
+    assert "(waiting)" in details["loadgen"]
+
+def test_cnpg_topology_graph_shows_bypassed_pooler(mock_context):
+    """A deployed Pooler is part of the config under test even when the load
+    plan connects directly."""
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="auto", phases=[{"duration": "10s"}])
+    driver = CnpgDriver(k8s, spec, ns, events)
+    driver._run_dir = spec.dir
+
+    stub_clusters(k8s, "pg", poolers=["pg-pooler"])
+    stub_cluster_status(k8s, currentPrimary="pg-1", instanceNames=["pg-1"])
+
+    with patch.object(driver, "_psql", return_value=""):
+        graph = driver.topology_graph()
+
+    edges = {(e["source"], e["target"]): e.get("detail") for e in graph["edges"]}
+    assert edges[("loadgen", "pg-1")] == "pg-rw"   # direct path
+    assert ("pg-pooler", "pg-1") in edges           # pooler still on the map
 
 def test_cnpg_wait_ready_emits_bootstrap_telemetry(mock_context, fake_clock):
     """During cluster bootstrap the topology view sees replicas joining."""

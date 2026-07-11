@@ -1,8 +1,8 @@
 """Full-screen dashboard for `k8ost run` (the default on a terminal).
 
 Everything on one page: header with the current step, load progress, metrics
-(ops/s sparkline, rates, live goal scores) beside the live topology tree and
-its change history, and the full event log underneath. The run executes on a
+(rates, ratios, live goal scores) beside the live topology tree and its
+change history, and the full event log underneath. The run executes on a
 worker thread and feeds the app through the same event stream as the plain
 and live outputs; when it finishes the dashboard stays open for inspection
 and `q` exits with the run's exit code (0 passed / 1 error / 2 failed).
@@ -17,7 +17,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import (
-    DataTable, Footer, ProgressBar, RichLog, Sparkline, Static,
+    DataTable, Footer, ProgressBar, RichLog, Static,
 )
 
 from k8ostester.cli.live import ALERT_TYPES, PANE_TYPES, topology_text
@@ -50,8 +50,7 @@ class RunApp(App):
     #metrics-pane, #topology-pane {
         width: 1fr; padding: 0 1; border: round $surface-lighten-2;
     }
-    #ops-spark { height: 3; }
-    #m-rates { height: 1; }
+    #m-rates { height: 2; }
     #m-goals { height: 1fr; }
     #t-current { height: auto; }
     #t-history { height: 1fr; border-top: dashed $surface-lighten-2; }
@@ -70,7 +69,6 @@ class RunApp(App):
         self.current_step = "starting"
         self.status = "running"
         self.sample: dict | None = None
-        self.ops_history: list[float] = []
         self.load_total_s: float | None = None
         self.load_started_at: float | None = None
         self._exit_code = 1  # interrupted before a verdict counts as an error
@@ -81,7 +79,6 @@ class RunApp(App):
         with Horizontal(id="panes"):
             with Vertical(id="metrics-pane") as metrics:
                 metrics.border_title = "metrics"
-                yield Sparkline([], summary_function=max, id="ops-spark")
                 yield Static(id="m-rates")
                 yield DataTable(id="m-goals", cursor_type="row")
             with Vertical(id="topology-pane") as topology:
@@ -139,8 +136,6 @@ class RunApp(App):
             self.query_one("#load-progress").display = bool(self.load_total_s)
         elif etype == "load.sample":
             self.sample = data
-            self.ops_history = (self.ops_history + [data["ops_s"]])[-120:]
-            self.query_one("#ops-spark", Sparkline).data = self.ops_history
             self._update_metrics()
         elif etype == "topology":
             self._update_topology(event)
@@ -149,11 +144,13 @@ class RunApp(App):
 
     def _update_metrics(self) -> None:
         s = self.sample or {}
+        total, failed = s.get("total_ops", 0), s.get("failed", 0)
+        fail_pct = (failed / total * 100) if total else 0.0
         rates = Text.assemble(
             (f"{s.get('ops_s', 0):.1f}", "bold green"), (" ops/s   ", "dim"),
             (f"{s.get('err_s', 0):.1f}", "bold red" if s.get("err_s") else "bold"), (" err/s   ", "dim"),
-            (f"{s.get('total_ops', 0)} ops · {s.get('acked_writes', 0)} acked writes · "
-             f"{s.get('failed', 0)} failed", "dim"),
+            (f"{fail_pct:.2f}%", "bold red" if failed else "bold"), (" failed", "dim"),
+            (f"\n{total} ops · {s.get('acked_writes', 0)} acked writes · {failed} failed", "dim"),
         )
         self.query_one("#m-rates", Static).update(rates)
         table = self.query_one("#m-goals", DataTable)

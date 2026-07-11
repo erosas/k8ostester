@@ -66,6 +66,7 @@ def topology_text(data: dict) -> Text:
         has_parent.add(edge["target"])
 
     lines: list[Text] = []
+    seen: set[str] = set()
 
     def emit(node_id: str, prefix: str, via: dict | None, last: bool) -> None:
         node = by_id.get(node_id, {"id": node_id, "role": ""})
@@ -83,6 +84,13 @@ def topology_text(data: dict) -> Text:
             line.append(f"  {role}", style="dim")
         if detail := node.get("detail"):
             line.append(f"  {detail}", style=_node_style(node) or "dim")
+        # a node reachable via several paths (e.g. a bypassed pooler also
+        # points at the primary) renders its subtree only once
+        if node_id in seen:
+            line.append("  ↩", style="dim")
+            lines.append(line)
+            return
+        seen.add(node_id)
         lines.append(line)
         child_prefix = prefix if via is None else prefix + ("   " if last else "│  ")
         outgoing = children.get(node_id, [])

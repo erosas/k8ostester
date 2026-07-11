@@ -70,3 +70,7 @@ def test_generic_driver_ignores_infra(mock_context):
 def test_base_driver_op_records_default_empty(mock_context):
     k8s, events, spec, ns = mock_context
     assert TechnologyDriver(k8s, spec, ns, events).op_records == []
+
+def test_base_driver_live_telemetry_is_noop(mock_context):
+    k8s, events, spec, ns = mock_context
+    TechnologyDriver(k8s, spec, ns, events).emit_live_telemetry()  # must not raise

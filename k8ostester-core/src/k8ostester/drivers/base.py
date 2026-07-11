@@ -67,6 +67,11 @@ class TechnologyDriver:
     def wait_load_done(self) -> None:
         raise K8osDriverError(f"{type(self).__name__} has no load generator")
 
+    def emit_live_telemetry(self) -> None:
+        """Best-effort progress hook: emit load.sample/topology events for the
+        live run view. Called by the runner while it waits out the fault
+        timeline (and by drivers from their own wait loops); must never raise."""
+
     @property
     def op_records(self) -> list[dict]:
         """Per-operation records from the completed load run (goal evidence)."""

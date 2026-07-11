@@ -250,3 +250,21 @@ def test_runner_error_handling(dummy_spec, tmp_path):
         
         # Ensure cleanup still happened
         mock_k8s.delete_namespace.assert_called_once()
+
+@patch("k8ostester.core.runner.ClusterClient")
+@patch("k8ostester.core.runner.get_driver")
+@patch("k8ostester.core.runner.probe")
+def test_runner_samples_telemetry_while_waiting_for_fault(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path, fake_clock):
+    dummy_spec.load = LoadSpec(phases=[{"duration": "30s", "rate": "10/s"}])
+    dummy_spec.faults = [FaultSpec(at="12s", worker="pod_kill", target={"pod": "x"})]
+
+    mock_k8s = mock_k8s_cls.return_value
+    mock_k8s.core.list_namespace.return_value.items = []
+    mock_driver = mock_get_driver.return_value.return_value
+    mock_driver.wait_load_started.return_value = time.time()
+
+    with patch("k8ostester.core.runner.get_worker"):
+        Runner(dummy_spec, results_root=tmp_path).run()
+
+    # 12s offset in <=5s slices: telemetry sampled on each slice (5+5+2)
+    assert mock_driver.emit_live_telemetry.call_count == 3

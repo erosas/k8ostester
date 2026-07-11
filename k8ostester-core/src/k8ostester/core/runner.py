@@ -187,9 +187,11 @@ class Runner:
         """Fire each fault at its offset from load start; targets resolve at
         injection time (topology shifts as faults land)."""
         for fault in sorted(self.spec.faults, key=lambda f: f.at_s):
-            delay = t0 + fault.at_s - time.time()
-            if delay > 0:
-                time.sleep(delay)
+            # sleep toward the offset in short slices so the live view keeps
+            # getting samples while the fault clock runs down
+            while (remaining := t0 + fault.at_s - time.time()) > 0:
+                time.sleep(min(remaining, 5))
+                driver.emit_live_telemetry()
             worker = get_worker(fault.worker)(k8s, driver, self.namespace, self.events)
             cleanup = worker.execute(fault)
             if cleanup:

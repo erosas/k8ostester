@@ -17,6 +17,7 @@ from typing import Any
 
 from k8ostester.core.exceptions import K8osConfigError
 from k8ostester.core.experiment import parse_rate
+from k8ostester.core.goals import _LATENCY_RE, evaluate_goals
 from k8ostester.core.helm import Helm, HelmError
 from k8ostester.core.infra import InfraManager
 from k8ostester.core.k8s import wait_until
@@ -44,6 +45,7 @@ class CnpgDriver(TechnologyDriver):
     _journal: list[dict]  # acked-write records from the loadgen run
     _records: list[dict]  # every op record
     _backup_name: str | None = None
+    _last_topology: dict | None = None  # last topology emitted as telemetry
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -267,6 +269,7 @@ class CnpgDriver(TechnologyDriver):
             "load.start",
             f"{len(phases)} phase(s), ~{total_s:.0f}s"
             + (f", {spec.workers} worker pods" if spec.workers > 1 else ""),
+            total_s=total_s,
         )
 
     def _start_pgbench(self, run_dir: Path) -> None:
@@ -318,6 +321,7 @@ class CnpgDriver(TechnologyDriver):
             "load.start",
             f"pgbench: scale {spec.params.get('scale', 10)}, {clients} clients, "
             f"{int(phase.duration_s)}s" + (f", {int(rate)}/s" if rate else " (unthrottled)"),
+            total_s=phase.duration_s,
         )
 
     def wait_load_started(self, timeout: float = 300) -> float:
@@ -340,12 +344,35 @@ class CnpgDriver(TechnologyDriver):
         self.events.emit("load.started", "loadgen is emitting ops")
         return time.time()
 
+    def emit_live_telemetry(self) -> None:
+        """Live telemetry for the run view, piggybacked on whatever loop is
+        currently waiting. Best-effort by contract: it must never fail a run."""
+        try:
+            sample = self._live_sample(self._loadgen_logs())
+            if sample:
+                self.events.emit(
+                    "load.sample",
+                    f"{sample['ops_s']} ops/s, {sample['failed']} failed",
+                    **sample,
+                )
+            topology = self.topology()
+            if topology != self._last_topology:
+                self._last_topology = topology
+                self.events.emit(
+                    "topology", f"primary {topology['primary']}", **topology
+                )
+        except Exception:
+            pass
+
     def wait_load_done(self) -> None:
         def finished() -> bool:
             status = self.k8s.batch.read_namespaced_job("k8ost-loadgen", self.namespace).status
             if status.failed:
                 raise RuntimeError("loadgen job failed: " + self._loadgen_logs()[-2000:])
-            return (status.succeeded or 0) >= self._workers
+            done = (status.succeeded or 0) >= self._workers
+            if not done:
+                self.emit_live_telemetry()
+            return done
 
         # pull + pip headroom on top of the phase plan
         wait_until(finished, self._load_total_s + 300, interval=5,
@@ -361,6 +388,44 @@ class CnpgDriver(TechnologyDriver):
     @property
     def op_records(self) -> list[dict]:
         return [r for r in self._records if r.get("kind") == "op"]
+
+    # goal metrics computable mid-run — everything except the fault-anchored
+    # (rto) and reconciliation-based (rpo, checks) ones
+    LIVE_GOAL_METRICS = {
+        "uptime", "downtime_total", "availability",
+        "error_rate", "connect_error_rate", "tps",
+    }
+    LIVE_WINDOW_S = 10  # instantaneous ops/s and err/s window
+
+    def _live_sample(self, logs: str) -> dict | None:
+        """Aggregate the journal-so-far into one progress sample: instantaneous
+        ops/s + err/s, cumulative totals, and live values for every goal the
+        final evaluator can already score without fault/reconciliation data."""
+        ops = []
+        for line in logs.splitlines():
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # pip noise etc.
+            if rec.get("kind") == "op":
+                ops.append(rec)
+        if not ops:
+            return None
+
+        latest = max(r["t"] for r in ops)
+        window = [r for r in ops if r["t"] >= latest - self.LIVE_WINDOW_S]
+        live_goals = [
+            g for g in self.spec.goals
+            if g.metric and (g.metric in self.LIVE_GOAL_METRICS or _LATENCY_RE.match(g.metric))
+        ]
+        return {
+            "ops_s": round(len(window) / self.LIVE_WINDOW_S, 1),
+            "err_s": round(sum(not r["ok"] for r in window) / self.LIVE_WINDOW_S, 1),
+            "total_ops": len(ops),
+            "failed": sum(not r["ok"] for r in ops),
+            "acked_writes": sum(1 for r in ops if r["op"] == "write" and r["ok"]),
+            "goals": evaluate_goals(live_goals, ops, [], []) if live_goals else [],
+        }
 
     def _loadgen_logs(self) -> str:
         """Concatenated logs of every worker pod; records interleave safely

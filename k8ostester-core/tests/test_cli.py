@@ -315,3 +315,29 @@ def test_run_command_live_view(tmp_path):
         # the live view was wired in as the event sink
         from k8ostester.cli.live import LiveRunView
         assert isinstance(mock_runner_cls.call_args[1]["on_event"].__self__, LiveRunView)
+
+def test_live_run_view_metrics_topology_and_progress():
+    from k8ostester.cli.live import LiveRunView
+    from rich.console import Console
+
+    view = LiveRunView("exp", "postgres-cnpg", "docker-desktop")
+    view.on_event({"type": "load.start", "t_rel": 20.0, "msg": "1 phase(s)",
+                   "data": {"total_s": 150.0}})
+    view.on_event({"type": "load.sample", "t_rel": 40.0, "msg": "19.8 ops/s",
+                   "data": {"ops_s": 19.8, "err_s": 0.4, "total_ops": 812,
+                            "acked_writes": 555, "failed": 4,
+                            "goals": [{"goal": "uptime", "value": "99.10%",
+                                       "threshold": "min 98", "passed": True,
+                                       "detail": ""}]}})
+    view.on_event({"type": "topology", "t_rel": 40.0, "msg": "primary pg-1",
+                   "data": {"primary": "pg-1", "replicas": ["pg-2", "pg-3"]}})
+
+    console_ = Console(record=True, width=120)
+    console_.print(view)
+    out = console_.export_text()
+    assert "ops/s" in out and "19.8" in out
+    assert "812 ops" in out and "555 acked writes" in out
+    assert "uptime" in out and "99.10%" in out
+    assert "pg-1" in out and "primary" in out and "pg-3" in out
+    assert "/150s" in out  # load progress
+    assert "load.sample" not in out  # samples feed panes, not the event tail

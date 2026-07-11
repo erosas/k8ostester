@@ -119,7 +119,7 @@ def test_cnpg_start_load_journal(mock_context):
 
     k8s.core.create_namespaced_config_map.assert_called_once()
     k8s.batch.create_namespaced_job.assert_called_once()
-    events.emit.assert_any_call("load.start", ANY)
+    events.emit.assert_any_call("load.start", ANY, total_s=ANY)
 
 def test_cnpg_start_load_pgbench(mock_context):
     k8s, events, spec, ns = mock_context
@@ -139,7 +139,7 @@ def test_cnpg_start_load_pgbench(mock_context):
     driver.start_load(Path("/tmp"))
 
     k8s.batch.create_namespaced_job.assert_called_once()
-    events.emit.assert_any_call("load.start", ANY)
+    events.emit.assert_any_call("load.start", ANY, total_s=ANY)
 
 @pytest.mark.parametrize("load_kwargs,spec_updates,error", [
     ({}, {"faults": [FaultSpec(at="1s", worker="pod_kill")]}, "cannot run fault timelines"),
@@ -598,3 +598,76 @@ def test_cnpg_wait_load_started_waits_for_active_pods(mock_context, fake_clock):
 
     with patch.object(driver, "_loadgen_logs", return_value='{"kind": "start"}'):
         assert driver.wait_load_started() > 0
+
+def test_cnpg_live_sample_aggregates_journal(mock_context):
+    k8s, events, spec, ns = mock_context
+    spec.goals = [
+        GoalSpec(metric="uptime", min="50%"),
+        GoalSpec(metric="rto", max="10s"),  # fault-anchored: not live-scorable
+    ]
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    logs = "\n".join([
+        "pip noise",
+        '{"kind": "start"}',
+        '{"kind": "op", "op": "write", "ok": true, "t": 100, "id": 1, "checksum": "a"}',
+        '{"kind": "op", "op": "write", "ok": false, "t": 108, "err": "OSError"}',
+        '{"kind": "op", "op": "read", "ok": true, "t": 109}',
+    ])
+    sample = driver._live_sample(logs)
+
+    assert sample["total_ops"] == 3
+    assert sample["failed"] == 1
+    assert sample["acked_writes"] == 1
+    assert sample["ops_s"] == 0.3  # 3 ops in the 10s window ending at t=109
+    (goal,) = sample["goals"]  # rto filtered out, uptime scored live
+    assert goal["goal"] == "uptime"
+
+def test_cnpg_live_sample_empty_logs(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    assert driver._live_sample("pip noise only") is None
+
+def test_cnpg_wait_load_done_emits_live_telemetry(mock_context, fake_clock):
+    k8s, events, spec, ns = mock_context
+    spec.goals = [GoalSpec(metric="error_rate", max="5%")]
+    driver = CnpgDriver(k8s, spec, ns, events)
+    driver._workers = 1
+    driver._load_total_s = 10
+    driver._run_dir = spec.dir
+
+    running = MagicMock(succeeded=0, failed=0)
+    done = MagicMock(succeeded=1, failed=0)
+    statuses = iter([running, done])
+    k8s.batch.read_namespaced_job.side_effect = lambda *a: MagicMock(status=next(statuses))
+
+    logs = '{"kind": "op", "op": "write", "ok": true, "t": 100, "id": 1, "checksum": "a"}'
+    with patch.object(driver, "_loadgen_logs", return_value=logs), \
+         patch.object(driver, "topology", return_value={"primary": "pg-1", "replicas": ["pg-2"]}):
+        driver.wait_load_done()
+
+    sample_calls = [c for c in events.emit.call_args_list if c[0][0] == "load.sample"]
+    assert len(sample_calls) == 1  # one per in-flight poll, none once done
+    assert sample_calls[0][1]["total_ops"] == 1
+    assert sample_calls[0][1]["goals"][0]["goal"] == "error_rate"
+
+    topo_calls = [c for c in events.emit.call_args_list if c[0][0] == "topology"]
+    assert topo_calls[0][1] == {"primary": "pg-1", "replicas": ["pg-2"]}
+
+def test_cnpg_wait_load_done_survives_telemetry_failure(mock_context, fake_clock):
+    """Live telemetry is best-effort: a topology/log hiccup must not fail the run."""
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    driver._workers = 1
+    driver._load_total_s = 10
+    driver._run_dir = spec.dir
+
+    running = MagicMock(succeeded=0, failed=0)
+    done = MagicMock(succeeded=1, failed=0)
+    statuses = iter([running, done])
+    k8s.batch.read_namespaced_job.side_effect = lambda *a: MagicMock(status=next(statuses))
+
+    logs = '{"kind": "op", "op": "write", "ok": true, "t": 1, "id": 1, "checksum": "a"}'
+    with patch.object(driver, "_loadgen_logs", return_value=logs), \
+         patch.object(driver, "topology", side_effect=RuntimeError("no primary")):
+        driver.wait_load_done()  # must not raise

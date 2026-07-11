@@ -183,14 +183,19 @@ class ExplodingSession(FakeSession):
         raise RuntimeError("cluster unreachable")
 
 
-async def test_session_app_error_exit(spec):
+async def test_session_app_error_stays_open_until_quit(spec):
+    """An error must be readable, not a flash before exit — the app stays up
+    and q exits with code 1 (regression: the 'crash' was an instant exit)."""
     from k8ostester.cli.session import SessionApp
 
     app = SessionApp(spec, None, ExplodingSession())
-    async with app.run_test(size=(120, 40)):
-        pass  # worker fails immediately → app exits itself
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.error == "cluster unreachable"
+        assert app.return_value is None  # still open, error on screen
+        await pilot.press("q")
     assert app.return_value == 1
-    assert app.error == "cluster unreachable"
 
 
 def test_session_command_wiring(tmp_path):

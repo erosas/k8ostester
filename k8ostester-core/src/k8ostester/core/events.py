@@ -33,7 +33,12 @@ class EventLog:
         self._file.write(json.dumps(event) + "\n")
         self._file.flush()
         if self._on_event:
-            self._on_event(event)
+            try:
+                self._on_event(event)
+            except Exception:
+                # a display callback (e.g. a TUI that has already shut down)
+                # must never break the run — teardown depends on emit working
+                pass
         return event
 
     def close(self) -> None:

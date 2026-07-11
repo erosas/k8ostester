@@ -141,3 +141,32 @@ def test_run_command_tui_flag(tmp_path):
         result = CliRunner().invoke(cli_app, ["run", str(exp_dir), "--view", "tui"])
         assert result.exit_code == 2
         assert mock_tui.call_args[1]["keep"] is False
+
+async def test_tui_quit_blocked_while_run_in_flight(tmp_path, monkeypatch):
+    """q mid-run must not abandon the runner worker: teardown would be
+    skipped and the namespace leaked (regression)."""
+    import threading
+    monkeypatch.chdir(tmp_path)
+
+    release = threading.Event()
+
+    class SlowRunner:
+        def __init__(self, on_event):
+            self.on_event = on_event
+
+        def run(self):
+            assert release.wait(timeout=10)
+            result = RunResult("r1", Path("results/demo/r1"))
+            result.status = "passed"
+            return result
+
+    app = RunApp(make_spec(), None, lambda cb: SlowRunner(cb))
+    async with app.run_test() as pilot:
+        await pilot.press("q")           # in flight: blocked with a warning
+        assert app.return_value is None  # still running
+        release.set()                    # let the run finish
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert app.status == "passed"
+        await pilot.press("q")           # now it exits
+    assert app.return_value == 0

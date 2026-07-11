@@ -224,6 +224,12 @@ class RunApp(App):
             )
 
     def action_leave(self) -> None:
+        if self.result is None and self.error is None:
+            # the runner cannot be interrupted safely mid-flight: abandoning
+            # its worker thread would skip teardown and leak the namespace
+            self.notify("run in flight — it finishes (and tears down) first; "
+                        "the verdict is worth the wait", severity="warning", timeout=6)
+            return
         self.exit(self._exit_code)
 
 

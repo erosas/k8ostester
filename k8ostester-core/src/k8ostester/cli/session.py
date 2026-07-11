@@ -55,6 +55,7 @@ class SessionApp(RunApp):
         super().__init__(spec, context, make_runner=lambda cb: None)  # unused
         self.session = session
         self._ended_status: str | None = None
+        self._quit_requested = False
 
     def compose(self) -> ComposeResult:
         yield Static(id="header")
@@ -113,7 +114,13 @@ class SessionApp(RunApp):
             self.error = message
             self.query_one("#e-log", RichLog).write(
                 Text(f"session error: {message}", style="bold red"))
-        self.exit(1 if status == "error" else 0)
+        if self._quit_requested:
+            self.exit(1 if status == "error" else 0)
+        else:
+            # ended on its own (usually an error): stay open so the message
+            # can actually be read; q exits
+            self.notify(f"session {status} — q to quit", severity="error" if message else "information",
+                        timeout=10)
 
     # -- controls ---------------------------------------------------------------
 
@@ -127,6 +134,7 @@ class SessionApp(RunApp):
 
     def action_leave(self) -> None:
         if self._ended_status is None:
+            self._quit_requested = True
             self.notify("stopping session — tearing down…", timeout=8)
             self.session.stop()  # worker finishes → _session_ended → exit
         else:

@@ -97,6 +97,18 @@ class TechnologyDriver:
         """Per-operation records from the completed load run (goal evidence)."""
         return []
 
+    def start_load_session(self, run_dir: Path, rate: float, clients: int,
+                           replicas: int) -> None:
+        """Interactive load pool (`k8ost session`): every pod a self-contained
+        unit of load; scaling replicas scales total load."""
+        raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
+
+    def scale_load(self, replicas: int) -> None:
+        raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
+
+    def stop_load_session(self) -> str:
+        raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
+
     def ensure_backup(self) -> None:
         """Take a base backup now (before load, so PITR can replay forward)."""
         raise K8osDriverError(f"{type(self).__name__} has no backup support")

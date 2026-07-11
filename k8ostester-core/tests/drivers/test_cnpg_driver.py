@@ -1,4 +1,5 @@
 import base64
+import json
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, ANY
@@ -788,3 +789,37 @@ def test_cnpg_wait_ready_emits_bootstrap_telemetry(mock_context, fake_clock):
     topo_calls = [c for c in events.emit.call_args_list if c[0][0] == "topology"]
     assert topo_calls, "readiness polling should emit topology telemetry"
     assert topo_calls[0][1]["primary"] == "pg-1"
+
+def test_cnpg_start_load_session_creates_deployment(mock_context):
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="auto")
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    stub_app_secret(k8s)
+    stub_clusters(k8s, "pg")
+
+    driver.start_load_session(spec.dir, rate=10.0, clients=3, replicas=2)
+
+    k8s.core.create_namespaced_config_map.assert_called_once()
+    k8s.apps.create_namespaced_deployment.assert_called_once()
+    deployment = k8s.apps.create_namespaced_deployment.call_args[0][1]
+    assert deployment["spec"]["replicas"] == 2
+    env = {e["name"]: e.get("value") for e in
+           deployment["spec"]["template"]["spec"]["containers"][0]["env"]}
+    phases = json.loads(env["K8OST_PHASES"])
+    assert phases[0]["rate"] == 10.0
+    assert phases[0]["clients"] == 3
+    assert phases[0]["duration_s"] >= 10**8  # effectively unbounded
+    events.emit.assert_any_call("load.start", ANY)
+
+def test_cnpg_scale_and_stop_load_session(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    driver.scale_load(4)
+    k8s.apps.patch_namespaced_deployment_scale.assert_called_once_with(
+        "k8ost-loadgen", ns, {"spec": {"replicas": 4}})
+
+    with patch.object(driver, "_loadgen_logs", return_value="journal lines"):
+        assert driver.stop_load_session() == "journal lines"
+    k8s.apps.delete_namespaced_deployment.assert_called_once_with("k8ost-loadgen", ns)

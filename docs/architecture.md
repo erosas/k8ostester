@@ -50,9 +50,10 @@ Framework paths are relative to the package root `k8ostester-core/src/k8ostester
 
 | Path | Role |
 |---|---|
-| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run + experiment picker), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app; `live.py` the in-terminal live run panel; `tui.py` the full-screen single-page dashboard (metrics + topology + events together) — the default on a terminal, `--view live|plain` for the inline panel or log lines |
+| `cli/` | typer CLI (`k8ost`), split by command group: `run.py` (validate, run + experiment picker), `report.py` (report, runs), `env.py` (check, contexts); `app.py` holds the bare app; `live.py` the in-terminal live run panel; `tui.py` the full-screen single-page dashboard (metrics + topology + events together) — the default on a terminal, `--view live|plain` for the inline panel or log lines; `session.py` the interactive lab (`k8ost session`): the same dashboard plus a controls bar — scale load pods, kill primary/replica, partition |
 | `core/experiment.py` | pydantic models for `experiment.yaml` + loader; durations like `2m`/`30s` validated up front |
 | `core/runner.py` | lifecycle orchestration; technology-blind — all specifics go through the driver |
+| `core/session.py` | interactive sessions (`k8ost session`): deploy the config, load as a scalable Deployment of self-contained loadgen pods (pod count = the load knob), faults on demand via a command queue; no timeline, no verdict — the human is the experiment plan |
 | `core/k8s.py` | `ClusterClient`: kubeconfig-context-bound API access, namespace lifecycle, `kubectl apply` shell-out, workload readiness polling |
 | `core/helm.py` | helm CLI wrapper (`repo add`, `upgrade --install --wait`, uninstall) for infra prerequisites |
 | `core/capabilities.py` | cluster probe: nodes, storage classes, snapshot CRDs, operators (by CRD), helm — used to skip/flag goals a cluster can't exercise |

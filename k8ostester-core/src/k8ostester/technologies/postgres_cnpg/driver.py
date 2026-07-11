@@ -310,35 +310,13 @@ class CnpgDriver(TechnologyDriver):
             )
         total_s = sum(p["duration_s"] for p in phases)
 
-        secret = self.k8s.core.read_namespaced_secret(
-            f"{self.cluster_name}-app", self.namespace
-        )
-        import base64
-
-        decode = lambda k: base64.b64decode(secret.data[k]).decode()
-        host = (
-            f"{self.cluster_name}-rw"
-            if spec.endpoint == "auto"
-            else spec.endpoint
-        )
-        dsn = (
-            f"host={host} port=5432 dbname={decode('dbname')} "
-            f"user={decode('username')} password={decode('password')}"
-        )
-
-        self.k8s.core.create_namespaced_config_map(
-            self.namespace,
-            {
-                "metadata": {"name": "k8ost-loadgen"},
-                "data": {"loadgen.py": LOADGEN_SCRIPT.read_text()},
-            },
-        )
+        self._create_loadgen_configmap()
         job = load_resource(
             self._resolve_resource("loadgen-job.yaml"),
             {
                 "IMAGE": spec.image or LOADGEN_IMAGE,
                 "PSYCOPG_PIN": PSYCOPG_PIN,
-                "DSN": dsn,
+                "DSN": self._app_dsn(spec.endpoint),
                 "PHASES_JSON": json.dumps(phases),
                 "WORKERS": str(spec.workers),
                 "PULL_SECRETS": json.dumps(
@@ -356,6 +334,84 @@ class CnpgDriver(TechnologyDriver):
             + (f", {spec.workers} worker pods" if spec.workers > 1 else ""),
             total_s=total_s,
         )
+
+    def _app_dsn(self, endpoint: str) -> str:
+        """Connection string for the app user via the chosen endpoint."""
+        secret = self.k8s.core.read_namespaced_secret(
+            f"{self.cluster_name}-app", self.namespace
+        )
+        import base64
+
+        decode = lambda k: base64.b64decode(secret.data[k]).decode()
+        host = f"{self.cluster_name}-rw" if endpoint == "auto" else endpoint
+        return (
+            f"host={host} port=5432 dbname={decode('dbname')} "
+            f"user={decode('username')} password={decode('password')}"
+        )
+
+    def _create_loadgen_configmap(self) -> None:
+        self.k8s.core.create_namespaced_config_map(
+            self.namespace,
+            {
+                "metadata": {"name": "k8ost-loadgen"},
+                "data": {"loadgen.py": LOADGEN_SCRIPT.read_text()},
+            },
+        )
+
+    # -- interactive session load (k8ost session) -------------------------------
+
+    SESSION_PHASE_S = 10**8  # one effectively unbounded phase per pod
+
+    def start_load_session(self, run_dir: Path, rate: float, clients: int,
+                           replicas: int) -> None:
+        """Load as a scalable pod pool: a Deployment where every pod is a
+        self-contained unit of load (`clients` clients at `rate` ops/s,
+        forever). Scaling replicas is the load knob."""
+        spec = self.spec.load
+        phase = {
+            "duration_s": self.SESSION_PHASE_S,
+            "rate": rate,
+            "mix": {"read": 0.5, "write": 0.5},
+            "clients": clients,
+            "mode": "persistent",
+        }
+        self._create_loadgen_configmap()
+        deployment = load_resource(
+            self._resolve_resource("loadgen-deployment.yaml"),
+            {
+                "IMAGE": (spec.image if spec else None) or LOADGEN_IMAGE,
+                "PSYCOPG_PIN": PSYCOPG_PIN,
+                "DSN": self._app_dsn(spec.endpoint if spec else "auto"),
+                "PHASES_JSON": json.dumps([phase]),
+                "REPLICAS": str(replicas),
+                "RATE": str(rate),
+                "CLIENTS": str(clients),
+                "PULL_SECRETS": json.dumps(
+                    [{"name": spec.pull_secret}] if spec and spec.pull_secret else []
+                ),
+            },
+        )
+        self.k8s.apps.create_namespaced_deployment(self.namespace, deployment)
+        self._run_dir = run_dir
+        self.events.emit(
+            "load.start",
+            f"session pool: {replicas} pod(s) × {clients} clients @ {rate:g} ops/s",
+        )
+
+    def scale_load(self, replicas: int) -> None:
+        self.k8s.apps.patch_namespaced_deployment_scale(
+            "k8ost-loadgen", self.namespace, {"spec": {"replicas": replicas}}
+        )
+
+    def stop_load_session(self) -> str:
+        """Tear down the load pool; returns the pool's collected logs (the
+        journal-so-far) for the session artifacts."""
+        logs = self._loadgen_logs()
+        try:
+            self.k8s.apps.delete_namespaced_deployment("k8ost-loadgen", self.namespace)
+        except Exception:
+            pass  # namespace teardown will get it
+        return logs
 
     def _start_pgbench(self, run_dir: Path) -> None:
         """The pgbench runner (spec-validated: one phase, no faults, journal-free

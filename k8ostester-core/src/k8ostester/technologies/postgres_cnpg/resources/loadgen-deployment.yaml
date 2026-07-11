@@ -1,0 +1,45 @@
+# Interactive-session load pool: a Deployment of self-contained loadgen pods.
+# Each pod drives ${CLIENTS} clients at ${RATE} ops/s (one effectively
+# unbounded phase, no sharding) — scaling replicas scales total load linearly,
+# which makes the pod count the load knob for `k8ost session`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8ost-loadgen
+spec:
+  replicas: ${REPLICAS}
+  selector:
+    matchLabels:
+      app: k8ost-loadgen
+  template:
+    metadata:
+      labels:
+        app: k8ost-loadgen
+    spec:
+      imagePullSecrets: ${PULL_SECRETS}
+      containers:
+        - name: loadgen
+          image: '${IMAGE}'
+          command:
+            - bash
+            - -c
+            # idempotent bootstrap: a prebuilt image (load.image, D12) has
+            # psycopg baked in and skips pip; the stock image installs it
+            - python -c 'import psycopg' 2>/dev/null || pip install --quiet --no-cache-dir '${PSYCOPG_PIN}'; exec python /app/loadgen.py
+          env:
+            - name: K8OST_DSN
+              value: '${DSN}'
+            - name: K8OST_PHASES
+              value: '${PHASES_JSON}'
+            - name: K8OST_WORKERS
+              value: "1"
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      volumes:
+        - name: script
+          configMap:
+            name: k8ost-loadgen

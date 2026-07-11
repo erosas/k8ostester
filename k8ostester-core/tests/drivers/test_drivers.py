@@ -88,3 +88,13 @@ def test_base_driver_topology_graph_empty_without_topology(mock_context):
     k8s, events, spec, ns = mock_context
     # base topology() raises K8osDriverError → graph degrades to empty
     assert TechnologyDriver(k8s, spec, ns, events).topology_graph() == {"nodes": [], "edges": []}
+
+def test_base_driver_session_methods_unsupported(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = TechnologyDriver(k8s, spec, ns, events)
+    with pytest.raises(K8osDriverError, match="no interactive load"):
+        driver.start_load_session(Path("/tmp"), 10.0, 5, 1)
+    with pytest.raises(K8osDriverError, match="no interactive load"):
+        driver.scale_load(2)
+    with pytest.raises(K8osDriverError, match="no interactive load"):
+        driver.stop_load_session()

@@ -257,3 +257,52 @@ def test_session_rate_change(mock_k8s_cls, mock_get_driver, spec, tmp_path):
     assert driver.set_load_rate.call_args_list[1][0] == (1.0, 5)
     events = EventLog.read(session.run_dir / "events.jsonl")
     assert sum(e["type"] == "load.rate" for e in events) == 2
+
+
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_tech_action_dispatch(mock_k8s_cls, mock_get_driver, spec, tmp_path):
+    mock_k8s_cls.return_value.core.list_namespace.return_value.items = []
+    driver = mock_get_driver.return_value.return_value
+    driver.session_actions.return_value = [{"id": "backup", "label": "base backup"}]
+    driver.run_session_action.return_value = "base backup k8ost-1 completed"
+    driver.stop_load_session.return_value = ""
+
+    session = make_session(spec, tmp_path)
+    session.run_action("backup", "base backup")
+    session.stop()
+    session.start()
+
+    driver.run_session_action.assert_called_once_with("backup")
+    events = EventLog.read(session.run_dir / "events.jsonl")
+    ready = next(e for e in events if e["type"] == "session.ready")
+    assert ready["data"]["actions"] == [{"id": "backup", "label": "base backup"}]
+    action_events = [e for e in events if e["type"] == "session.action"]
+    assert len(action_events) == 2  # running… + summary
+    assert "completed" in action_events[1]["msg"]
+
+
+async def test_session_app_mounts_tech_actions(spec):
+    from textual.widgets import Button
+    from k8ostester.cli.session import SessionApp
+
+    fake = FakeSession()
+    fake.run_actions = []
+    fake.run_action = lambda aid, label: fake.run_actions.append((aid, label))
+    app = SessionApp(spec, None, fake)
+
+    async with app.run_test(size=(140, 44)) as pilot:
+        app._ingest({"type": "session.ready", "t_rel": 60.0, "msg": "controls live",
+                     "data": {"actions": [
+                         {"id": "backup", "label": "base backup", "variant": "primary"},
+                         {"id": "pitr-drill", "label": "PITR drill (2m ago)"},
+                     ]}})
+        await pilot.pause()
+        assert app.query_one("#tech-backup", Button).label.__str__() == "base backup"
+        assert app.query_one("#tech-pitr-drill", Button) is not None
+
+        await pilot.click("#tech-backup")
+        assert fake.run_actions == [("backup", "base backup")]
+
+        await pilot.press("q")
+    assert app.return_value == 0

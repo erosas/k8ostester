@@ -864,3 +864,44 @@ def test_cnpg_topology_graph_edge_lag(mock_context):
     edge = next(e for e in graph["edges"] if e["target"] == "pg-2")
     assert edge["detail"] == "async"
     assert edge["lag"] == "+3.5s"
+
+def test_cnpg_session_actions_gated_on_object_store(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_clusters(k8s, "pg")
+
+    k8s.custom.get_namespaced_custom_object.return_value = {"spec": {"backup": {"barmanObjectStore": {}}}}
+    assert [a["id"] for a in driver.session_actions()] == ["backup", "pitr-drill"]
+
+    k8s.custom.get_namespaced_custom_object.return_value = {"spec": {}}
+    assert driver.session_actions() == []  # no store, no backup/PITR buttons
+
+def test_cnpg_run_session_action(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+
+    with patch.object(driver, "ensure_backup") as backup:
+        driver._backup_name = "k8ost-1200"
+        assert "k8ost-1200" in driver.run_session_action("backup")
+        backup.assert_called_once()
+
+    # no backup yet: the drill refuses helpfully instead of failing in Barman
+    driver._backup_name = None
+    assert "run 'base backup' first" in driver.run_session_action("pitr-drill")
+
+    # target clamps to just after the backup finished (Barman needs a base
+    # backup that ENDED before the restore target)
+    driver._backup_name = "k8ost-1200"
+    import time as _time
+    recent_stop = _time.time() - 30  # backup newer than 'now - 2m'
+    from datetime import datetime as _dt, timezone as _tz
+    stopped_at = _dt.fromtimestamp(recent_stop, _tz.utc).isoformat().replace("+00:00", "Z")
+    k8s.custom.get_namespaced_custom_object.return_value = {"status": {"stoppedAt": stopped_at}}
+    with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
+         patch.object(driver, "_psql", return_value="585\n"):
+        summary = driver.run_session_action("pitr-drill")
+        assert "pg-pitr" in summary and "585" in summary
+        assert restore.call_args[0][0] >= recent_stop + 10  # clamped past backup end
+
+    with pytest.raises(ValueError, match="unknown session action"):
+        driver.run_session_action("nonsense")

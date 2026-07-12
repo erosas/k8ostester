@@ -74,6 +74,9 @@ class Session:
     def inject(self, worker: str, target: dict, duration: str | None = None) -> None:
         self._commands.put(("fault", worker, target, duration))
 
+    def run_action(self, action_id: str, label: str) -> None:
+        self._commands.put(("tech", action_id, label))
+
     def stop(self) -> None:
         self._stop.set()
 
@@ -101,9 +104,14 @@ class Session:
             driver.wait_ready()
 
             driver.start_load_session(self.run_dir, self.rate, self.clients, self.pods)
+            try:  # action metadata is optional decoration, never load-bearing
+                actions = [dict(a) for a in driver.session_actions()]
+            except Exception:
+                actions = []
             self.events.emit(
                 "session.ready",
                 "controls live — scale the load, inject faults; q tears down",
+                actions=actions,
             )
 
             while True:
@@ -142,6 +150,11 @@ class Session:
                         f"(≈ {self.pods * self.rate:g} ops/s total)",
                         rate=self.rate, pods=self.pods,
                     )
+                elif command[0] == "tech":
+                    _, action_id, label = command
+                    self.events.emit("session.action", f"{label} — running…")
+                    summary = driver.run_session_action(action_id)
+                    self.events.emit("session.action", f"{label}: {summary}")
                 elif command[0] == "fault":
                     _, worker_name, target, duration = command
                     worker = get_worker(worker_name)(k8s, driver, self.namespace, self.events)

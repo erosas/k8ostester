@@ -1,0 +1,64 @@
+# The DR drill with strict 1-sync + 1-async replication (method: first,
+# candidate list capped at one standby) — the single-variable comparison arm
+# to 16-cnpg-dr-drill's quorum (any/1). Same group, same load, same faults,
+# same goals: the report overlays them to answer which replication topology
+# is optimal here. Expectation: FIRST-1 pins a deterministic sync member
+# (pg-3 never gates commits — the geo/DR shape) but risks a brief commit
+# stall when the SYNC standby is lost, which any/1 does not have. Sequence:
+#   base backup before load → steady baseline → 30s pause (the PITR anchor,
+#   D13) → connection storm with a 60s PARTITION of the primary mid-storm →
+#   cool-down with a replica kill (must be a non-event, target architecture)
+# then verify integrity (every acked write present), backup (Barman base
+# backup completed), and PITR (a second cluster restored from the object
+# store to mid-pause must contain exactly the pre-pause acked rows).
+# One report answers: does the architecture fail over, lose nothing, keep
+# serving, AND can we actually get the data back from backups?
+name: 17-cnpg-dr-drill-sync-first
+technology: postgres-cnpg
+group: dr-drill
+cluster:
+  context: docker-desktop
+
+infra:
+  - operator: cnpg
+  - seaweedfs
+  - chaos-mesh
+
+config:
+  manifests: ./manifests
+
+load:
+  endpoint: pg-pooler
+  clients: {count: 10, mode: persistent}
+  phases:
+    - {duration: 60s, rate: 20/s, mix: {read: 0.5, write: 0.5}}   # baseline
+    - {duration: 30s, rate: 0/s}                                   # pause: PITR target (D13)
+    - {duration: 90s, rate: 100/s, mix: {read: 0.5, write: 0.5},
+       clients: {count: 150, mode: persistent}}                    # storm; partition mid-phase
+    - {duration: 60s, rate: 20/s, mix: {read: 0.5, write: 0.5}}   # cool-down; replica kill
+
+faults:
+  - at: 120s                     # 30s into the storm; heals at 180s, still in-storm
+    worker: network_partition
+    duration: 60s
+    target: {role: primary}
+  - at: 210s                     # mid cool-down: replica loss must be a non-event
+    worker: pod_kill
+    target: {role: replica}
+
+verify:
+  - integrity
+  - backup
+  - pitr
+
+goals:  # partition-class SLOs (D18, revised): CNPG partition detection is BIMODAL —
+        # the readiness transition is either caught immediately (~14s to failover
+        # decision) or missed and picked up by the operator's ~30s reconcile requeue
+        # (~44s). Observed across 7 runs: 18.7-22.5s x5, 45.5/49.9s x2, operator-log
+        # verified. SLOs must hold in BOTH modes or the verdict is a coin toss.
+  - {metric: rto, max: 55s}
+  - {metric: rpo, max: 0}
+  - {metric: uptime, min: 75%}
+  - {metric: downtime_total, max: 55s}
+  - {metric: error_rate, max: 1%}
+  - {metric: write_latency_p99, max: 200ms, window: steady-state}

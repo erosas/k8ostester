@@ -43,7 +43,8 @@ class SessionApp(RunApp):
         ("p", "fault('network_partition')", "Partition target 30s"),
     ]
     CSS = RunApp.CSS + """
-    #controls { height: 5; margin: 0 1; border: round $surface-lighten-2; }
+    #controls, #tech-controls { height: 5; margin: 0 1; border: round $surface-lighten-2; }
+    #tech-controls Button { margin: 0 1 0 0; }
     #controls Button { margin: 0 1 0 0; min-width: 10; }
     #pods { width: 18; content-align: center middle; }
     #target { width: 24; margin: 0 1 0 0; }
@@ -54,6 +55,7 @@ class SessionApp(RunApp):
         self.session = session
         self._ended_status: str | None = None
         self._quit_requested = False
+        self._tech_actions: dict[str, dict] = {}
 
     def compose(self) -> ComposeResult:
         yield Static(id="header")
@@ -78,6 +80,10 @@ class SessionApp(RunApp):
                          value="role:primary")
             yield Button("kill", id="kill", variant="error")
             yield Button("partition 30s", id="partition", variant="warning")
+        tech_row = Horizontal(id="tech-controls")
+        tech_row.border_title = "tech ops"
+        tech_row.display = False  # populated from the driver's action metadata
+        yield tech_row
         events_log = RichLog(id="e-log", markup=False, highlight=False)
         events_log.border_title = "events"
         yield events_log
@@ -167,6 +173,10 @@ class SessionApp(RunApp):
             self.action_fault("pod_kill")
         elif button_id == "partition":
             self.action_fault("network_partition")
+        elif button_id in self._tech_actions:
+            action = self._tech_actions[button_id]
+            self.session.run_action(action["id"], action["label"])
+            self.notify(f"{action['label']} queued", timeout=4)
 
     # -- ingestion additions ------------------------------------------------------
 
@@ -176,6 +186,23 @@ class SessionApp(RunApp):
             self._show_pods(event.get("data", {}).get("pods", self.session.pods))
         elif event["type"] == "topology":
             self._update_targets(event.get("data", {}))
+        elif event["type"] == "session.ready":
+            self._mount_tech_actions(event.get("data", {}).get("actions") or [])
+
+    def _mount_tech_actions(self, actions: list[dict]) -> None:
+        """Build the tech-ops row from the driver's action metadata — the
+        framework renders and dispatches; the plugin defines the semantics."""
+        if not actions:
+            return
+        row = self.query_one("#tech-controls")
+        row.display = True
+        for action in actions:
+            button_id = f"tech-{action['id']}"
+            self._tech_actions[button_id] = action
+            button = Button(action["label"], id=button_id,
+                            variant=action.get("variant", "default"))
+            button.tooltip = action.get("description")
+            row.mount(button)
 
     def _show_pods(self, pods: int) -> None:
         self.query_one("#pods", Static).update(Text.assemble(

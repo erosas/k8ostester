@@ -112,6 +112,18 @@ class TechnologyDriver:
     def stop_load_session(self) -> str:
         raise K8osDriverError(f"{type(self).__name__} has no interactive load support")
 
+    def session_actions(self) -> list[dict]:
+        """Tech-specific ops for the interactive session UI. Each entry:
+        {id, label, variant?, description?} — the framework renders them as
+        controls and dispatches run_session_action(id); the plugin defines
+        what they mean (a Postgres driver offers backup/PITR, a Kafka driver
+        would offer partition reassignment, ...)."""
+        return []
+
+    def run_session_action(self, action_id: str) -> str:
+        """Execute a session action; returns a one-line summary for the log."""
+        raise K8osDriverError(f"{type(self).__name__} has no session actions")
+
     def ensure_backup(self) -> None:
         """Take a base backup now (before load, so PITR can replay forward)."""
         raise K8osDriverError(f"{type(self).__name__} has no backup support")

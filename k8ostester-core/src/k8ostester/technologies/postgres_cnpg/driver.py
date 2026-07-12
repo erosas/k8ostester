@@ -450,6 +450,45 @@ class CnpgDriver(TechnologyDriver):
             ]}}}},
         )
 
+    SESSION_ACTIONS = [
+        {"id": "backup", "label": "base backup", "variant": "primary",
+         "description": "take a Barman base backup to the object store now"},
+        {"id": "pitr-drill", "label": "PITR drill (2m ago)", "variant": "warning",
+         "description": "bootstrap <cluster>-pitr from backups at now-2m and report its rows"},
+    ]
+
+    def session_actions(self) -> list[dict]:
+        # backup/PITR only make sense when the cluster archives to a store
+        try:
+            has_store = bool(self._cluster(self.cluster_name)["spec"].get("backup"))
+        except Exception:
+            has_store = False
+        return self.SESSION_ACTIONS if has_store else []
+
+    def run_session_action(self, action_id: str) -> str:
+        if action_id == "backup":
+            self.ensure_backup()
+            return f"base backup {self._backup_name} completed"
+        if action_id == "pitr-drill":
+            if not self._backup_name:
+                return "no base backup this session — run 'base backup' first"
+            # Barman needs a base backup that ENDED before the target: clamp
+            # '2 minutes ago' to just after the newest backup finished
+            backup = self.k8s.custom.get_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
+            )
+            stopped_at = backup.get("status", {}).get("stoppedAt")
+            floor = (
+                datetime.fromisoformat(stopped_at.replace("Z", "+00:00")).timestamp() + 10
+                if stopped_at else time.time() - 120
+            )
+            target_ts = max(time.time() - 120, floor)
+            restore = self._restore_cluster_at(target_ts)
+            rows = self._psql("select count(*) from k8ost_ops", pod=f"{restore}-1").strip()
+            when = datetime.fromtimestamp(target_ts, timezone.utc).strftime("%H:%M:%S")
+            return f"{restore} restored to {when}Z — {rows} rows in k8ost_ops"
+        raise ValueError(f"unknown session action {action_id!r}")
+
     def stop_load_session(self) -> str:
         """Tear down the load pool; returns the pool's collected logs (the
         journal-so-far) for the session artifacts."""
@@ -781,14 +820,13 @@ class CnpgDriver(TechnologyDriver):
             f"beginLSN={status.get('beginLSN')}, endLSN={status.get('endLSN')}",
         )
 
-    def verify_pitr(self) -> VerifyResult:
-        """Restore a second cluster to the mid-run pause phase and compare row
-        sets exactly: every pre-pause acked write present, nothing after."""
-        target_ts, expected_ids = self._pitr_target()
+    def _restore_cluster_at(self, target_ts: float) -> str:
+        """Bootstrap `<cluster>-pitr` from the object store at target_ts;
+        returns the restore cluster's name once it is healthy."""
         target = datetime.fromtimestamp(target_ts, timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S.%f+00"
         )
-        self.events.emit("pitr.start", f"restore target: {target} ({len(expected_ids)} rows expected)")
+        self.events.emit("pitr.start", f"restore target: {target}")
 
         # make sure WAL covering the target is archived before restoring
         self._psql("select pg_switch_wal()", db="postgres")
@@ -811,6 +849,13 @@ class CnpgDriver(TechnologyDriver):
             ),
         )
         self._wait_cluster_healthy(restore_name, timeout=600)
+        return restore_name
+
+    def verify_pitr(self) -> VerifyResult:
+        """Restore a second cluster to the mid-run pause phase and compare row
+        sets exactly: every pre-pause acked write present, nothing after."""
+        target_ts, expected_ids = self._pitr_target()
+        restore_name = self._restore_cluster_at(target_ts)
 
         restored = {
             int(line)

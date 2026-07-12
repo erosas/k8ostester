@@ -6,12 +6,37 @@ Every code block below is runnable (IntelliJ: click the gutter icon), from the r
 
 ## Setup
 
-Requires Python ≥ 3.14, `kubectl` and `helm` on PATH, and a kubeconfig context
-(local docker-desktop/kind or remote — everything rides the Kubernetes API).
+Two ways to get `k8ost`. Everything rides the Kubernetes API, so all either
+needs is a kubeconfig (local docker-desktop/kind or remote).
+
+**Option 1 — local install** (requires Python ≥ 3.14, `kubectl` and `helm` on PATH):
 
 ```bash
 uv tool install --editable ./k8ostester-core
 ```
+
+**Option 2 — the tool container** (requires only docker): python, k8ost,
+kubectl and helm are baked into one image; the `k8ost-docker` shim mounts your
+kubeconfig and the current directory, allocates a TTY for the dashboard, and
+transparently reroutes 127.0.0.1 kubeconfigs (docker-desktop/kind) via the
+host gateway with TLS still verified. Results land in your CWD as usual.
+
+```bash
+docker build -t k8ostester:local k8ostester-core
+```
+
+```bash
+./k8ost-docker env check
+```
+
+```bash
+./k8ost-docker run experiments/generic/01-nginx-smoke --view plain
+```
+
+Distribute it by pushing the image and pointing the shim at your registry:
+`K8OST_TOOL_IMAGE=my-registry/k8ostester:0.1 ./k8ost-docker session --attach prod-db`.
+Caveat: kubeconfigs that authenticate via exec plugins (aws/gcloud/az) need those
+binaries in the image — extend the Dockerfile (a comment in it shows how).
 
 ```bash
 k8ost env check          # nodes (incl. availability zones), storage, snapshot CRDs, operators

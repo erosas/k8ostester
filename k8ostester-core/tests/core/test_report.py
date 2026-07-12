@@ -56,21 +56,24 @@ def test_find_all_runs(tmp_path):
     assert runs[0] == run1
     assert runs[1] == run2
 
-def test_find_group_runs(tmp_path):
-    in_group = tmp_path / "01-exp" / "run1"
-    in_group.mkdir(parents=True)
-    (in_group / "summary.json").write_text(json.dumps({"group": "g1"}))
+def test_find_latest_runs_group_reduces_to_latest_verdict(tmp_path):
+    """--group auto-reduces to the latest verdict per experiment in the group,
+    skipping older runs, sessions, errors, and other groups."""
+    from k8ostester.core.report import find_latest_runs
+    def run(exp, stamp, status, group):
+        d = tmp_path / exp / stamp
+        d.mkdir(parents=True)
+        (d / "summary.json").write_text(json.dumps({"status": status, "group": group}))
+        return d
 
-    other_group = tmp_path / "02-exp" / "run2"
-    other_group.mkdir(parents=True)
-    (other_group / "summary.json").write_text(json.dumps({"group": "g2"}))
+    run("01-exp", "20260101", "passed", "g1")
+    latest1 = run("01-exp", "20260102", "failed", "g1")   # newer verdict, same exp
+    run("01-exp", "20260103", "session", "g1")            # session skipped
+    run("02-exp", "20260101", "error", "g1")              # error-only excluded
+    latest3 = run("03-exp", "20260101", "passed", "g1")
+    run("04-exp", "20260101", "passed", "g2")             # other group excluded
 
-    corrupt = tmp_path / "03-exp" / "run3"
-    corrupt.mkdir(parents=True)
-    (corrupt / "summary.json").write_text("{not json")
-
-    from k8ostester.core.report import find_group_runs
-    assert find_group_runs("g1", results_root=tmp_path) == [in_group]
+    assert find_latest_runs(tmp_path, group="g1") == [latest1, latest3]
 
 def test_render(tmp_path):
     runs = [

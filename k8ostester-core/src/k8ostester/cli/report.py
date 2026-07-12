@@ -26,8 +26,8 @@ def report(
     from k8ostester.core import report as report_mod
 
     dirs = list(runs or [])
-    if group:
-        dirs += [d for d in report_mod.find_group_runs(group) if d not in dirs]
+    if group:  # auto-reduce to the latest verdict per experiment in the group
+        dirs += [d for d in report_mod.find_latest_runs(group=group) if d not in dirs]
     if all_runs:
         dirs += [d for d in report_mod.find_all_runs() if d not in dirs]
     if latest:

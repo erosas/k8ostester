@@ -105,16 +105,16 @@ def test_report_command_group(tmp_path):
     import json
     (run1 / "summary.json").write_text(json.dumps({"experiment": "exp1", "run_id": "r1", "status": "passed", "group": "g1"}))
     
-    with patch("k8ostester.core.report.find_group_runs") as mock_find, \
+    with patch("k8ostester.core.report.find_latest_runs") as mock_find, \
          patch("k8ostester.core.report.gather_run") as mock_gather, \
          patch("k8ostester.core.report.render") as mock_render:
         mock_find.return_value = [run1]
         mock_gather.return_value = {"run_id": "r1"}
         mock_render.return_value = tmp_path / "out.html"
-        
+
         result = runner.invoke(app, ["report", "--group", "g1"])
         assert result.exit_code == 0
-        mock_find.assert_called_with("g1")
+        mock_find.assert_called_with(group="g1")   # --group auto-reduces to latest verdict
 
 def make_exp_dir(tmp_path):
     exp_dir = tmp_path / "my-exp"

@@ -95,26 +95,17 @@ def gather_run(run_dir: Path) -> dict:
     }
 
 
-def find_group_runs(group: str, results_root: Path = Path("results")) -> list[Path]:
-    dirs = []
-    for summary_path in sorted(results_root.glob("*/*/summary.json")):
-        try:
-            if json.loads(summary_path.read_text()).get("group") == group:
-                dirs.append(summary_path.parent)
-        except json.JSONDecodeError:
-            continue
-    return dirs
-
-
 def find_all_runs(results_root: Path = Path("results")) -> list[Path]:
     """Every recorded run, in experiment order (numbered prefixes sort)."""
     return [p.parent for p in sorted(results_root.glob("*/*/summary.json"))]
 
 
-def find_latest_runs(results_root: Path = Path("results")) -> list[Path]:
+def find_latest_runs(results_root: Path = Path("results"),
+                     group: str | None = None) -> list[Path]:
     """The most recent *verdict* run (passed/failed) of each experiment — the
-    one-row-per-experiment overview. Skips sessions (no verdict) and error
-    runs so the table reads as a results catalog, in experiment order."""
+    one-row-per-experiment view. Skips sessions (no verdict) and error runs so
+    a report reads as a clean comparison, not the raw run history. With
+    `group`, restricted to experiments recorded under that group."""
     latest: dict[str, Path] = {}
     for summary_path in sorted(results_root.glob("*/*/summary.json")):
         try:
@@ -122,6 +113,8 @@ def find_latest_runs(results_root: Path = Path("results")) -> list[Path]:
         except json.JSONDecodeError:
             continue
         if summary.get("status") not in ("passed", "failed"):
+            continue
+        if group is not None and summary.get("group") != group:
             continue
         latest[summary_path.parent.parent.name] = summary_path.parent  # later run wins
     return [latest[name] for name in sorted(latest)]

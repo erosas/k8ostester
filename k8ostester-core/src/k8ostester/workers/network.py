@@ -11,6 +11,7 @@ Requires the `chaos-mesh` common infra entry in the experiment's infra list.
 
 from __future__ import annotations
 
+import itertools
 import json
 from pathlib import Path
 from typing import Callable
@@ -26,6 +27,7 @@ CHAOS_VERSION = "v1alpha1"
 CHAOS_PLURAL = "networkchaos"
 CHAOS_CRD = "networkchaos.chaos-mesh.org"
 RESOURCES = Path(__file__).parent.parent / "resources"
+_seq = itertools.count(1)
 
 
 class NetworkChaosWorker(Worker):
@@ -44,7 +46,9 @@ class NetworkChaosWorker(Worker):
         if not fault.duration:
             raise ValueError(f"{self.name} needs a 'duration' (e.g. duration: 60s)")
         pod = self.resolve_pod(fault.target)
-        name = f"k8ost-{self.name.replace('_', '-')}-{int(fault.at_s)}s"
+        # unique per injection: chaos CRs outlive their duration, and manual
+        # session faults all fire at at=0s — a fixed name would 409 on repeat
+        name = f"k8ost-{self.name.replace('_', '-')}-{int(fault.at_s)}s-{next(_seq)}"
         body = load_resource(
             RESOURCES / self.template,
             {

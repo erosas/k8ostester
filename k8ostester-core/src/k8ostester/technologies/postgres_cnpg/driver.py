@@ -453,8 +453,10 @@ class CnpgDriver(TechnologyDriver):
     SESSION_ACTIONS = [
         {"id": "backup", "label": "base backup", "variant": "primary",
          "description": "take a Barman base backup to the object store now"},
-        {"id": "pitr-drill", "label": "PITR drill (2m ago)", "variant": "warning",
-         "description": "bootstrap <cluster>-pitr from backups at now-2m and report its rows"},
+        {"id": "pitr-drill", "label": "PITR drill", "variant": "warning",
+         "description": "bootstrap <cluster>-pitr from backups at the chosen point and report its rows",
+         "params": [{"id": "minutes_ago", "label": "restore to",
+                     "options": ["1", "2", "5", "10", "30"], "default": "2"}]},
     ]
 
     def session_actions(self) -> list[dict]:
@@ -465,24 +467,25 @@ class CnpgDriver(TechnologyDriver):
             has_store = False
         return self.SESSION_ACTIONS if has_store else []
 
-    def run_session_action(self, action_id: str) -> str:
+    def run_session_action(self, action_id: str, params: dict | None = None) -> str:
         if action_id == "backup":
             self.ensure_backup()
             return f"base backup {self._backup_name} completed"
         if action_id == "pitr-drill":
             if not self._backup_name:
                 return "no base backup this session — run 'base backup' first"
+            minutes = float((params or {}).get("minutes_ago", 2))
             # Barman needs a base backup that ENDED before the target: clamp
-            # '2 minutes ago' to just after the newest backup finished
+            # 'N minutes ago' to just after the newest backup finished
             backup = self.k8s.custom.get_namespaced_custom_object(
                 CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
             )
             stopped_at = backup.get("status", {}).get("stoppedAt")
             floor = (
                 datetime.fromisoformat(stopped_at.replace("Z", "+00:00")).timestamp() + 10
-                if stopped_at else time.time() - 120
+                if stopped_at else time.time() - minutes * 60
             )
-            target_ts = max(time.time() - 120, floor)
+            target_ts = max(time.time() - minutes * 60, floor)
             restore = self._restore_cluster_at(target_ts)
             rows = self._psql("select count(*) from k8ost_ops", pod=f"{restore}-1").strip()
             when = datetime.fromtimestamp(target_ts, timezone.utc).strftime("%H:%M:%S")

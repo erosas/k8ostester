@@ -74,8 +74,8 @@ class Session:
     def inject(self, worker: str, target: dict, duration: str | None = None) -> None:
         self._commands.put(("fault", worker, target, duration))
 
-    def run_action(self, action_id: str, label: str) -> None:
-        self._commands.put(("tech", action_id, label))
+    def run_action(self, action_id: str, label: str, params: dict | None = None) -> None:
+        self._commands.put(("tech", action_id, label, params))
 
     def stop(self) -> None:
         self._stop.set()
@@ -151,9 +151,9 @@ class Session:
                         rate=self.rate, pods=self.pods,
                     )
                 elif command[0] == "tech":
-                    _, action_id, label = command
+                    _, action_id, label, params = command
                     self.events.emit("session.action", f"{label} — running…")
-                    summary = driver.run_session_action(action_id)
+                    summary = driver.run_session_action(action_id, params)
                     self.events.emit("session.action", f"{label}: {summary}")
                 elif command[0] == "fault":
                     _, worker_name, target, duration = command

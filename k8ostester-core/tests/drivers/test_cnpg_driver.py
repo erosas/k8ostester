@@ -903,5 +903,14 @@ def test_cnpg_run_session_action(mock_context):
         assert "pg-pitr" in summary and "585" in summary
         assert restore.call_args[0][0] >= recent_stop + 10  # clamped past backup end
 
+    # the time selector param moves the target (older backup, no clamping)
+    old_stop = _time.time() - 3600
+    k8s.custom.get_namespaced_custom_object.return_value = {
+        "status": {"stoppedAt": _dt.fromtimestamp(old_stop, _tz.utc).isoformat().replace("+00:00", "Z")}}
+    with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
+         patch.object(driver, "_psql", return_value="12\n"):
+        driver.run_session_action("pitr-drill", {"minutes_ago": "30"})
+        assert abs(restore.call_args[0][0] - (_time.time() - 1800)) < 5  # ~30m ago
+
     with pytest.raises(ValueError, match="unknown session action"):
         driver.run_session_action("nonsense")

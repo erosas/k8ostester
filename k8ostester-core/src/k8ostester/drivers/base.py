@@ -114,13 +114,15 @@ class TechnologyDriver:
 
     def session_actions(self) -> list[dict]:
         """Tech-specific ops for the interactive session UI. Each entry:
-        {id, label, variant?, description?} — the framework renders them as
-        controls and dispatches run_session_action(id); the plugin defines
-        what they mean (a Postgres driver offers backup/PITR, a Kafka driver
-        would offer partition reassignment, ...)."""
+        {id, label, variant?, description?, params?} — params is a list of
+        choice inputs ({id, label, options, default}) the UI renders next to
+        the button. The framework renders and dispatches
+        run_session_action(id, params); the plugin defines what they mean
+        (a Postgres driver offers backup/PITR, a Kafka driver would offer
+        partition reassignment, ...)."""
         return []
 
-    def run_session_action(self, action_id: str) -> str:
+    def run_session_action(self, action_id: str, params: dict | None = None) -> str:
         """Execute a session action; returns a one-line summary for the log."""
         raise K8osDriverError(f"{type(self).__name__} has no session actions")
 

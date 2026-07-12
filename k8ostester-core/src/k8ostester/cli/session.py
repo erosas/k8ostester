@@ -45,6 +45,7 @@ class SessionApp(RunApp):
     CSS = RunApp.CSS + """
     #controls, #tech-controls { height: 5; margin: 0 1; border: round $surface-lighten-2; }
     #tech-controls Button { margin: 0 1 0 0; }
+    #tech-controls Select { width: 22; margin: 0 1 0 0; }
     #controls Button { margin: 0 1 0 0; min-width: 10; }
     #pods { width: 18; content-align: center middle; }
     #target { width: 24; margin: 0 1 0 0; }
@@ -175,7 +176,8 @@ class SessionApp(RunApp):
             self.action_fault("network_partition")
         elif button_id in self._tech_actions:
             action = self._tech_actions[button_id]
-            self.session.run_action(action["id"], action["label"])
+            self.session.run_action(action["id"], action["label"],
+                                    self._action_params(action))
             self.notify(f"{action['label']} queued", timeout=4)
 
     # -- ingestion additions ------------------------------------------------------
@@ -188,10 +190,15 @@ class SessionApp(RunApp):
             self._update_targets(event.get("data", {}))
         elif event["type"] == "session.ready":
             self._mount_tech_actions(event.get("data", {}).get("actions") or [])
+        elif event["type"] == "session.command.error":
+            # a failed control must be seen, not buried in the event log
+            self.notify(event["msg"], severity="error", timeout=8)
 
     def _mount_tech_actions(self, actions: list[dict]) -> None:
         """Build the tech-ops row from the driver's action metadata — the
-        framework renders and dispatches; the plugin defines the semantics."""
+        framework renders and dispatches; the plugin defines the semantics.
+        Choice params render as a Select in front of their button (e.g. the
+        PITR restore point)."""
         if not actions:
             return
         row = self.query_one("#tech-controls")
@@ -199,10 +206,25 @@ class SessionApp(RunApp):
         for action in actions:
             button_id = f"tech-{action['id']}"
             self._tech_actions[button_id] = action
+            for param in action.get("params", []):
+                select = Select(
+                    [(f"{param['label']}: {option}", option) for option in param["options"]],
+                    id=f"param-{action['id']}-{param['id']}",
+                    allow_blank=False, value=param.get("default", param["options"][0]),
+                )
+                select.tooltip = param["label"]
+                row.mount(select)
             button = Button(action["label"], id=button_id,
                             variant=action.get("variant", "default"))
             button.tooltip = action.get("description")
             row.mount(button)
+
+    def _action_params(self, action: dict) -> dict | None:
+        values = {
+            param["id"]: self.query_one(f"#param-{action['id']}-{param['id']}", Select).value
+            for param in action.get("params", [])
+        }
+        return values or None
 
     def _show_pods(self, pods: int) -> None:
         self.query_one("#pods", Static).update(Text.assemble(

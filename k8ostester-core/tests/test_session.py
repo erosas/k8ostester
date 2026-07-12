@@ -273,7 +273,7 @@ def test_session_tech_action_dispatch(mock_k8s_cls, mock_get_driver, spec, tmp_p
     session.stop()
     session.start()
 
-    driver.run_session_action.assert_called_once_with("backup")
+    driver.run_session_action.assert_called_once_with("backup", None)
     events = EventLog.read(session.run_dir / "events.jsonl")
     ready = next(e for e in events if e["type"] == "session.ready")
     assert ready["data"]["actions"] == [{"id": "backup", "label": "base backup"}]
@@ -286,23 +286,38 @@ async def test_session_app_mounts_tech_actions(spec):
     from textual.widgets import Button
     from k8ostester.cli.session import SessionApp
 
+    from textual.widgets import Select
+
     fake = FakeSession()
     fake.run_actions = []
-    fake.run_action = lambda aid, label: fake.run_actions.append((aid, label))
+    fake.run_action = lambda aid, label, params=None: fake.run_actions.append((aid, label, params))
     app = SessionApp(spec, None, fake)
 
-    async with app.run_test(size=(140, 44)) as pilot:
+    async with app.run_test(size=(160, 44)) as pilot:
         app._ingest({"type": "session.ready", "t_rel": 60.0, "msg": "controls live",
                      "data": {"actions": [
                          {"id": "backup", "label": "base backup", "variant": "primary"},
-                         {"id": "pitr-drill", "label": "PITR drill (2m ago)"},
+                         {"id": "pitr-drill", "label": "PITR drill",
+                          "params": [{"id": "minutes_ago", "label": "restore to",
+                                      "options": ["1", "2", "5"], "default": "2"}]},
                      ]}})
         await pilot.pause()
         assert app.query_one("#tech-backup", Button).label.__str__() == "base backup"
-        assert app.query_one("#tech-pitr-drill", Button) is not None
 
         await pilot.click("#tech-backup")
-        assert fake.run_actions == [("backup", "base backup")]
+        assert fake.run_actions == [("backup", "base backup", None)]
+        fake.run_actions.clear()
+
+        # the PITR time selector feeds the action's params
+        selector = app.query_one("#param-pitr-drill-minutes_ago", Select)
+        assert selector.value == "2"
+        selector.value = "5"
+        await pilot.click("#tech-pitr-drill")
+        assert fake.run_actions == [("pitr-drill", "PITR drill", {"minutes_ago": "5"})]
+
+        # a failed control surfaces as a notification, not just a log line
+        app._ingest({"type": "session.command.error", "t_rel": 70.0,
+                     "msg": "fault: network_partition needs Chaos Mesh"})
 
         await pilot.press("q")
     assert app.return_value == 0

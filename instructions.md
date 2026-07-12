@@ -208,6 +208,15 @@ It is fully namespaced (a Role, not a ClusterRole; scraping scoped to the run
 namespace), so it deploys and tears down with the run and leaves nothing behind.
 The same pattern works for any technology whose pods expose Prometheus metrics.
 
+## Housekeeping
+
+A hard-killed run/session or a timed-out teardown can leave a labeled namespace
+behind (it trips the concurrent-run guard). Sweep them:
+
+```bash
+k8ost clean
+```
+
 ## Results
 
 Every run/session writes `results/<name>/<stamp>[-session]/`:

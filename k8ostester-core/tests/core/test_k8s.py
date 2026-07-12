@@ -1,8 +1,11 @@
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 from kubernetes import client
-from k8ostester.core.k8s import ClusterClient, available_contexts, wait_until
+
 from k8ostester.core.exceptions import K8osInfraError
+from k8ostester.core.k8s import ClusterClient, available_contexts, wait_until
+
 
 @pytest.fixture
 def mock_config():

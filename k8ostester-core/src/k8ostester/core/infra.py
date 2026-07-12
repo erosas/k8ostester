@@ -14,10 +14,11 @@ from typing import Any
 from kubernetes import client
 
 from k8ostester.core.events import EventLog
+from k8ostester.core.exceptions import K8osConfigError, K8osInfraError
 from k8ostester.core.helm import Helm, HelmError
-from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
 from k8ostester.core.k8s import ClusterClient
 from k8ostester.core.resources import PACKAGED_RESOURCES
+
 CHAOS_MESH_CHART_VERSION = "2.8.3"  # network fault engine (Apache 2.0, D16)
 CHAOS_MESH_REPO = "https://charts.chaos-mesh.org"
 

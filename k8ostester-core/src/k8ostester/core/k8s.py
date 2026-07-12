@@ -11,12 +11,14 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from kubernetes import client, config
-from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
+
+from k8ostester.core.exceptions import K8osInfraError
 
 T = TypeVar("T")
 

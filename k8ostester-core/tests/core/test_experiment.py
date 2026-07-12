@@ -1,5 +1,14 @@
 import pytest
-from k8ostester.core.experiment import parse_duration, parse_rate, GoalSpec, ExperimentSpec, LoadPhase, FaultSpec
+
+from k8ostester.core.experiment import (
+    ExperimentSpec,
+    FaultSpec,
+    GoalSpec,
+    LoadPhase,
+    parse_duration,
+    parse_rate,
+)
+
 
 def test_parse_duration():
     assert parse_duration("30s") == 30.0
@@ -103,8 +112,8 @@ def test_extends_missing_target(tmp_path):
 
 
 def test_extends_circular(tmp_path):
-    from k8ostester.core.experiment import load_experiment
     from k8ostester.core.exceptions import K8osConfigError
+    from k8ostester.core.experiment import load_experiment
     (tmp_path / "manifests").mkdir()
     (tmp_path / "a.yaml").write_text("extends: ./experiment.yaml\n")
     (tmp_path / "experiment.yaml").write_text("extends: ./a.yaml\nname: x\ntechnology: generic\n")

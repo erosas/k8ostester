@@ -1,12 +1,15 @@
-import pytest
-import json
-from unittest.mock import MagicMock, patch, ANY
-from kubernetes import client
-from k8ostester.workers.network import (
-    NetworkPartitionWorker, NetworkLossWorker, NetworkDelayWorker, PARTITION_LABEL,
-)
-from k8ostester.core.experiment import FaultSpec
+from unittest.mock import ANY, patch
 
+import pytest
+from kubernetes import client
+
+from k8ostester.core.experiment import FaultSpec
+from k8ostester.workers.network import (
+    PARTITION_LABEL,
+    NetworkDelayWorker,
+    NetworkLossWorker,
+    NetworkPartitionWorker,
+)
 
 # -- native NetworkPolicy partition (the default engine) -------------------------
 

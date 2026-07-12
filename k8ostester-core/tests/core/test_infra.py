@@ -1,7 +1,10 @@
+from unittest.mock import ANY, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, ANY
-from k8ostester.core.infra import InfraManager
+
 from k8ostester.core.exceptions import K8osConfigError, K8osInfraError
+from k8ostester.core.infra import InfraManager
+
 
 @pytest.fixture
 def mock_context():

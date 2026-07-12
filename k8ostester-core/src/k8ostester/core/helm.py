@@ -4,7 +4,6 @@ reimplement chart rendering."""
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -13,7 +12,6 @@ class HelmError(Exception):
     pass
 
 
-from k8ostester.core.exceptions import K8osInfraError
 
 
 class Helm:

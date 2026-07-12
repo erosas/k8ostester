@@ -81,7 +81,7 @@ def pick_experiment(root: Path = Path(".")) -> Path:
             show_choices=False,
         )
     except EOFError:
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     return dirs[idx - 1]
 
 
@@ -146,7 +146,7 @@ def run(
             result = runner.run()
     except Exception as e:
         console.print(f"\n[red]run error:[/red] {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     if result.goals or result.verifications:
         console.print(verdict_table(result))

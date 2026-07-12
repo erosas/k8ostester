@@ -1,8 +1,10 @@
-import pytest
 import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-from k8ostester.core.report import gather_run, find_all_runs, render
+from unittest.mock import patch
+
+import pytest
+
+from k8ostester.core.report import find_all_runs, gather_run, render
+
 
 @pytest.fixture
 def mock_run_dir(tmp_path):

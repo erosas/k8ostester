@@ -140,7 +140,7 @@ class Pool:
         deadline = t0 + ACQUIRE_TIMEOUT
         try:
             await asyncio.wait_for(self.slots.acquire(), ACQUIRE_TIMEOUT)
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             record("connect", self.phase_i, t0, False, err="PoolTimeout")
             return None
         while self.idle:
@@ -301,7 +301,7 @@ async def run_phase(i, phase, deadline):
 async def main():
     read_env_config()
     conn = None
-    for attempt in range(30):
+    for _ in range(30):
         conn = await connect(-1)
         if conn:
             break

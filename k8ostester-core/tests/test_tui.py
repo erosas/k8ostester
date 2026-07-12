@@ -130,6 +130,7 @@ async def test_tui_run_error(tmp_path, monkeypatch):
 
 def test_run_command_tui_flag(tmp_path):
     from typer.testing import CliRunner
+
     from k8ostester.cli import app as cli_app
 
     exp_dir = tmp_path / "my-exp"

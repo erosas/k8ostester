@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
+
 from k8ostester.core.exceptions import K8osConfigError
 
 _DURATION_RE = re.compile(r"^(\d+(?:\.\d+)?)(ms|s|m|h)$")

@@ -1,6 +1,13 @@
-import pytest
-from unittest.mock import patch, MagicMock
-from k8ostester.core.capabilities import Capabilities, NodeInfo, _kubectl_version, _helm_version, probe, _node_info
+from unittest.mock import MagicMock, patch
+
+from k8ostester.core.capabilities import (
+    Capabilities,
+    NodeInfo,
+    _helm_version,
+    _kubectl_version,
+    probe,
+)
+
 
 def test_capabilities_logic():
     nodes = [

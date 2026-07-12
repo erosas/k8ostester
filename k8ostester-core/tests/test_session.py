@@ -146,6 +146,7 @@ class FakeSession:
 
 async def test_session_app_controls(spec):
     from textual.widgets import Select, Static
+
     from k8ostester.cli.session import SessionApp
 
     fake = FakeSession()
@@ -192,6 +193,7 @@ async def test_session_app_controls(spec):
 
 def test_session_command_requires_terminal(tmp_path):
     from typer.testing import CliRunner
+
     from k8ostester.cli import app as cli_app
 
     result = CliRunner().invoke(cli_app, ["session", str(tmp_path)])
@@ -220,8 +222,10 @@ async def test_session_app_error_stays_open_until_quit(spec):
 
 def test_session_command_wiring(tmp_path):
     from unittest.mock import PropertyMock
+
     from rich.console import Console
     from typer.testing import CliRunner
+
     from k8ostester.cli import app as cli_app
 
     exp_dir = tmp_path / "lab"
@@ -287,10 +291,9 @@ def test_session_tech_action_dispatch(mock_k8s_cls, mock_get_driver, spec, tmp_p
 
 
 async def test_session_app_mounts_tech_actions(spec):
-    from textual.widgets import Button
-    from k8ostester.cli.session import SessionApp
+    from textual.widgets import Button, Select
 
-    from textual.widgets import Select
+    from k8ostester.cli.session import SessionApp
 
     fake = FakeSession()
     fake.run_actions = []
@@ -389,8 +392,8 @@ def test_session_attach_mode(mock_k8s_cls, mock_get_driver, mock_detect, tmp_pat
 @patch("k8ostester.core.session.detect_technology", return_value=None)
 @patch("k8ostester.core.session.ClusterClient")
 def test_session_attach_detection_failure(mock_k8s_cls, mock_detect, tmp_path):
-    from k8ostester.core.experiment import ExperimentSpec
     from k8ostester.core.exceptions import K8osInfraError
+    from k8ostester.core.experiment import ExperimentSpec
 
     spec = ExperimentSpec(name="attach-empty", technology="auto")
     session = Session(spec, results_root=tmp_path / "results",
@@ -402,8 +405,10 @@ def test_session_attach_detection_failure(mock_k8s_cls, mock_detect, tmp_path):
 
 def test_session_command_attach_wiring(tmp_path):
     from unittest.mock import PropertyMock
+
     from rich.console import Console
     from typer.testing import CliRunner
+
     from k8ostester.cli import app as cli_app
 
     with patch("k8ostester.core.session.Session") as mock_session_cls, \

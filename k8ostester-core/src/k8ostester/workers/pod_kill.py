@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from k8ostester.core.experiment import FaultSpec
 from k8ostester.workers.base import Worker

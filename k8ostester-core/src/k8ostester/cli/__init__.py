@@ -4,7 +4,7 @@
 themselves on import. The console entry point is `k8ostester.cli:app`.
 """
 
+from k8ostester.cli import clean, env, report, run, session  # noqa: F401  (register commands)
 from k8ostester.cli.app import app
-from k8ostester.cli import env, report, run, session  # noqa: F401  (register commands)
 
 __all__ = ["app"]

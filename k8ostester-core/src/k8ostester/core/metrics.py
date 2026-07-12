@@ -7,11 +7,13 @@ minutes long, not weeks.
 """
 
 from __future__ import annotations
-from k8ostester.core.exceptions import K8osConfigError
 
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
+
+from k8ostester.core.exceptions import K8osConfigError
 
 
 class MetricStore:

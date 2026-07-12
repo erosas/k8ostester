@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +46,7 @@ PSYCOPG_PIN = "psycopg[binary]==3.2.*"
 
 
 def _clock(ts: float) -> str:
-    return datetime.fromtimestamp(ts, timezone.utc).strftime("%H:%M:%SZ")
+    return datetime.fromtimestamp(ts, UTC).strftime("%H:%M:%SZ")
 
 
 def _format_lag(seconds: float, bytes_: float) -> str:
@@ -67,7 +67,7 @@ def _format_lag(seconds: float, bytes_: float) -> str:
 
 class VerifyResult(dict):
     @classmethod
-    def make(cls, check: str, passed: bool, detail: str) -> "VerifyResult":
+    def make(cls, check: str, passed: bool, detail: str) -> VerifyResult:
         return cls(check=check, passed=passed, detail=detail)
 
 
@@ -400,7 +400,8 @@ class CnpgDriver(TechnologyDriver):
         )
         import base64
 
-        decode = lambda k: base64.b64decode(secret.data[k]).decode()
+        def decode(k):
+            return base64.b64decode(secret.data[k]).decode()
         host = f"{self.cluster_name}-rw" if endpoint == "auto" else endpoint
         return (
             f"host={host} port=5432 dbname={decode('dbname')} "
@@ -616,7 +617,8 @@ class CnpgDriver(TechnologyDriver):
         )
         import base64
 
-        decode = lambda k: base64.b64decode(secret.data[k]).decode()
+        def decode(k):
+            return base64.b64decode(secret.data[k]).decode()
         host = f"{self.cluster_name}-rw" if spec.endpoint == "auto" else spec.endpoint
         dsn = (
             f"host={host} port=5432 dbname={decode('dbname')} "
@@ -887,7 +889,7 @@ class CnpgDriver(TechnologyDriver):
     def ensure_backup(self) -> None:
         """Take a Barman base backup now (called before load so PITR can
         replay WAL forward through the whole run)."""
-        self._backup_name = f"k8ost-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+        self._backup_name = f"k8ost-{datetime.now(UTC).strftime('%H%M%S')}"
         self.k8s.custom.create_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, self.namespace, "backups",
             load_resource(
@@ -946,7 +948,7 @@ class CnpgDriver(TechnologyDriver):
     def _restore_cluster_at(self, target_ts: float) -> str:
         """Bootstrap `<cluster>-pitr` from the object store at target_ts;
         returns the restore cluster's name once it is healthy."""
-        target = datetime.fromtimestamp(target_ts, timezone.utc).strftime(
+        target = datetime.fromtimestamp(target_ts, UTC).strftime(
             "%Y-%m-%d %H:%M:%S.%f+00"
         )
         self.events.emit("pitr.start", f"restore target: {target}")

@@ -19,15 +19,16 @@ import queue
 import shutil
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+import yaml
 
 from k8ostester.core.events import EventLog
 from k8ostester.core.exceptions import K8osInfraError
 from k8ostester.core.experiment import ExperimentSpec, FaultSpec
 from k8ostester.core.k8s import ClusterClient
 from k8ostester.core.runner import RUN_LABEL
-import yaml
 from k8ostester.drivers import detect_technology, get_driver
 from k8ostester.workers import get_worker
 
@@ -56,7 +57,7 @@ class Session:
         self.rate = rate
         self.clients = clients
         self.attach = attach_namespace is not None
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         self.session_id = f"{stamp}-session"
         self.run_dir = results_root / spec.name / self.session_id
         self.run_dir.mkdir(parents=True, exist_ok=True)

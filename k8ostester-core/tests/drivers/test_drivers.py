@@ -1,11 +1,13 @@
-import pytest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from k8ostester.core.exceptions import K8osConfigError, K8osDriverError
+from k8ostester.core.experiment import ExperimentSpec
 from k8ostester.drivers.base import TechnologyDriver
 from k8ostester.drivers.generic import GenericDriver
-from k8ostester.drivers import get_driver, _load_tech_driver
-from k8ostester.core.experiment import ExperimentSpec
-from k8ostester.core.exceptions import K8osConfigError, K8osDriverError
+
 
 @pytest.fixture
 def mock_context():

@@ -11,13 +11,17 @@ and `q` exits with the run's exit code (0 passed / 1 error / 2 failed).
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import (
-    DataTable, Footer, ProgressBar, RichLog, Static,
+    DataTable,
+    Footer,
+    ProgressBar,
+    RichLog,
+    Static,
 )
 
 from k8ostester.cli.live import ALERT_TYPES, PANE_TYPES, topology_text

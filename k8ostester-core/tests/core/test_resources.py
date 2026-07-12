@@ -1,5 +1,6 @@
 from k8ostester.core.resources import load_resource
 
+
 def test_load_resource(tmp_path):
     tpl = tmp_path / "template.yaml"
     tpl.write_text("name: ${NAME}\nvalue: ${VALUE}")

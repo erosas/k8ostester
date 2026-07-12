@@ -1,7 +1,9 @@
+
 import pytest
-import json
-from k8ostester.core.metrics import MetricStore, percentile
+
 from k8ostester.core.exceptions import K8osConfigError
+from k8ostester.core.metrics import MetricStore, percentile
+
 
 def test_metric_store(tmp_path):
     path = tmp_path / "metrics.jsonl"

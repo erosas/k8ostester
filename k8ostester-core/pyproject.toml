@@ -2,7 +2,11 @@
 name = "k8ostester"
 version = "0.1.0"
 description = "Validate Kubernetes configurations of stateful technologies against resilience and performance goals"
+readme = "../README.md"
 requires-python = ">=3.14"
+license = "MIT"
+authors = [{ name = "Erick Rosas", email = "erickrosas89@gmail.com" }]
+keywords = ["kubernetes", "resilience", "chaos", "postgres", "cloudnative-pg"]
 dependencies = [
     "typer>=0.15",
     "rich>=13.0",
@@ -18,6 +22,20 @@ dev = [
     "pytest-asyncio>=1.0",
     "pytest-cov>=6.0.0",
     "pytest-timeout>=2.4.0",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = [
+    "E501",   # line length — the formatter's job, not the linter's
+    "B008",   # function-call defaults are how typer declares CLI options/args
+    "UP042",  # str+Enum is intentional (typer choice enums)
+    "UP047",  # TypeVar generics are fine; not migrating to PEP 695 syntax
 ]
 
 

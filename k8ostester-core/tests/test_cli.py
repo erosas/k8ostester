@@ -1,7 +1,7 @@
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 from typer.testing import CliRunner
+
 from k8ostester.cli import app
 
 runner = CliRunner()
@@ -242,7 +242,7 @@ def test_find_experiments_skips_hidden_and_results(tmp_path):
 
 def test_run_command_interactive_picker(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    exp_dir = make_exp_dir(tmp_path)
+    make_exp_dir(tmp_path)  # discovered by the picker
 
     with patch("k8ostester.core.runner.Runner") as mock_runner_cls:
         from k8ostester.core.runner import RunResult
@@ -282,8 +282,9 @@ def test_picker_flags_invalid_experiment(tmp_path, monkeypatch):
         assert "invalid" in result.output  # the broken row is marked, not fatal
 
 def test_live_run_view_renders_header_and_events():
-    from k8ostester.cli.live import LiveRunView
     from rich.console import Console
+
+    from k8ostester.cli.live import LiveRunView
 
     view = LiveRunView("my-exp", "postgres-cnpg", None)
     view.on_event({"type": "deploy.start", "t_rel": 1.2, "msg": "applying manifests"})
@@ -314,6 +315,7 @@ def test_run_command_live_view(tmp_path):
 
 def test_run_command_terminal_defaults_to_tui(tmp_path):
     from unittest.mock import PropertyMock
+
     from rich.console import Console
 
     exp_dir = make_exp_dir(tmp_path)
@@ -325,8 +327,9 @@ def test_run_command_terminal_defaults_to_tui(tmp_path):
         mock_tui.assert_called_once()
 
 def test_live_run_view_metrics_topology_and_progress():
-    from k8ostester.cli.live import LiveRunView
     from rich.console import Console
+
+    from k8ostester.cli.live import LiveRunView
 
     view = LiveRunView("exp", "postgres-cnpg", "docker-desktop")
     view.on_event({"type": "load.start", "t_rel": 20.0, "msg": "1 phase(s)",
@@ -391,3 +394,26 @@ def test_topology_text_renders_replication_lag():
     }
     out = topology_text(graph).plain
     assert "async +2.1s" in out
+
+def test_clean_command(tmp_path):
+    with patch("k8ostester.cli.clean.ClusterClient") as mock_cls:
+        k8s = mock_cls.return_value
+        live, terminating = MagicMock(), MagicMock()
+        live.metadata.name = "exp-dummy-abc123"
+        live.status.phase = "Active"
+        terminating.metadata.name = "exp-old-xyz"
+        terminating.status.phase = "Terminating"
+        k8s.core.list_namespace.return_value.items = [live, terminating]
+
+        result = runner.invoke(app, ["clean", "--yes"])
+        assert result.exit_code == 0
+        assert "exp-dummy-abc123" in result.output
+        # only the non-terminating one is deleted; the terminating one is skipped
+        k8s.delete_namespace.assert_called_once_with("exp-dummy-abc123", wait=False)
+
+def test_clean_command_nothing(tmp_path):
+    with patch("k8ostester.cli.clean.ClusterClient") as mock_cls:
+        mock_cls.return_value.core.list_namespace.return_value.items = []
+        result = runner.invoke(app, ["clean"])
+        assert result.exit_code == 0
+        assert "nothing to clean" in result.output

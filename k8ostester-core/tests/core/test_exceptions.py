@@ -1,4 +1,5 @@
-from k8ostester.core.exceptions import K8osConfigError, K8osError, K8osInfraError, K8osDriverError
+from k8ostester.core.exceptions import K8osConfigError, K8osDriverError, K8osError, K8osInfraError
+
 
 def test_exceptions():
     assert issubclass(K8osConfigError, K8osError)

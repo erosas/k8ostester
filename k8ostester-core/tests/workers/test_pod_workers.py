@@ -1,10 +1,13 @@
-import pytest
 from unittest.mock import MagicMock
-from k8ostester.workers.base import Worker
-from k8ostester.workers.pod_kill import PodKillWorker
-from k8ostester.workers.node_drain import NodeDrainWorker
-from k8ostester.workers.process_kill import ProcessKillWorker
+
+import pytest
+
 from k8ostester.core.experiment import FaultSpec
+from k8ostester.workers.base import Worker
+from k8ostester.workers.node_drain import NodeDrainWorker
+from k8ostester.workers.pod_kill import PodKillWorker
+from k8ostester.workers.process_kill import ProcessKillWorker
+
 
 def test_worker_resolve_pod_direct(mock_context):
     k8s, driver, events, ns = mock_context

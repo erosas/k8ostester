@@ -1,7 +1,9 @@
 import pytest
-from k8ostester.core.goals import evaluate_goals, _threshold, _rto
-from k8ostester.core.experiment import GoalSpec
+
 from k8ostester.core.exceptions import K8osConfigError
+from k8ostester.core.experiment import GoalSpec
+from k8ostester.core.goals import _rto, _threshold, evaluate_goals
+
 
 def test_threshold_parsing():
     # Test rto seconds

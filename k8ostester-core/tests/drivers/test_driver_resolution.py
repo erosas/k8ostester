@@ -1,7 +1,9 @@
+
 import pytest
-from pathlib import Path
-from k8ostester.drivers import get_driver, _BUILTINS
+
+from k8ostester.drivers import get_driver
 from k8ostester.drivers.generic import GenericDriver
+
 
 def test_get_driver_builtin():
     assert get_driver("generic") == GenericDriver

@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from k8ostester.core.capabilities import probe
-from k8ostester.core.exceptions import K8osConfigError, K8osInfraError, K8osDriverError
 from k8ostester.core.events import EventLog
+from k8ostester.core.exceptions import K8osConfigError, K8osInfraError
 from k8ostester.core.experiment import ExperimentSpec
 from k8ostester.core.goals import evaluate_goals
 from k8ostester.core.k8s import ClusterClient
@@ -55,7 +55,7 @@ class Runner:
         self.allow_concurrent = allow_concurrent
         self.context = context_override or spec.cluster.context
         self.group = group_override or spec.group
-        run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        run_stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         self.run_id = run_stamp
         self.run_dir = results_root / spec.name / run_stamp
         self.run_dir.mkdir(parents=True, exist_ok=True)

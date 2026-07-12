@@ -45,7 +45,8 @@ spec:
     spec:
       containers:
         - name: seaweedfs
-          image: chrislusf/seaweedfs:latest   # TODO(D7 follow-up): pin a digest
+          # pinned by digest (was :latest) for reproducible backup-store infra
+          image: chrislusf/seaweedfs:3.80@sha256:1055999e08eed1789b0ae45d235126e4495e23d3fb9d6396293fd42539b1ae6a
           args:
             - server
             - -dir=/data

@@ -1,5 +1,6 @@
 from k8ostester.core.events import EventLog
 
+
 def test_event_log(tmp_path):
     log_path = tmp_path / "events.jsonl"
     events = []

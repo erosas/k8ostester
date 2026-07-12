@@ -1,7 +1,10 @@
-import pytest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
+
+import pytest
+
 from k8ostester.core.helm import Helm, HelmError
+
 
 @pytest.fixture
 def mock_k8s():

@@ -1,14 +1,22 @@
 import base64
 import json
-import pytest
+from datetime import UTC
 from pathlib import Path
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import ANY, MagicMock, patch
+
+import pytest
 from kubernetes import client
-from k8ostester.technologies.postgres_cnpg.driver import CnpgDriver
-from k8ostester.core.experiment import (
-    ExperimentSpec, FaultSpec, GoalSpec, LoadSpec, ClusterSpec,
-)
+
 from k8ostester.core.exceptions import K8osConfigError
+from k8ostester.core.experiment import (
+    ClusterSpec,
+    ExperimentSpec,
+    FaultSpec,
+    GoalSpec,
+    LoadSpec,
+)
+from k8ostester.technologies.postgres_cnpg.driver import CnpgDriver
+
 
 @pytest.fixture
 def mock_context(tmp_path):
@@ -111,10 +119,10 @@ def test_cnpg_cluster_name_requires_exactly_one(mock_context):
 
     stub_clusters(k8s)
     with pytest.raises(RuntimeError, match="expected exactly 1 CNPG Cluster"):
-        driver.cluster_name
+        _ = driver.cluster_name
     stub_clusters(k8s, "a", "b")
     with pytest.raises(RuntimeError, match="found 2"):
-        driver.cluster_name
+        _ = driver.cluster_name
 
 def test_cnpg_start_load_journal(mock_context):
     k8s, events, spec, ns = mock_context
@@ -876,7 +884,7 @@ def test_cnpg_topology_graph_edge_lag(mock_context):
 
 def test_cnpg_session_actions_restore_window(mock_context):
     import time as _time
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt
     k8s, events, spec, ns = mock_context
     driver = CnpgDriver(k8s, spec, ns, events)
 
@@ -890,7 +898,7 @@ def test_cnpg_session_actions_restore_window(mock_context):
     assert [a["id"] for a in driver.session_actions()] == ["backup"]
 
     # a completed backup 10 minutes ago opens the restore window
-    stopped = _dt.fromtimestamp(_time.time() - 600, _tz.utc).isoformat().replace("+00:00", "Z")
+    stopped = _dt.fromtimestamp(_time.time() - 600, UTC).isoformat().replace("+00:00", "Z")
     stub_clusters(k8s, "pg", backups=[("k8ost-1", stopped)])
     actions = driver.session_actions()
     assert [a["id"] for a in actions] == ["backup", "restore"]
@@ -907,12 +915,12 @@ def test_cnpg_session_actions_restore_window(mock_context):
 
 def test_cnpg_run_session_action(mock_context):
     import time as _time
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt
     k8s, events, spec, ns = mock_context
     driver = CnpgDriver(k8s, spec, ns, events)
 
     # backup: summary reports the (now open) restore window
-    stopped = _dt.fromtimestamp(_time.time() - 60, _tz.utc).isoformat().replace("+00:00", "Z")
+    stopped = _dt.fromtimestamp(_time.time() - 60, UTC).isoformat().replace("+00:00", "Z")
     stub_clusters(k8s, "pg", backups=[("k8ost-1200", stopped)])
     with patch.object(driver, "ensure_backup") as backup:
         driver._backup_name = "k8ost-1200"
@@ -926,7 +934,7 @@ def test_cnpg_run_session_action(mock_context):
 
     # a picked target inside the window is honored exactly; k8ost_ops present
     # → row count reported (presence probe returns 't', then the count)
-    old_stop = _dt.fromtimestamp(_time.time() - 3600, _tz.utc).isoformat().replace("+00:00", "Z")
+    old_stop = _dt.fromtimestamp(_time.time() - 3600, UTC).isoformat().replace("+00:00", "Z")
     stub_clusters(k8s, "pg", backups=[("k8ost-1200", old_stop)])
     target = _time.time() - 1800
     with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
@@ -943,7 +951,7 @@ def test_cnpg_run_session_action(mock_context):
         assert "pg-pitr" in summary and "healthy" in summary and "no k8ost_ops" in summary
 
     # a target before the window clamps to the window start
-    recent_stop = _dt.fromtimestamp(_time.time() - 30, _tz.utc).isoformat().replace("+00:00", "Z")
+    recent_stop = _dt.fromtimestamp(_time.time() - 30, UTC).isoformat().replace("+00:00", "Z")
     stub_clusters(k8s, "pg", backups=[("k8ost-1200", recent_stop)])
     with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
          patch.object(driver, "_psql", side_effect=["t\n", "12\n"]):

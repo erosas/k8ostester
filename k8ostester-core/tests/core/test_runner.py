@@ -1,11 +1,13 @@
-import pytest
 import time
-from pathlib import Path
-from unittest.mock import MagicMock, patch, ANY
+from unittest.mock import MagicMock, patch
+
+import pytest
+
 from k8ostester.core.events import EventLog
 from k8ostester.core.exceptions import K8osConfigError, K8osInfraError
-from k8ostester.core.runner import Runner, RunResult
-from k8ostester.core.experiment import ExperimentSpec, GoalSpec, LoadSpec, FaultSpec, ClusterSpec
+from k8ostester.core.experiment import ClusterSpec, ExperimentSpec, FaultSpec, GoalSpec, LoadSpec
+from k8ostester.core.runner import Runner
+
 
 @pytest.fixture
 def dummy_spec(tmp_path):
@@ -239,7 +241,7 @@ def test_runner_detects_host_suspend(mock_probe, mock_get_driver, mock_k8s_cls, 
 def test_runner_error_handling(dummy_spec, tmp_path):
     with patch("k8ostester.core.runner.ClusterClient") as mock_k8s_cls, \
          patch("k8ostester.core.runner.get_driver") as mock_get_driver, \
-         patch("k8ostester.core.runner.probe") as mock_probe:
+         patch("k8ostester.core.runner.probe"):
         
         mock_k8s = mock_k8s_cls.return_value
         mock_k8s.core.list_namespace.return_value.items = []

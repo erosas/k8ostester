@@ -80,6 +80,10 @@ k8ost report --group dr-drill --open      # one comparison table (verdict + metr
 ```
 
 ```bash
+k8ost report --latest --open             # ALL experiments in one table (latest verdict each)
+```
+
+```bash
 k8ost runs                                # every recorded run
 ```
 
@@ -185,6 +189,24 @@ The load pool starts at **0 pods**: your applications drive the load and you dri
 chaos, watching their telemetry. Press `load +` at any moment to add k8ost's own
 journaled load against the cluster's `rw` service (its metrics then appear in the
 dashboard). Partitioning needs a policy-enforcing CNI (Calico/Cilium) or chaos-mesh present; `k8ost env check` reports which. Loss/delay always need chaos-mesh.
+
+## DB-node metrics via OpenTelemetry
+
+k8ost installs no monitoring stack — the config under test owns its telemetry
+(D19). To ship the database nodes' own metrics to an OTEL endpoint you already
+run, add an OpenTelemetry Collector to the experiment's `manifests/`: it scrapes
+CNPG's built-in Prometheus exporter (`:9187`) and forwards OTLP. The worked
+example is `experiments/postgres-cnpg/19-cnpg-otel/` — set
+`OTEL_EXPORTER_OTLP_ENDPOINT` in `manifests/otel-collector.yaml` to your OTLP
+gRPC receiver, then:
+
+```bash
+k8ost run experiments/postgres-cnpg/19-cnpg-otel
+```
+
+It is fully namespaced (a Role, not a ClusterRole; scraping scoped to the run
+namespace), so it deploys and tears down with the run and leaves nothing behind.
+The same pattern works for any technology whose pods expose Prometheus metrics.
 
 ## Results
 

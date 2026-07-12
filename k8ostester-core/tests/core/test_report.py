@@ -91,3 +91,21 @@ def test_render(tmp_path):
         content = out.read_text()
         assert "Title: Test Report" in content
         assert '"run_id":"r1"' in content
+
+
+def test_find_latest_runs_one_verdict_per_experiment(tmp_path):
+    from k8ostester.core.report import find_latest_runs
+    def run(exp, stamp, status):
+        d = tmp_path / exp / stamp
+        d.mkdir(parents=True)
+        (d / "summary.json").write_text(json.dumps({"status": status}))
+        return d
+
+    run("01-a", "20260101-000000", "passed")
+    latest_a = run("01-a", "20260102-000000", "failed")   # newer verdict wins
+    run("01-a", "20260103-000000", "session")             # sessions ignored
+    run("02-b", "20260101-000000", "error")               # error-only → excluded
+    latest_c = run("03-c", "20260101-000000", "passed")
+
+    result = find_latest_runs(tmp_path)
+    assert result == [latest_a, latest_c]                 # experiment order, verdicts only

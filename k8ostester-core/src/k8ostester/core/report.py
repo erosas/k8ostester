@@ -111,6 +111,22 @@ def find_all_runs(results_root: Path = Path("results")) -> list[Path]:
     return [p.parent for p in sorted(results_root.glob("*/*/summary.json"))]
 
 
+def find_latest_runs(results_root: Path = Path("results")) -> list[Path]:
+    """The most recent *verdict* run (passed/failed) of each experiment — the
+    one-row-per-experiment overview. Skips sessions (no verdict) and error
+    runs so the table reads as a results catalog, in experiment order."""
+    latest: dict[str, Path] = {}
+    for summary_path in sorted(results_root.glob("*/*/summary.json")):
+        try:
+            summary = json.loads(summary_path.read_text())
+        except json.JSONDecodeError:
+            continue
+        if summary.get("status") not in ("passed", "failed"):
+            continue
+        latest[summary_path.parent.parent.name] = summary_path.parent  # later run wins
+    return [latest[name] for name in sorted(latest)]
+
+
 def render(runs: list[dict], title: str, out: Path) -> Path:
     goal_names: list[str] = []
     for run in runs:

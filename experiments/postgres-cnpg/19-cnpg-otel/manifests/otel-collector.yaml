@@ -1,0 +1,89 @@
+# OpenTelemetry Collector (Apache-2.0) that scrapes the CNPG instances'
+# Prometheus metrics endpoint (:9187) and exports them as OTLP to an external
+# endpoint. Part of the config under test, not k8ost infra — all namespaced
+# (Role, not ClusterRole), so `k8ost` teardown removes it with the namespace.
+#
+# ►► Point OTEL_EXPORTER_OTLP_ENDPOINT (bottom) at YOUR OTLP gRPC receiver.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: k8ost-otel, namespace: ${K8OST_NAMESPACE}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: k8ost-otel, namespace: ${K8OST_NAMESPACE}}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: k8ost-otel, namespace: ${K8OST_NAMESPACE}}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: k8ost-otel}
+subjects:
+  - {kind: ServiceAccount, name: k8ost-otel, namespace: ${K8OST_NAMESPACE}}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: k8ost-otel-config, namespace: ${K8OST_NAMESPACE}}
+data:
+  config.yaml: |
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: cnpg
+              scrape_interval: 15s
+              kubernetes_sd_configs:
+                - role: pod
+                  namespaces: {names: [${K8OST_NAMESPACE}]}
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+                  action: keep
+                  regex: pg                              # only this cluster's instances
+                - source_labels: [__meta_kubernetes_pod_container_port_number]
+                  action: keep
+                  regex: "9187"                          # CNPG's metrics port
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: instance
+    processors:
+      batch: {}
+      resource:
+        attributes:
+          - {key: service.name, value: cnpg-${K8OST_NAMESPACE}, action: upsert}
+    exporters:
+      otlp:
+        endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT}
+        tls: {insecure: true}
+      debug: {verbosity: basic}                          # also logs a sample locally
+    service:
+      pipelines:
+        metrics:
+          receivers: [prometheus]
+          processors: [resource, batch]
+          exporters: [otlp, debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: k8ost-otel, namespace: ${K8OST_NAMESPACE}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: k8ost-otel}}
+  template:
+    metadata: {labels: {app: k8ost-otel}}
+    spec:
+      serviceAccountName: k8ost-otel
+      containers:
+        - name: collector
+          image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.116.1
+          args: ["--config=/etc/otel/config.yaml"]
+          env:
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "otel-collector.observability.svc.cluster.local:4317"   # ►► YOUR endpoint
+          volumeMounts:
+            - {name: config, mountPath: /etc/otel}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: "500m", memory: 512Mi}
+      volumes:
+        - {name: config, configMap: {name: k8ost-otel-config}}

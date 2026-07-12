@@ -30,6 +30,7 @@ class NodeInfo(BaseModel):
     ready: bool
     arch: str
     kubelet_version: str
+    zone: str = ""  # topology.kubernetes.io/zone — empty when the cluster has no zone labels
 
 
 class StorageClassInfo(BaseModel):
@@ -78,6 +79,7 @@ def _node_info(node) -> NodeInfo:
         ready=ready,
         arch=node.status.node_info.architecture,
         kubelet_version=node.status.node_info.kubelet_version,
+        zone=(node.metadata.labels or {}).get("topology.kubernetes.io/zone", ""),
     )
 
 

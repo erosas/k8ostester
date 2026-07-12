@@ -39,6 +39,7 @@ def env_check(
     nodes.add_column("Ready")
     nodes.add_column("Arch")
     nodes.add_column("Kubelet")
+    nodes.add_column("Zone")
     for n in caps.nodes:
         nodes.add_row(
             n.name,
@@ -46,6 +47,7 @@ def env_check(
             "[green]yes[/green]" if n.ready else "[red]NO[/red]",
             n.arch,
             n.kubelet_version,
+            n.zone or "[dim]—[/dim]",
         )
     console.print(nodes)
 

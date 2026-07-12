@@ -412,3 +412,67 @@ def test_session_command_attach_wiring(tmp_path):
         # attach + experiment dir is a contradiction
         result = CliRunner().invoke(cli_app, ["session", str(tmp_path), "--attach", "prod-db"])
         assert result.exit_code == 2
+
+
+@patch("k8ostester.core.session.get_worker")
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_recorder_exports_replayable_experiment(mock_k8s_cls, mock_get_driver, mock_get_worker, spec, tmp_path):
+    mock_k8s_cls.return_value.core.list_namespace.return_value.items = []
+    driver = mock_get_driver.return_value.return_value
+    driver.stop_load_session.return_value = ""
+
+    session = make_session(spec, tmp_path, pods=1, rate=20.0, clients=5)
+    session.scale(1)
+    session.inject("pod_kill", {"role": "primary"})
+    session.stop()
+    session.start()
+
+    recorded = session.run_dir / "recorded"
+    assert (recorded / "experiment.yaml").exists()
+    assert (recorded / "manifests").is_dir()  # copied from the source experiment
+    import yaml
+    doc = yaml.safe_load((recorded / "experiment.yaml").read_text())
+    assert doc["name"] == "lab-recorded"
+    assert doc["faults"][0]["worker"] == "pod_kill"
+    assert doc["faults"][0]["target"] == {"role": "primary"}
+    assert doc["verify"] == ["integrity"]
+    assert doc["goals"] == [{"metric": "uptime", "min": "98%"}]
+
+    events = EventLog.read(session.run_dir / "events.jsonl")
+    assert any(e["type"] == "session.recorded" for e in events)
+
+
+def test_recorded_spec_timeline(spec, tmp_path):
+    """The pure timeline synthesis: scale/rate changes become load phases,
+    faults keep offsets, a backup adds the verification."""
+    from k8ostester.core.experiment import ExperimentSpec
+
+    session = make_session(spec, tmp_path, pods=1, rate=20.0, clients=5)
+    t0 = 1000.0
+    session._ready_at = t0
+    session._ready_state = (1, 20.0, 5)
+    session._recorded = [
+        (t0 + 30, ("pods", 3)),                                # scale up at +30s
+        (t0 + 60, ("fault", "pod_kill", {"pod": "pg-3"}, None)),
+        (t0 + 75, ("fault", "network_partition", {"role": "primary"}, "30s")),
+        (t0 + 90, ("rate", 50.0)),                             # rate change at +90s
+        (t0 + 100, ("backup",)),
+        (t0 + 120, ("pods", 0)),                               # pause at +120s
+    ]
+    doc = session.recorded_spec(end=t0 + 150)
+
+    assert doc["load"]["phases"] == [
+        {"duration": "30s", "rate": "20/s", "clients": {"count": 5, "mode": "persistent"}},
+        {"duration": "60s", "rate": "60/s", "clients": {"count": 15, "mode": "persistent"}},
+        {"duration": "30s", "rate": "150/s", "clients": {"count": 15, "mode": "persistent"}},
+        {"duration": "30s", "rate": "0/s"},
+    ]
+    assert doc["faults"] == [
+        {"at": "60s", "worker": "pod_kill", "target": {"pod": "pg-3"}},
+        {"at": "75s", "worker": "network_partition", "target": {"role": "primary"},
+         "duration": "30s"},
+    ]
+    assert doc["verify"] == ["integrity", "backup"]
+    # the export round-trips through the spec model
+    ExperimentSpec.model_validate(doc)

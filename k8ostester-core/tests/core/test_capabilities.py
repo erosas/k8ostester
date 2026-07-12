@@ -104,3 +104,23 @@ def test_probe_snapshot_classes_absent(mock_client_cls):
 def test_kubectl_version_both_forms_fail(mock_run, mock_which):
     mock_run.return_value = MagicMock(returncode=1, stderr="broken")
     assert _kubectl_version() is None
+
+
+@patch("k8ostester.core.capabilities.ClusterClient")
+def test_probe_reports_zones(mock_client_cls):
+    mock_k8s = mock_client_cls.return_value
+    mock_k8s.version.get_code.return_value = MagicMock(git_version="v1.31.0")
+    node = MagicMock()
+    node.metadata.name = "ip-10-0-1-5"
+    node.metadata.labels = {"topology.kubernetes.io/zone": "us-east-1a"}
+    node.status.conditions = []
+    node.status.node_info.architecture = "amd64"
+    node.status.node_info.kubelet_version = "v1.31.0"
+    mock_k8s.core.list_node.return_value.items = [node]
+    mock_k8s.storage.list_storage_class.return_value.items = []
+    mock_k8s.has_crd.return_value = False
+
+    with patch("k8ostester.core.capabilities._helm_version", return_value=None), \
+         patch("k8ostester.core.capabilities._kubectl_version", return_value=None):
+        caps = probe(None)
+    assert caps.nodes[0].zone == "us-east-1a"

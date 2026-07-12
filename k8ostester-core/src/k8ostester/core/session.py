@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import queue
+import shutil
 import threading
 import time
 from datetime import datetime, timezone
@@ -26,6 +27,7 @@ from k8ostester.core.exceptions import K8osInfraError
 from k8ostester.core.experiment import ExperimentSpec, FaultSpec
 from k8ostester.core.k8s import ClusterClient
 from k8ostester.core.runner import RUN_LABEL
+import yaml
 from k8ostester.drivers import detect_technology, get_driver
 from k8ostester.workers import get_worker
 
@@ -64,6 +66,11 @@ class Session:
         self._commands: queue.Queue = queue.Queue()
         self._stop = threading.Event()
         self._cleanups: list = []
+        # the recorder: successful controls, timestamped — exported as a
+        # replayable experiment.yaml at teardown
+        self._recorded: list[tuple[float, tuple]] = []
+        self._ready_at: float | None = None
+        self._ready_state: tuple[int, float, int] = (pods, rate, clients)
 
     # -- controls (thread-safe, called from the UI) -----------------------------
 
@@ -137,6 +144,8 @@ class Session:
                 "controls live — scale the load, inject faults; q tears down",
                 actions=actions,
             )
+            self._ready_at = time.time()
+            self._ready_state = (self.pods, self.rate, self.clients)
 
             while True:
                 self._drain_commands(k8s, driver)
@@ -165,6 +174,7 @@ class Session:
                         f"{self.pods} load pod(s) ≈ {self.pods * self.rate:g} ops/s",
                         pods=self.pods,
                     )
+                    self._recorded.append((time.time(), ("pods", self.pods)))
                 elif command[0] == "rate":
                     self.rate = max(1.0, self.rate + command[1])
                     driver.set_load_rate(self.rate, self.clients)
@@ -174,10 +184,13 @@ class Session:
                         f"(≈ {self.pods * self.rate:g} ops/s total)",
                         rate=self.rate, pods=self.pods,
                     )
+                    self._recorded.append((time.time(), ("rate", self.rate)))
                 elif command[0] == "tech":
                     _, action_id, label, params = command
                     self.events.emit("session.action", f"{label} — running…")
                     summary = driver.run_session_action(action_id, params)
+                    if action_id == "backup":
+                        self._recorded.append((time.time(), ("backup",)))
                     self.events.emit("session.action", f"{label}: {summary}")
                     # tech ops change what is possible next (a backup opens
                     # the restore window) — refresh the action metadata
@@ -196,9 +209,95 @@ class Session:
                         self._cleanups.append(cleanup)
                     self.events.emit("fault.injected", f"{worker_name} (manual)",
                                      worker=worker_name, target=target)
+                    self._recorded.append(
+                        (time.time(), ("fault", worker_name, target, duration)))
             except Exception as e:
                 # a failed control action is reported, never fatal
                 self.events.emit("session.command.error", f"{command[0]}: {e}")
+
+    def recorded_spec(self, end: float) -> dict:
+        """The session's control timeline as a declarative experiment: scale
+        and rate changes become load phases (total rate = pods × per-pod
+        rate), manual faults keep their offsets from session-ready, a backup
+        adds the backup verification. Replayable with `k8ost run`."""
+        assert self._ready_at is not None
+        t0 = self._ready_at
+        pods, rate, clients = self._ready_state
+
+        phases: list[dict] = []
+        faults: list[dict] = []
+        took_backup = False
+        segment_start = t0
+
+        def close_segment(until: float) -> None:
+            duration = round(until - segment_start)
+            if duration < 1:
+                return
+            if pods == 0 or rate == 0:
+                phases.append({"duration": f"{duration}s", "rate": "0/s"})
+            else:
+                phases.append({
+                    "duration": f"{duration}s",
+                    "rate": f"{pods * rate:g}/s",
+                    "clients": {"count": pods * clients, "mode": "persistent"},
+                })
+
+        for at, command in self._recorded:
+            if command[0] in ("pods", "rate"):
+                close_segment(at)
+                segment_start = at
+                if command[0] == "pods":
+                    pods = command[1]
+                else:
+                    rate = command[1]
+            elif command[0] == "fault":
+                _, worker, target, duration = command
+                faults.append({
+                    "at": f"{round(at - t0)}s", "worker": worker, "target": target,
+                    **({"duration": duration} if duration else {}),
+                })
+            elif command[0] == "backup":
+                took_backup = True
+        close_segment(end)
+
+        return {
+            "name": f"{self.spec.name}-recorded",
+            "technology": self.spec.technology,
+            **({"group": self.spec.group} if self.spec.group else {}),
+            **({"cluster": {"context": self.context}} if self.context else {}),
+            **({"infra": self.spec.infra} if self.spec.infra else {}),
+            "load": {
+                "endpoint": self.spec.load.endpoint if self.spec.load else "auto",
+                "phases": phases,
+            },
+            "faults": faults,
+            "verify": ["integrity"] + (["backup"] if took_backup else []),
+            "goals": [g.model_dump(exclude_none=True, exclude_defaults=True)
+                      for g in self.spec.goals],
+        }
+
+    def _write_recording(self) -> None:
+        if not self._recorded or self._ready_at is None:
+            return
+        try:
+            recorded_dir = self.run_dir / "recorded"
+            recorded_dir.mkdir(exist_ok=True)
+            doc = self.recorded_spec(end=time.time())
+            header = (
+                f"# Recorded from session {self.session_id} on {self.spec.name}.\n"
+                "# Replay with: k8ost run <this directory>\n"
+            )
+            if not (self.spec.dir / "manifests").is_dir():
+                header += "# NOTE: recorded from an attached cluster — supply manifests/ before replaying.\n"
+            (recorded_dir / "experiment.yaml").write_text(
+                header + yaml.safe_dump(doc, sort_keys=False))
+            if (self.spec.dir / "manifests").is_dir():
+                shutil.copytree(self.spec.manifests_dir, recorded_dir / "manifests",
+                                dirs_exist_ok=True)
+            self.events.emit("session.recorded",
+                             f"replayable experiment written: {recorded_dir}")
+        except Exception as e:
+            self.events.emit("session.record.error", str(e))
 
     def _check_no_concurrent_run(self, k8s: ClusterClient) -> None:
         others = [
@@ -212,6 +311,7 @@ class Session:
             )
 
     def _teardown(self, k8s: ClusterClient, driver, started: float) -> None:
+        self._write_recording()
         for cleanup in self._cleanups:
             try:
                 cleanup()

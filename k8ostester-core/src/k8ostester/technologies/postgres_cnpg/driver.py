@@ -10,6 +10,7 @@ in-cluster load generator Job, and the three verifications — integrity
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,13 @@ CNPG_REPO = "https://cloudnative-pg.github.io/charts"
 LOADGEN_SCRIPT = Path(__file__).parent / "loadgen.py"
 RESOURCES = Path(__file__).parent / "resources"
 LOADGEN_IMAGE = "python:3.12-slim"
+
+
+def _loadgen_image(spec_image: str | None) -> str:
+    """Image resolution: experiment's load.image > K8OST_LOADGEN_IMAGE env
+    (the artifactory knob — set once, applies to every run and session) >
+    stock python. Prebuilt images come from loadgen.Dockerfile."""
+    return spec_image or os.environ.get("K8OST_LOADGEN_IMAGE") or LOADGEN_IMAGE
 PSYCOPG_PIN = "psycopg[binary]==3.2.*"
 
 
@@ -361,7 +369,7 @@ class CnpgDriver(TechnologyDriver):
         job = load_resource(
             self._resolve_resource("loadgen-job.yaml"),
             {
-                "IMAGE": spec.image or LOADGEN_IMAGE,
+                "IMAGE": _loadgen_image(spec.image),
                 "PSYCOPG_PIN": PSYCOPG_PIN,
                 "DSN": self._app_dsn(spec.endpoint),
                 "PHASES_JSON": json.dumps(phases),
@@ -426,7 +434,7 @@ class CnpgDriver(TechnologyDriver):
         deployment = load_resource(
             self._resolve_resource("loadgen-deployment.yaml"),
             {
-                "IMAGE": (spec.image if spec else None) or LOADGEN_IMAGE,
+                "IMAGE": _loadgen_image(spec.image if spec else None),
                 "PSYCOPG_PIN": PSYCOPG_PIN,
                 "DSN": self._app_dsn(spec.endpoint if spec else "auto"),
                 "PHASES_JSON": json.dumps([phase]),

@@ -970,3 +970,24 @@ def test_cnpg_stop_load_session_removes_all_artifacts(mock_context):
     k8s.core.delete_namespaced_config_map.assert_called_once_with("k8ost-loadgen", ns)
     k8s.custom.delete_namespaced_custom_object.assert_called_once_with(
         "postgresql.cnpg.io", "v1", ns, "clusters", "pg-pitr")
+
+def test_cnpg_loadgen_image_resolution(mock_context, monkeypatch):
+    from k8ostester.technologies.postgres_cnpg.driver import _loadgen_image
+
+    monkeypatch.delenv("K8OST_LOADGEN_IMAGE", raising=False)
+    assert _loadgen_image(None) == "python:3.12-slim"
+    assert _loadgen_image("custom:1") == "custom:1"          # experiment wins
+
+    monkeypatch.setenv("K8OST_LOADGEN_IMAGE", "artifactory.local/k8ost-loadgen:3.2")
+    assert _loadgen_image(None) == "artifactory.local/k8ost-loadgen:3.2"
+    assert _loadgen_image("custom:1") == "custom:1"          # experiment still wins
+
+    # the env knob reaches the session pool
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_app_secret(k8s)
+    stub_clusters(k8s, "pg")
+    driver.start_load_session(spec.dir, rate=10.0, clients=3, replicas=1)
+    deployment = k8s.apps.create_namespaced_deployment.call_args[0][1]
+    image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
+    assert image == "artifactory.local/k8ost-loadgen:3.2"

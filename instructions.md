@@ -14,7 +14,7 @@ uv tool install --editable ./k8ostester-core
 ```
 
 ```bash
-k8ost env check          # what can this cluster do? (nodes, storage, snapshot CRDs, operators)
+k8ost env check          # nodes (incl. availability zones), storage, snapshot CRDs, operators
 ```
 
 ## Scenario A — validate a config against assumptions
@@ -97,6 +97,25 @@ it appears when the cluster archives to an object store, and works like real DR 
    `window start`). Pick one, click: a second cluster `<name>-pitr` bootstraps from the
    object store at that instant and reports its row count. Targets outside the window
    clamp to it. The restore cluster is a k8ost artifact — removed at session end.
+
+### Every session is recorded
+
+Everything you do in a session — scale changes, rate changes, faults, backups — is
+captured with its timing and exported at teardown as a **replayable experiment**:
+
+```bash
+ls results/*/*-session/recorded/        # experiment.yaml (+ manifests, when managed)
+```
+
+Discover interactively, then replay the exact scenario as a verdict-producing run
+(and keep it as a regression test):
+
+```bash
+k8ost run results/03-cnpg-ha-3node/<stamp>-session/recorded
+```
+
+Attach-mode recordings note in their header that you must supply `manifests/` before
+replaying (the cluster wasn't k8ost's to snapshot).
 
 ## Scenario C — attach to an existing cluster (chaos control plane)
 
@@ -181,6 +200,13 @@ docker push my-registry.example.com/k8ost-loadgen:latest
 load:
   image: my-registry.example.com/k8ost-loadgen:latest
   pull_secret: my-registry-creds        # imagePullSecret in the run namespace
+```
+
+Or set it once for every run and session (the artifactory knob — the experiment's
+`load.image` still wins when present):
+
+```bash
+export K8OST_LOADGEN_IMAGE=my-registry.example.com/k8ost-loadgen:latest
 ```
 
 Mirror-list for a fully air-gapped install: the loadgen image (above), your postgres

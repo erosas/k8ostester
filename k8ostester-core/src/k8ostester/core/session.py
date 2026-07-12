@@ -179,6 +179,13 @@ class Session:
                     self.events.emit("session.action", f"{label} — running…")
                     summary = driver.run_session_action(action_id, params)
                     self.events.emit("session.action", f"{label}: {summary}")
+                    # tech ops change what is possible next (a backup opens
+                    # the restore window) — refresh the action metadata
+                    try:
+                        self.events.emit("session.actions", "tech ops refreshed",
+                                         actions=[dict(a) for a in driver.session_actions()])
+                    except Exception:
+                        pass
                 elif command[0] == "fault":
                     _, worker_name, target, duration = command
                     worker = get_worker(worker_name)(k8s, driver, self.namespace, self.events)

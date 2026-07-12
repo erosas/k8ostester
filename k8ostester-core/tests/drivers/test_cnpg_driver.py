@@ -22,13 +22,19 @@ def mock_context(tmp_path):
     )
     return k8s, events, spec, "test-ns"
 
-def stub_clusters(k8s, *names, poolers=()):
+def stub_clusters(k8s, *names, poolers=(), backups=()):
     """Route custom-object listings by plural: the CNPG Cluster list plus any
-    Pooler CRs the test declares."""
+    Pooler/Backup CRs the test declares (backups: (name, stoppedAt) pairs)."""
     def list_custom(group, version, namespace, plural):
         if plural == "poolers":
             return {"items": [
                 {"metadata": {"name": n}, "spec": {"type": "rw"}} for n in poolers
+            ]}
+        if plural == "backups":
+            return {"items": [
+                {"metadata": {"name": n},
+                 "status": {"phase": "completed", "stoppedAt": stopped}}
+                for n, stopped in backups
             ]}
         return {"items": [{"metadata": {"name": n}} for n in names]}
     k8s.custom.list_namespaced_custom_object.side_effect = list_custom
@@ -865,52 +871,73 @@ def test_cnpg_topology_graph_edge_lag(mock_context):
     assert edge["detail"] == "async"
     assert edge["lag"] == "+3.5s"
 
-def test_cnpg_session_actions_gated_on_object_store(mock_context):
+def test_cnpg_session_actions_restore_window(mock_context):
+    import time as _time
+    from datetime import datetime as _dt, timezone as _tz
     k8s, events, spec, ns = mock_context
     driver = CnpgDriver(k8s, spec, ns, events)
+
+    # no object store: no tech ops at all
     stub_clusters(k8s, "pg")
-
-    k8s.custom.get_namespaced_custom_object.return_value = {"spec": {"backup": {"barmanObjectStore": {}}}}
-    assert [a["id"] for a in driver.session_actions()] == ["backup", "pitr-drill"]
-
     k8s.custom.get_namespaced_custom_object.return_value = {"spec": {}}
-    assert driver.session_actions() == []  # no store, no backup/PITR buttons
+    assert driver.session_actions() == []
+
+    # store but no completed backup yet: only 'base backup' (it opens the window)
+    k8s.custom.get_namespaced_custom_object.return_value = {"spec": {"backup": {"barmanObjectStore": {}}}}
+    assert [a["id"] for a in driver.session_actions()] == ["backup"]
+
+    # a completed backup 10 minutes ago opens the restore window
+    stopped = _dt.fromtimestamp(_time.time() - 600, _tz.utc).isoformat().replace("+00:00", "Z")
+    stub_clusters(k8s, "pg", backups=[("k8ost-1", stopped)])
+    actions = driver.session_actions()
+    assert [a["id"] for a in actions] == ["backup", "restore"]
+    restore = actions[1]
+    assert "restorable window" in restore["description"]
+    (param,) = restore["params"]
+    values = [float(o["value"]) for o in param["options"]]
+    window_start = _time.time() - 600 + 10
+    assert all(v >= window_start - 2 for v in values)   # every choice inside the window
+    assert any("now − 5m" in o["label"] for o in param["options"])
+    assert "window start" in param["options"][-1]["label"]
+    # offsets older than the window are not offered
+    assert not any("now − 30m" in o["label"] for o in param["options"])
 
 def test_cnpg_run_session_action(mock_context):
+    import time as _time
+    from datetime import datetime as _dt, timezone as _tz
     k8s, events, spec, ns = mock_context
     driver = CnpgDriver(k8s, spec, ns, events)
 
+    # backup: summary reports the (now open) restore window
+    stopped = _dt.fromtimestamp(_time.time() - 60, _tz.utc).isoformat().replace("+00:00", "Z")
+    stub_clusters(k8s, "pg", backups=[("k8ost-1200", stopped)])
     with patch.object(driver, "ensure_backup") as backup:
         driver._backup_name = "k8ost-1200"
-        assert "k8ost-1200" in driver.run_session_action("backup")
+        summary = driver.run_session_action("backup")
+        assert "k8ost-1200" in summary and "restore window" in summary
         backup.assert_called_once()
 
-    # no backup yet: the drill refuses helpfully instead of failing in Barman
-    driver._backup_name = None
-    assert "run 'base backup' first" in driver.run_session_action("pitr-drill")
+    # restore without any completed backup: helpful refusal
+    stub_clusters(k8s, "pg")  # no backups
+    assert "take 'base backup' first" in driver.run_session_action("restore")
 
-    # target clamps to just after the backup finished (Barman needs a base
-    # backup that ENDED before the restore target)
-    driver._backup_name = "k8ost-1200"
-    import time as _time
-    recent_stop = _time.time() - 30  # backup newer than 'now - 2m'
-    from datetime import datetime as _dt, timezone as _tz
-    stopped_at = _dt.fromtimestamp(recent_stop, _tz.utc).isoformat().replace("+00:00", "Z")
-    k8s.custom.get_namespaced_custom_object.return_value = {"status": {"stoppedAt": stopped_at}}
+    # a picked target inside the window is honored exactly
+    old_stop = _dt.fromtimestamp(_time.time() - 3600, _tz.utc).isoformat().replace("+00:00", "Z")
+    stub_clusters(k8s, "pg", backups=[("k8ost-1200", old_stop)])
+    target = _time.time() - 1800
     with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
          patch.object(driver, "_psql", return_value="585\n"):
-        summary = driver.run_session_action("pitr-drill")
+        summary = driver.run_session_action("restore", {"target": f"{target:.0f}"})
         assert "pg-pitr" in summary and "585" in summary
-        assert restore.call_args[0][0] >= recent_stop + 10  # clamped past backup end
+        assert abs(restore.call_args[0][0] - target) < 2
 
-    # the time selector param moves the target (older backup, no clamping)
-    old_stop = _time.time() - 3600
-    k8s.custom.get_namespaced_custom_object.return_value = {
-        "status": {"stoppedAt": _dt.fromtimestamp(old_stop, _tz.utc).isoformat().replace("+00:00", "Z")}}
+    # a target before the window clamps to the window start
+    recent_stop = _dt.fromtimestamp(_time.time() - 30, _tz.utc).isoformat().replace("+00:00", "Z")
+    stub_clusters(k8s, "pg", backups=[("k8ost-1200", recent_stop)])
     with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
          patch.object(driver, "_psql", return_value="12\n"):
-        driver.run_session_action("pitr-drill", {"minutes_ago": "30"})
-        assert abs(restore.call_args[0][0] - (_time.time() - 1800)) < 5  # ~30m ago
+        driver.run_session_action("restore", {"target": f"{_time.time() - 7200:.0f}"})
+        assert restore.call_args[0][0] >= _time.time() - 30 + 8  # clamped into window
 
     with pytest.raises(ValueError, match="unknown session action"):
         driver.run_session_action("nonsense")

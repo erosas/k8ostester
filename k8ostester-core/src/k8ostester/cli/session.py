@@ -188,29 +188,41 @@ class SessionApp(RunApp):
             self._show_pods(event.get("data", {}).get("pods", self.session.pods))
         elif event["type"] == "topology":
             self._update_targets(event.get("data", {}))
-        elif event["type"] == "session.ready":
+        elif event["type"] in ("session.ready", "session.actions"):
             self._mount_tech_actions(event.get("data", {}).get("actions") or [])
         elif event["type"] == "session.command.error":
             # a failed control must be seen, not buried in the event log
             self.notify(event["msg"], severity="error", timeout=8)
 
     def _mount_tech_actions(self, actions: list[dict]) -> None:
+        # removal is deferred in textual — rebuild on a worker so the old
+        # buttons are gone before their replacements mount
+        self.run_worker(self._rebuild_tech_actions(actions),
+                        exclusive=True, group="tech-actions")
+
+    async def _rebuild_tech_actions(self, actions: list[dict]) -> None:
         """Build the tech-ops row from the driver's action metadata — the
         framework renders and dispatches; the plugin defines the semantics.
         Choice params render as a Select in front of their button (e.g. the
-        PITR restore point)."""
-        if not actions:
-            return
+        PITR restore point); metadata refreshes as ops change what's possible
+        (a backup opens the restore window)."""
         row = self.query_one("#tech-controls")
-        row.display = True
+        await row.remove_children()
+        self._tech_actions.clear()
+        row.display = bool(actions)
         for action in actions:
             button_id = f"tech-{action['id']}"
             self._tech_actions[button_id] = action
             for param in action.get("params", []):
+                options = [
+                    (option["label"], option["value"]) if isinstance(option, dict)
+                    else (f"{param['label']}: {option}", option)
+                    for option in param["options"]
+                ]
                 select = Select(
-                    [(f"{param['label']}: {option}", option) for option in param["options"]],
-                    id=f"param-{action['id']}-{param['id']}",
-                    allow_blank=False, value=param.get("default", param["options"][0]),
+                    options, id=f"param-{action['id']}-{param['id']}",
+                    allow_blank=False,
+                    value=param.get("default", options[0][1]),
                 )
                 select.tooltip = param["label"]
                 row.mount(select)

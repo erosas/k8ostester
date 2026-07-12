@@ -280,6 +280,9 @@ def test_session_tech_action_dispatch(mock_k8s_cls, mock_get_driver, spec, tmp_p
     action_events = [e for e in events if e["type"] == "session.action"]
     assert len(action_events) == 2  # running… + summary
     assert "completed" in action_events[1]["msg"]
+    # a tech op refreshes the action metadata (a backup opens the restore window)
+    refresh = next(e for e in events if e["type"] == "session.actions")
+    assert refresh["data"]["actions"] == [{"id": "backup", "label": "base backup"}]
 
 
 async def test_session_app_mounts_tech_actions(spec):
@@ -297,9 +300,6 @@ async def test_session_app_mounts_tech_actions(spec):
         app._ingest({"type": "session.ready", "t_rel": 60.0, "msg": "controls live",
                      "data": {"actions": [
                          {"id": "backup", "label": "base backup", "variant": "primary"},
-                         {"id": "pitr-drill", "label": "PITR drill",
-                          "params": [{"id": "minutes_ago", "label": "restore to",
-                                      "options": ["1", "2", "5"], "default": "2"}]},
                      ]}})
         await pilot.pause()
         assert app.query_one("#tech-backup", Button).label.__str__() == "base backup"
@@ -308,12 +308,25 @@ async def test_session_app_mounts_tech_actions(spec):
         assert fake.run_actions == [("backup", "base backup", None)]
         fake.run_actions.clear()
 
-        # the PITR time selector feeds the action's params
-        selector = app.query_one("#param-pitr-drill-minutes_ago", Select)
-        assert selector.value == "2"
-        selector.value = "5"
-        await pilot.click("#tech-pitr-drill")
-        assert fake.run_actions == [("pitr-drill", "PITR drill", {"minutes_ago": "5"})]
+        # after the backup the metadata refreshes: the restore action appears
+        # with the window's concrete points as dict options
+        app._ingest({"type": "session.actions", "t_rel": 80.0, "msg": "tech ops refreshed",
+                     "data": {"actions": [
+                         {"id": "backup", "label": "base backup", "variant": "primary"},
+                         {"id": "restore", "label": "restore (PITR)",
+                          "params": [{"id": "target", "label": "12:00:00Z → now",
+                                      "options": [
+                                          {"label": "now − 1m  (12:09:00Z)", "value": "1000060"},
+                                          {"label": "window start  (12:00:00Z)", "value": "1000000"},
+                                      ],
+                                      "default": "1000060"}]},
+                     ]}})
+        await pilot.pause()
+        selector = app.query_one("#param-restore-target", Select)
+        assert selector.value == "1000060"
+        selector.value = "1000000"  # pick the window start
+        await pilot.click("#tech-restore")
+        assert fake.run_actions == [("restore", "restore (PITR)", {"target": "1000000"})]
 
         # a failed control surfaces as a notification, not just a log line
         app._ingest({"type": "session.command.error", "t_rel": 70.0,

@@ -35,6 +35,10 @@ LOADGEN_IMAGE = "python:3.12-slim"
 PSYCOPG_PIN = "psycopg[binary]==3.2.*"
 
 
+def _clock(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%H:%M:%SZ")
+
+
 def _format_lag(seconds: float, bytes_: float) -> str:
     """Coarse, stable buckets: steady replication reads '' (no lag shown), a
     catching-up replica reads e.g. '+300ms' / '+2.1s' / '+45MB'. Coarseness
@@ -464,46 +468,77 @@ class CnpgDriver(TechnologyDriver):
             ]}}}},
         )
 
-    SESSION_ACTIONS = [
-        {"id": "backup", "label": "base backup", "variant": "primary",
-         "description": "take a Barman base backup to the object store now"},
-        {"id": "pitr-drill", "label": "PITR drill", "variant": "warning",
-         "description": "bootstrap <cluster>-pitr from backups at the chosen point and report its rows",
-         "params": [{"id": "minutes_ago", "label": "restore to",
-                     "options": ["1", "2", "5", "10", "30"], "default": "2"}]},
-    ]
+    RESTORE_OFFSETS = [("now − 1m", 60), ("now − 2m", 120), ("now − 5m", 300),
+                       ("now − 10m", 600), ("now − 30m", 1800), ("now − 1h", 3600)]
 
     def session_actions(self) -> list[dict]:
-        # backup/PITR only make sense when the cluster archives to a store
+        """base backup always (it OPENS the restore window); the restore action
+        appears once a completed backup exists, its choices being concrete
+        points inside the restorable window [earliest backup end → now]."""
         try:
             has_store = bool(self._cluster(self.cluster_name)["spec"].get("backup"))
         except Exception:
             has_store = False
-        return self.SESSION_ACTIONS if has_store else []
+        if not has_store:
+            return []
+        actions = [
+            {"id": "backup", "label": "base backup", "variant": "primary",
+             "description": "take a Barman base backup — opens/extends the PITR restore window"},
+        ]
+        window = self._restore_window()
+        if window:
+            start, now = window
+            options = [
+                {"label": f"{label}  ({_clock(now - offset)})", "value": f"{now - offset:.0f}"}
+                for label, offset in self.RESTORE_OFFSETS
+                if now - offset >= start
+            ]
+            options.append({"label": f"window start  ({_clock(start)})", "value": f"{start:.0f}"})
+            actions.append({
+                "id": "restore", "label": "restore (PITR)", "variant": "warning",
+                "description": f"bootstrap {'<cluster>'}-pitr at the chosen point — "
+                               f"restorable window: {_clock(start)} → now",
+                "params": [{"id": "target",
+                            "label": f"{_clock(start)} → now",
+                            "options": options,
+                            "default": options[0]["value"]}],
+            })
+        return actions
+
+    def _restore_window(self) -> tuple[float, float] | None:
+        """[end of the earliest completed base backup + margin, now] — the
+        span Barman can restore into. None until a backup has completed."""
+        try:
+            backups = self.k8s.custom.list_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, self.namespace, "backups"
+            )["items"]
+        except Exception:
+            return None
+        ends = [
+            datetime.fromisoformat(s["stoppedAt"].replace("Z", "+00:00")).timestamp()
+            for b in backups
+            if (s := b.get("status", {})).get("phase") == "completed" and s.get("stoppedAt")
+        ]
+        if not ends:
+            return None
+        return min(ends) + 10, time.time()
 
     def run_session_action(self, action_id: str, params: dict | None = None) -> str:
         if action_id == "backup":
             self.ensure_backup()
-            return f"base backup {self._backup_name} completed"
-        if action_id == "pitr-drill":
-            if not self._backup_name:
-                return "no base backup this session — run 'base backup' first"
-            minutes = float((params or {}).get("minutes_ago", 2))
-            # Barman needs a base backup that ENDED before the target: clamp
-            # 'N minutes ago' to just after the newest backup finished
-            backup = self.k8s.custom.get_namespaced_custom_object(
-                CNPG_GROUP, CNPG_VERSION, self.namespace, "backups", self._backup_name
-            )
-            stopped_at = backup.get("status", {}).get("stoppedAt")
-            floor = (
-                datetime.fromisoformat(stopped_at.replace("Z", "+00:00")).timestamp() + 10
-                if stopped_at else time.time() - minutes * 60
-            )
-            target_ts = max(time.time() - minutes * 60, floor)
+            window = self._restore_window()
+            opened = f" — restore window {_clock(window[0])} → now" if window else ""
+            return f"base backup {self._backup_name} completed{opened}"
+        if action_id == "restore":
+            window = self._restore_window()
+            if not window:
+                return "no completed base backup — take 'base backup' first to open the restore window"
+            start, now = window
+            target_ts = float((params or {}).get("target", now - 120))
+            target_ts = min(max(target_ts, start), now)  # clamp into the window
             restore = self._restore_cluster_at(target_ts)
             rows = self._psql("select count(*) from k8ost_ops", pod=f"{restore}-1").strip()
-            when = datetime.fromtimestamp(target_ts, timezone.utc).strftime("%H:%M:%S")
-            return f"{restore} restored to {when}Z — {rows} rows in k8ost_ops"
+            return f"{restore} restored to {_clock(target_ts)} — {rows} rows in k8ost_ops"
         raise ValueError(f"unknown session action {action_id!r}")
 
     def stop_load_session(self) -> str:

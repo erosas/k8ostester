@@ -22,6 +22,7 @@ k8ost env check                              # what can this cluster do?
 k8ost run                                    # pick an experiment, watch it in the TUI
 k8ost run experiments/postgres-cnpg/02-cnpg-single   # TUI on a terminal; --view live|plain
 k8ost session experiments/postgres-cnpg/03-cnpg-ha-3node   # interactive lab: scale load, fire faults
+k8ost session --attach my-namespace          # attach to an EXISTING cluster as a chaos control plane
 k8ost runs                                   # list recorded runs
 k8ost report --group pooling --open          # comparison graphs for a run group
 ```

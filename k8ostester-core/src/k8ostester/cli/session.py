@@ -262,23 +262,40 @@ class SessionApp(RunApp):
 @app.command()
 def session(
     path: Path = typer.Argument(None, help="Experiment directory (omit to pick interactively)"),
+    attach: str = typer.Option(
+        None, "--attach",
+        help="Attach to an EXISTING namespace instead of deploying: chaos control "
+             "plane mode — teardown removes only k8ost artifacts, never the namespace",
+    ),
+    technology: str = typer.Option(None, "--technology",
+                                   help="Driver for --attach (default: auto-detect)"),
     context: str = typer.Option(None, "--context", "-c", help="Override the experiment's kubeconfig context"),
     keep: bool = typer.Option(False, "--keep", help="Leave the namespace running after the session"),
-    pods: int = typer.Option(1, "--pods", help="Initial load pods"),
+    pods: int = typer.Option(None, "--pods",
+                             help="Initial load pods (default 1; 0 in attach mode — the apps drive the load)"),
     rate: float = typer.Option(20.0, "--rate", help="ops/s per load pod"),
     clients: int = typer.Option(5, "--clients", help="Clients per load pod"),
     allow_concurrent: bool = typer.Option(False, "--allow-concurrent",
                                           help="Run even if another experiment occupies the cluster"),
 ) -> None:
-    """Interactive lab: deploy a config, scale load and fire faults by hand."""
+    """Interactive lab: deploy a config (or attach to a live one), scale load
+    and fire faults by hand."""
+    from k8ostester.core.experiment import ExperimentSpec
     from k8ostester.core.session import Session
 
     if not console.is_terminal:
         console.print("[red]k8ost session needs a terminal[/red] — it is interactive by nature")
         raise typer.Exit(1)
-    if path is None:
-        path = pick_experiment()
-    spec = load_experiment(path)
+    if attach:
+        if path is not None:
+            console.print("[red]--attach takes no experiment directory[/red] — the cluster already exists")
+            raise typer.Exit(2)
+        spec = ExperimentSpec(name=f"attach-{attach}", technology=technology or "auto")
+    else:
+        if path is None:
+            path = pick_experiment()
+        spec = load_experiment(path)
+    pods = pods if pods is not None else (0 if attach else 1)
 
     tui: SessionApp | None = None
 
@@ -288,7 +305,8 @@ def session(
 
     live_session = Session(spec, keep=keep, context_override=context,
                            on_event=on_event, allow_concurrent=allow_concurrent,
-                           pods=pods, rate=rate, clients=clients)
+                           pods=pods, rate=rate, clients=clients,
+                           attach_namespace=attach)
     tui = SessionApp(spec, context or spec.cluster.context, live_session)
     code = tui.run()
     raise typer.Exit(code if isinstance(code, int) else 1)

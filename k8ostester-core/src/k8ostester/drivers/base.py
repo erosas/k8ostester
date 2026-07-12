@@ -33,6 +33,12 @@ class TechnologyDriver:
         self.namespace = namespace
         self.events = events
 
+    @classmethod
+    def detects(cls, k8s: ClusterClient, namespace: str) -> bool:
+        """True if this driver recognizes its technology deployed in the
+        namespace — attach-mode auto-discovery. Default: never."""
+        return False
+
     def install_prereqs(self) -> None:
         """Install cluster-level prerequisites (operators, object store).
         Must be idempotent; shared across experiments, not torn down per run."""

@@ -26,7 +26,7 @@ from k8ostester.core.exceptions import K8osInfraError
 from k8ostester.core.experiment import ExperimentSpec, FaultSpec
 from k8ostester.core.k8s import ClusterClient
 from k8ostester.core.runner import RUN_LABEL
-from k8ostester.drivers import get_driver
+from k8ostester.drivers import detect_technology, get_driver
 from k8ostester.workers import get_worker
 
 TELEMETRY_INTERVAL_S = 3
@@ -44,6 +44,7 @@ class Session:
         pods: int = 1,
         rate: float = 20.0,
         clients: int = 5,
+        attach_namespace: str | None = None,
     ):
         self.spec = spec
         self.keep = keep
@@ -52,12 +53,13 @@ class Session:
         self.pods = pods
         self.rate = rate
         self.clients = clients
+        self.attach = attach_namespace is not None
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         self.session_id = f"{stamp}-session"
         self.run_dir = results_root / spec.name / self.session_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.events = EventLog(self.run_dir / "events.jsonl", on_event=on_event)
-        self.namespace = f"{spec.namespace_base}-{stamp.replace('-', '')[-6:]}"
+        self.namespace = attach_namespace or f"{spec.namespace_base}-{stamp.replace('-', '')[-6:]}"
         self.error: str | None = None
         self._commands: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -88,20 +90,42 @@ class Session:
         driver = None
         started = time.time()
         try:
-            self._check_no_concurrent_run(k8s)
-            driver_cls = get_driver(self.spec.technology, self.spec.dir)
-            driver = driver_cls(k8s, self.spec, self.namespace, self.events)
+            if self.attach:
+                # attach mode: the cluster under test already exists and is
+                # not ours — discover it, never deploy, never delete
+                if self.spec.technology == "auto":
+                    detected = detect_technology(k8s, self.namespace)
+                    if not detected:
+                        raise K8osInfraError(
+                            f"no supported technology detected in namespace {self.namespace!r} "
+                            "— pass --technology explicitly"
+                        )
+                    self.spec.technology = detected
+                    self.events.emit("session.detect", f"detected {detected} in {self.namespace}")
+                driver_cls = get_driver(self.spec.technology, self.spec.dir)
+                driver = driver_cls(k8s, self.spec, self.namespace, self.events)
+                self.events.emit(
+                    "session.attach",
+                    f"attached to existing namespace {self.namespace} ({self.spec.technology}) "
+                    "— teardown removes only k8ost artifacts",
+                    namespace=self.namespace, context=self.context or "(current)",
+                )
+                driver.topology()  # fail fast if there is nothing to drive
+            else:
+                self._check_no_concurrent_run(k8s)
+                driver_cls = get_driver(self.spec.technology, self.spec.dir)
+                driver = driver_cls(k8s, self.spec, self.namespace, self.events)
 
-            self.events.emit("session.start", f"interactive session on {self.spec.name}",
-                             namespace=self.namespace, context=self.context or "(current)")
-            self.events.emit("prereqs.install", "installing prerequisites")
-            driver.install_prereqs()
-            self.events.emit("namespace.create", self.namespace)
-            k8s.create_namespace(self.namespace, labels={RUN_LABEL: self.session_id})
-            self.events.emit("deploy.start", str(self.spec.manifests_dir))
-            driver.deploy()
-            self.events.emit("ready.wait", "waiting for workloads")
-            driver.wait_ready()
+                self.events.emit("session.start", f"interactive session on {self.spec.name}",
+                                 namespace=self.namespace, context=self.context or "(current)")
+                self.events.emit("prereqs.install", "installing prerequisites")
+                driver.install_prereqs()
+                self.events.emit("namespace.create", self.namespace)
+                k8s.create_namespace(self.namespace, labels={RUN_LABEL: self.session_id})
+                self.events.emit("deploy.start", str(self.spec.manifests_dir))
+                driver.deploy()
+                self.events.emit("ready.wait", "waiting for workloads")
+                driver.wait_ready()
 
             driver.start_load_session(self.run_dir, self.rate, self.clients, self.pods)
             try:  # action metadata is optional decoration, never load-bearing
@@ -192,7 +216,12 @@ class Session:
                 (self.run_dir / "loadgen.log").write_text(logs)
             except Exception:
                 pass  # sessions that never got the pool up have nothing to keep
-        if self.keep:
+        if self.attach:
+            self.events.emit(
+                "teardown.skip",
+                f"attached namespace {self.namespace} left untouched (k8ost artifacts removed)",
+            )
+        elif self.keep:
             self.events.emit("teardown.skip", f"--keep: namespace {self.namespace} left running")
         else:
             try:

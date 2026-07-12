@@ -65,6 +65,15 @@ class CnpgDriver(TechnologyDriver):
 
     # -- lifecycle -----------------------------------------------------------
 
+    @classmethod
+    def detects(cls, k8s, namespace: str) -> bool:
+        try:
+            return bool(k8s.custom.list_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, namespace, "clusters"
+            )["items"])
+        except Exception:
+            return False
+
     def install_prereqs(self) -> None:
         """Tech-owned prerequisites here; common entries delegate to core.
         Omitting `- operator: cnpg` from infra means "the cluster already has
@@ -130,7 +139,12 @@ class CnpgDriver(TechnologyDriver):
 
     @property
     def cluster_name(self) -> str:
-        clusters = self._clusters()["items"]
+        clusters = [
+            c for c in self._clusters()["items"]
+            # a PITR drill's restore cluster is k8ost's artifact, not the
+            # cluster under test — it must not confuse discovery
+            if not c["metadata"]["name"].endswith("-pitr")
+        ]
         if len(clusters) != 1:
             raise RuntimeError(
                 f"expected exactly 1 CNPG Cluster in {self.namespace}, found {len(clusters)}"
@@ -493,13 +507,33 @@ class CnpgDriver(TechnologyDriver):
         raise ValueError(f"unknown session action {action_id!r}")
 
     def stop_load_session(self) -> str:
-        """Tear down the load pool; returns the pool's collected logs (the
-        journal-so-far) for the session artifacts."""
-        logs = self._loadgen_logs()
+        """Remove every k8ost artifact from the namespace (load pool,
+        configmap, any PITR restore cluster) — in attach mode this is ALL the
+        teardown there is. Returns the pool's collected logs."""
+        logs = ""
         try:
-            self.k8s.apps.delete_namespaced_deployment("k8ost-loadgen", self.namespace)
+            logs = self._loadgen_logs()
         except Exception:
-            pass  # namespace teardown will get it
+            pass
+        cleanups = [
+            lambda: self.k8s.apps.delete_namespaced_deployment("k8ost-loadgen", self.namespace),
+            lambda: self.k8s.core.delete_namespaced_config_map("k8ost-loadgen", self.namespace),
+        ]
+        try:
+            cleanups += [
+                (lambda name=c["metadata"]["name"]:
+                 self.k8s.custom.delete_namespaced_custom_object(
+                     CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters", name))
+                for c in self._clusters()["items"]
+                if c["metadata"]["name"].endswith("-pitr")
+            ]
+        except Exception:
+            pass
+        for cleanup in cleanups:
+            try:
+                cleanup()
+            except Exception:
+                pass  # best effort; managed mode deletes the namespace anyway
         return logs
 
     def _start_pgbench(self, run_dir: Path) -> None:

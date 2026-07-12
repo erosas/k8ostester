@@ -321,3 +321,81 @@ async def test_session_app_mounts_tech_actions(spec):
 
         await pilot.press("q")
     assert app.return_value == 0
+
+
+@patch("k8ostester.core.session.detect_technology", return_value="postgres-cnpg")
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_attach_mode(mock_k8s_cls, mock_get_driver, mock_detect, tmp_path):
+    """Attach: discover instead of deploy, and NEVER touch the namespace."""
+    from k8ostester.core.experiment import ExperimentSpec
+
+    mock_k8s = mock_k8s_cls.return_value
+    driver = mock_get_driver.return_value.return_value
+    driver.stop_load_session.return_value = '{"kind": "op"}'
+
+    spec = ExperimentSpec(name="attach-prod-db", technology="auto")
+    session = Session(spec, results_root=tmp_path / "results",
+                      attach_namespace="prod-db", pods=0)
+    session.stop()
+    session.start()
+
+    # discovery instead of deployment
+    mock_detect.assert_called_once()
+    assert spec.technology == "postgres-cnpg"
+    driver.topology.assert_called()          # fail-fast discovery check
+    driver.install_prereqs.assert_not_called()
+    driver.deploy.assert_not_called()
+    driver.wait_ready.assert_not_called()
+    mock_k8s.create_namespace.assert_not_called()
+
+    # load pool created inert (0 pods) so it can be dialed up later
+    driver.start_load_session.assert_called_once_with(session.run_dir, 20.0, 5, 0)
+
+    # teardown: artifacts removed, namespace untouched
+    driver.stop_load_session.assert_called_once()
+    mock_k8s.delete_namespace.assert_not_called()
+
+    events = EventLog.read(session.run_dir / "events.jsonl")
+    types = [e["type"] for e in events]
+    assert "session.detect" in types and "session.attach" in types
+    skip = next(e for e in events if e["type"] == "teardown.skip")
+    assert "untouched" in skip["msg"]
+
+
+@patch("k8ostester.core.session.detect_technology", return_value=None)
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_attach_detection_failure(mock_k8s_cls, mock_detect, tmp_path):
+    from k8ostester.core.experiment import ExperimentSpec
+    from k8ostester.core.exceptions import K8osInfraError
+
+    spec = ExperimentSpec(name="attach-empty", technology="auto")
+    session = Session(spec, results_root=tmp_path / "results",
+                      attach_namespace="empty-ns", pods=0)
+    with pytest.raises(K8osInfraError, match="no supported technology detected"):
+        session.start()
+    mock_k8s_cls.return_value.delete_namespace.assert_not_called()  # never ours
+
+
+def test_session_command_attach_wiring(tmp_path):
+    from unittest.mock import PropertyMock
+    from rich.console import Console
+    from typer.testing import CliRunner
+    from k8ostester.cli import app as cli_app
+
+    with patch("k8ostester.core.session.Session") as mock_session_cls, \
+         patch("k8ostester.cli.session.SessionApp") as mock_app_cls, \
+         patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True):
+        mock_app_cls.return_value.run.return_value = 0
+        result = CliRunner().invoke(cli_app, ["session", "--attach", "prod-db"])
+        assert result.exit_code == 0
+        kwargs = mock_session_cls.call_args[1]
+        assert kwargs["attach_namespace"] == "prod-db"
+        assert kwargs["pods"] == 0                      # attach default: observe only
+        spec = mock_session_cls.call_args[0][0]
+        assert spec.name == "attach-prod-db"
+        assert spec.technology == "auto"
+
+        # attach + experiment dir is a contradiction
+        result = CliRunner().invoke(cli_app, ["session", str(tmp_path), "--attach", "prod-db"])
+        assert result.exit_code == 2

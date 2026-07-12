@@ -914,3 +914,32 @@ def test_cnpg_run_session_action(mock_context):
 
     with pytest.raises(ValueError, match="unknown session action"):
         driver.run_session_action("nonsense")
+
+def test_cnpg_detects(mock_context):
+    k8s, events, spec, ns = mock_context
+    stub_clusters(k8s, "pg")
+    assert CnpgDriver.detects(k8s, ns) is True
+    stub_clusters(k8s)  # nothing deployed
+    assert CnpgDriver.detects(k8s, ns) is False
+    k8s.custom.list_namespaced_custom_object.side_effect = RuntimeError("no CRD")
+    assert CnpgDriver.detects(k8s, ns) is False
+
+def test_cnpg_cluster_name_ignores_pitr_restore(mock_context):
+    """After a PITR drill two Cluster CRs exist — discovery must keep working."""
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_clusters(k8s, "pg", "pg-pitr")
+    assert driver.cluster_name == "pg"
+
+def test_cnpg_stop_load_session_removes_all_artifacts(mock_context):
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_clusters(k8s, "pg", "pg-pitr")
+
+    with patch.object(driver, "_loadgen_logs", return_value="journal"):
+        assert driver.stop_load_session() == "journal"
+
+    k8s.apps.delete_namespaced_deployment.assert_called_once_with("k8ost-loadgen", ns)
+    k8s.core.delete_namespaced_config_map.assert_called_once_with("k8ost-loadgen", ns)
+    k8s.custom.delete_namespaced_custom_object.assert_called_once_with(
+        "postgresql.cnpg.io", "v1", ns, "clusters", "pg-pitr")

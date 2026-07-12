@@ -98,3 +98,14 @@ def test_base_driver_session_methods_unsupported(mock_context):
         driver.scale_load(2)
     with pytest.raises(K8osDriverError, match="no interactive load"):
         driver.stop_load_session()
+
+def test_detect_technology_registry(mock_context):
+    from k8ostester.drivers import detect_technology
+    k8s, events, spec, ns = mock_context
+
+    with patch("k8ostester.technologies.postgres_cnpg.driver.CnpgDriver.detects",
+               return_value=True):
+        assert detect_technology(k8s, "some-ns") == "postgres-cnpg"
+    with patch("k8ostester.technologies.postgres_cnpg.driver.CnpgDriver.detects",
+               return_value=False):
+        assert detect_technology(k8s, "some-ns") is None  # generic never detects

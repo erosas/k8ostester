@@ -60,6 +60,15 @@ def _load_tech_driver(experiment_dir: Path) -> type[TechnologyDriver] | None:
     return None
 
 
+def detect_technology(k8s, namespace: str) -> str | None:
+    """Attach-mode discovery: the first built-in whose driver recognizes what
+    is deployed in the namespace."""
+    for technology in _BUILTINS:
+        if _resolve_builtin(technology).detects(k8s, namespace):
+            return technology
+    return None
+
+
 def get_driver(technology: str, experiment_dir: Path | None = None) -> type[TechnologyDriver]:
     if experiment_dir is not None:
         driver = _load_tech_driver(experiment_dir.resolve())

@@ -76,7 +76,7 @@ k8ost run experiments/postgres-cnpg/17-cnpg-dr-drill-sync-first --group dr-drill
 ```
 
 ```bash
-k8ost report --group dr-drill --open      # overlaid graphs + goal matrix, self-contained HTML
+k8ost report --group dr-drill --open      # one comparison table (verdict + metrics + every goal per experiment) + overlaid graphs
 ```
 
 ```bash

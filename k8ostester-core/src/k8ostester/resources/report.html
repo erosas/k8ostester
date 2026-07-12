@@ -50,8 +50,7 @@
 <div class="viz-root">
   <h1>__TITLE__</h1>
   <p class="sub" id="sub"></p>
-  <div class="card"><h2>Run stats</h2><div class="wrap"><table id="stats"></table></div></div>
-  <div class="card"><h2>Goals</h2><div class="wrap"><table id="matrix"></table></div></div>
+  <div class="card"><h2>Comparison</h2><div class="wrap"><table id="comparison"></table></div></div>
   <div class="card"><h2>Successful writes per second</h2>
     <div class="legend" id="legend1"></div><div id="chart-wps"></div></div>
   <div class="card"><h2>Write latency p99 (ms, per second)</h2>
@@ -70,25 +69,31 @@ const runs = DATA.runs;
 document.getElementById('sub').textContent =
   runs.map(r => `${r.label} — ${r.status.toUpperCase()}`).join('  ·  ');
 
-// run stats: one row per run, app-perspective numbers from the journal
+// one comprehensive comparison table: one row per experiment, columns are
+// verdict + app-perspective metrics (from the journal) + every goal's value,
+// each goal cell colored by pass/fail so arms of an investigation read
+// side by side at a glance.
 {
-  const table = document.getElementById('stats');
-  const COLS = [
-    ['Run', r => r.name],
-    ['Status', null],
-    ['Ops', r => r.stats.ops.toLocaleString()],
-    ['Acked writes', r => r.stats.acked_writes.toLocaleString()],
-    ['Failed ops', r => r.stats.failed.toLocaleString()],
-    ['Avg tps', r => r.stats.avg_tps.toLocaleString()],
-    ['Downtime', r => r.stats.downtime_s + 's'],
-    ['Duration', r => r.stats.span_s + 's'],
+  const table = document.getElementById('comparison');
+  const stat = (r, fn, dflt = '—') => r.stats ? fn(r.stats) : dflt;
+  const METRICS = [
+    ['Avg tps', r => stat(r, s => s.avg_tps.toLocaleString())],
+    ['Acked writes', r => stat(r, s => s.acked_writes.toLocaleString())],
+    ['Failed', r => stat(r, s => s.failed.toLocaleString())],
+    ['Downtime', r => stat(r, s => s.downtime_s + 's')],
+    ['Duration', r => stat(r, s => s.span_s + 's')],
   ];
+  // goal columns, in the matrix's stable union order; cells[i] aligns to run i
+  const goals = DATA.matrix.map(row => row.goal);
+
   const head = document.createElement('tr');
-  COLS.forEach(([label]) => head.appendChild(document.createElement('th')).textContent = label);
+  ['Experiment', 'Verdict', ...METRICS.map(m => m[0]), ...goals]
+    .forEach(label => head.appendChild(document.createElement('th')).textContent = label);
   table.appendChild(head);
+
   runs.forEach((r, i) => {
-    if (!r.stats) return;  // error runs without op records
     const tr = document.createElement('tr');
+    // experiment name with its series color key
     const name = document.createElement('td');
     const key = document.createElement('span');
     key.className = 'k'; key.style.cssText =
@@ -96,44 +101,21 @@ document.getElementById('sub').textContent =
     name.appendChild(key);
     name.appendChild(document.createTextNode(r.name));
     tr.appendChild(name);
+    // verdict badge
     const status = document.createElement('td');
     const b = document.createElement('span');
     b.className = 'badge ' + (r.status === 'passed' ? 'pass' : 'fail');
     b.textContent = r.status.toUpperCase();
     status.appendChild(b);
     tr.appendChild(status);
-    COLS.slice(2).forEach(([, fn]) => {
-      tr.appendChild(document.createElement('td')).textContent = fn(r);
-    });
-    table.appendChild(tr);
-  });
-}
-
-// goal matrix
-{
-  const table = document.getElementById('matrix');
-  const head = document.createElement('tr');
-  head.appendChild(document.createElement('th')).textContent = 'Goal';
-  runs.forEach((r, i) => {
-    const th = document.createElement('th');
-    const key = document.createElement('span');
-    key.className = 'k'; key.style.cssText =
-      `display:inline-block;width:12px;height:2px;margin-right:6px;vertical-align:middle;background:var(${color(i)})`;
-    th.appendChild(key);
-    th.appendChild(document.createTextNode(r.name + ' '));
-    const b = document.createElement('span');
-    b.className = 'badge ' + (r.status === 'passed' ? 'pass' : 'fail');
-    b.textContent = r.status.toUpperCase();
-    th.appendChild(b);
-    head.appendChild(th);
-  });
-  table.appendChild(head);
-  DATA.matrix.forEach(row => {
-    const tr = document.createElement('tr');
-    tr.appendChild(document.createElement('td')).textContent = row.goal;
-    row.cells.forEach(cell => {
+    // metrics
+    METRICS.forEach(([, fn]) =>
+      tr.appendChild(document.createElement('td')).textContent = fn(r));
+    // one cell per goal, colored by outcome
+    DATA.matrix.forEach(row => {
+      const cell = row.cells[i];
       const td = document.createElement('td');
-      if (!cell) { td.textContent = '—'; }
+      if (!cell) { td.textContent = '—'; td.className = 'thr'; }
       else {
         const mark = document.createElement('span');
         mark.className = cell.passed ? 'ok' : 'bad';
@@ -141,7 +123,7 @@ document.getElementById('sub').textContent =
         td.appendChild(mark);
         if (cell.threshold) {
           const thr = document.createElement('span');
-          thr.className = 'thr'; thr.textContent = '  (' + cell.threshold + ')';
+          thr.className = 'thr'; thr.textContent = ' (' + cell.threshold + ')';
           td.appendChild(thr);
         }
       }

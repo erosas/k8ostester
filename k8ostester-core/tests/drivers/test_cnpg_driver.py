@@ -1026,3 +1026,33 @@ def test_cnpg_restore_replaces_existing_pitr_cluster(mock_context, fake_clock):
     k8s.custom.delete_namespaced_custom_object.assert_called_once_with(
         "postgresql.cnpg.io", "v1", ns, "clusters", "pg-pitr")
     k8s.custom.create_namespaced_custom_object.assert_called_once()
+
+def test_cnpg_split_read_endpoint_sets_dsn_ro(mock_context):
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="auto", endpoint_ro="pg-ro",
+                         phases=[{"duration": "10s", "rate": "10/s"}], workers=1)
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_app_secret(k8s)
+    stub_clusters(k8s, "pg")
+
+    driver.start_load(Path("/tmp"))
+
+    job = k8s.batch.create_namespaced_job.call_args[0][1]
+    env = {e["name"]: e.get("value") for e in
+           job["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert "host=pg-ro" in env["K8OST_DSN_RO"]     # reads routed to the ro endpoint
+    assert "host=pg-rw" in env["K8OST_DSN"]        # writes to the primary
+
+def test_cnpg_no_read_endpoint_leaves_dsn_ro_empty(mock_context):
+    k8s, events, spec, ns = mock_context
+    spec.load = LoadSpec(endpoint="auto", phases=[{"duration": "10s", "rate": "10/s"}], workers=1)
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_app_secret(k8s)
+    stub_clusters(k8s, "pg")
+
+    driver.start_load(Path("/tmp"))
+
+    job = k8s.batch.create_namespaced_job.call_args[0][1]
+    env = {e["name"]: e.get("value") for e in
+           job["spec"]["template"]["spec"]["containers"][0]["env"]}
+    assert env["K8OST_DSN_RO"] == ""               # single-endpoint (backward compatible)

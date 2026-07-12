@@ -71,6 +71,7 @@ class LoadPhase(BaseModel):
 
 class LoadSpec(BaseModel):
     endpoint: str = "auto"  # Service to hit; "auto" = driver default
+    endpoint_ro: str | None = None  # read-only endpoint; set → reads route here, writes to endpoint
     runner: Literal["journal", "pgbench"] = "journal"  # journal = built-in loadgen (full goal set)
     params: dict[str, Any] = {}  # runner-specific knobs, e.g. pgbench {scale: 20}
     workers: int = 1  # loadgen pods (Indexed Job); clients + rate shard across them
@@ -145,14 +146,44 @@ class ExperimentSpec(BaseModel):
         return self.cluster.namespace or f"exp-{self.name}"
 
 
+def _deep_merge(base: dict, over: dict) -> dict:
+    """over wins; nested dicts merge, everything else (incl. lists) replaces."""
+    out = dict(base)
+    for key, value in over.items():
+        if isinstance(out.get(key), dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _load_raw(yaml_path: Path, _seen: set[Path] | None = None) -> dict:
+    """Parse experiment YAML, resolving `extends:` — a shared scenario file
+    (load/faults/goals) that config variants merge over (the variant wins).
+    This is how a comparison suite holds one scenario fixed across N configs:
+    same faults and goals, only the manifests and endpoint differ."""
+    _seen = _seen or set()
+    if yaml_path in _seen:
+        raise K8osConfigError(f"circular extends at {yaml_path}")
+    _seen.add(yaml_path)
+    with open(yaml_path) as f:
+        raw = yaml.safe_load(f) or {}
+    base_ref = raw.pop("extends", None)
+    if base_ref is None:
+        return raw
+    base_path = (yaml_path.parent / base_ref).resolve()
+    if not base_path.exists():
+        raise FileNotFoundError(f"extends target not found: {base_path} (from {yaml_path})")
+    return _deep_merge(_load_raw(base_path, _seen), raw)
+
+
 def load_experiment(path: Path) -> ExperimentSpec:
     """Load and validate an experiment directory (or a direct experiment.yaml path)."""
     path = path.resolve()
     yaml_path = path / "experiment.yaml" if path.is_dir() else path
     if not yaml_path.exists():
         raise FileNotFoundError(f"no experiment.yaml at {yaml_path}")
-    with open(yaml_path) as f:
-        raw = yaml.safe_load(f)
+    raw = _load_raw(yaml_path)
     spec = ExperimentSpec.model_validate(raw)
     spec.dir = yaml_path.parent
     if not spec.manifests_dir.is_dir():

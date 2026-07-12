@@ -30,6 +30,8 @@ spec:
           env:
             - name: K8OST_DSN
               value: '${DSN}'
+            - name: K8OST_DSN_RO
+              value: '${DSN_RO}'
             - name: K8OST_PHASES
               value: '${PHASES_JSON}'
             - name: K8OST_WORKERS

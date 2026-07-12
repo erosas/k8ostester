@@ -142,6 +142,31 @@ k8ost run results/03-cnpg-ha-3node/<stamp>-session/recorded
 Attach-mode recordings note in their header that you must supply `manifests/` before
 replaying (the cluster wasn't k8ost's to snapshot).
 
+## Comparison suites (shared scenario, varied config)
+
+The meaningful cross-config comparison holds the workload + faults + goals
+fixed and changes only the config under test. Express that with `extends:`: a
+shared `_scenario.yaml` holds load/faults/goals, and each variant is a thin
+`experiment.yaml` that inherits it, points at its own `manifests/`, and shares
+a `group:`. The variant's keys deep-merge over the scenario (variant wins).
+
+```bash
+k8ost run experiments/postgres-cnpg/read-scaling/replicas-direct
+```
+
+```bash
+k8ost report --group read-scaling --open   # one comparison table across the variants
+```
+
+The bundled `read-scaling/` suite is the worked example: writes always hit the
+primary (`endpoint: auto`), while each variant routes **reads** elsewhere via
+`load.endpoint_ro` — `pg-rw` (no offload), `pg-ro` (replica service), or
+`pg-pooler-ro` (read-only PgBouncer). The loadgen models a real read/write
+split datasource (writes → the write endpoint, reads → `endpoint_ro`). Note
+the `-ro` path load-balances across BOTH replicas including the quorum-sync
+member, so the shared write-latency goal measures whether read load
+back-pressures commits.
+
 ## Scenario C — attach to an existing cluster (chaos control plane)
 
 No experiment dir, no deploy. The technology is auto-detected (CNPG: its Cluster CR),

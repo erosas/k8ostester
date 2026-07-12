@@ -262,11 +262,17 @@ async def test_read_op_flags_checksum_mismatch(capsys):
     assert rec == dict(rec, op="read", ok=False, err="checksum_mismatch")
 
 
+def test_pick_op_respects_mix(monkeypatch):
+    monkeypatch.setattr(loadgen.random, "random", lambda: 0.1)
+    assert loadgen.pick_op({"mix": {"write": 0.5}}) == "write"
+    assert loadgen.pick_op({"mix": {"write": 0.0}}) == "read"
+
+
 async def test_do_op_success(capsys):
     cursor = MagicMock(fetchone=AsyncMock(return_value=[7]))
     conn = MagicMock(execute=AsyncMock(return_value=cursor))
 
-    ok = await loadgen.do_op(conn, client_id=1, phase_i=0, phase={"mix": {"write": 1}})
+    ok = await loadgen.do_op(conn, client_id=1, phase_i=0, op="write")
 
     assert ok is True
     (rec,) = journal(capsys)
@@ -276,7 +282,7 @@ async def test_do_op_success(capsys):
 async def test_do_op_read_path(capsys):
     conn = MagicMock(execute=AsyncMock())  # known_max_id 0 → ping read
 
-    ok = await loadgen.do_op(conn, client_id=1, phase_i=0, phase={"mix": {"write": 0}})
+    ok = await loadgen.do_op(conn, client_id=1, phase_i=0, op="read")
 
     assert ok is True
     (rec,) = journal(capsys)
@@ -286,7 +292,7 @@ async def test_do_op_read_path(capsys):
 async def test_do_op_failure_journals_error_and_flags_discard(capsys):
     conn = MagicMock(execute=AsyncMock(side_effect=RuntimeError("connection reset")))
 
-    ok = await loadgen.do_op(conn, client_id=1, phase_i=0, phase={"mix": {"write": 1}})
+    ok = await loadgen.do_op(conn, client_id=1, phase_i=0, op="write")
 
     assert ok is False
     (rec,) = journal(capsys)
@@ -304,11 +310,30 @@ async def test_pooled_client_runs_until_deadline(fake_clock, monkeypatch):
     do_op = AsyncMock(side_effect=lambda *a, **k: fake_clock.sleep(3) or True)
     monkeypatch.setattr(loadgen, "do_op", do_op)
 
-    phase = {"clients": 1, "rate": 0, "mix": {"write": 1}}
-    await loadgen.pooled_client(pool, 1, 0, phase, deadline=fake_clock.time() + 5)
+    phase = {"clients": 1, "rate": 0, "mix": {"write": 1}}  # writes → write_pool
+    await loadgen.pooled_client(pool, pool, 1, 0, phase, deadline=fake_clock.time() + 5)
 
     assert do_op.await_count == 2  # 3s per op in a 5s window
     pool.release.assert_called_with(conn, broken=False)
+
+
+async def test_pooled_client_routes_reads_to_read_pool(fake_clock, monkeypatch):
+    """writes → write pool, reads → read pool (split datasource)."""
+    wconn, rconn = MagicMock(name="w"), MagicMock(name="r")
+    write_pool = MagicMock(acquire=AsyncMock(return_value=wconn))
+    read_pool = MagicMock(acquire=AsyncMock(return_value=rconn))
+    ops = iter(["write", "read"])
+    monkeypatch.setattr(loadgen, "pick_op", lambda phase: next(ops))
+    monkeypatch.setattr(loadgen, "do_op",
+                        AsyncMock(side_effect=lambda *a, **k: fake_clock.sleep(3) or True))
+
+    phase = {"clients": 1, "rate": 0, "mix": {}}
+    await loadgen.pooled_client(write_pool, read_pool, 1, 0, phase, deadline=fake_clock.time() + 5)
+
+    write_pool.acquire.assert_awaited_once()   # the write op
+    read_pool.acquire.assert_awaited_once()    # the read op
+    write_pool.release.assert_called_once_with(wconn, broken=False)
+    read_pool.release.assert_called_once_with(rconn, broken=False)
 
 
 async def test_pooled_client_retries_after_pool_timeout(fake_clock, monkeypatch):
@@ -318,7 +343,7 @@ async def test_pooled_client_retries_after_pool_timeout(fake_clock, monkeypatch)
     monkeypatch.setattr(loadgen, "do_op", do_op)
 
     phase = {"clients": 1, "rate": 0, "mix": {"write": 1}}
-    await loadgen.pooled_client(pool, 1, 0, phase, deadline=fake_clock.time() + 5)
+    await loadgen.pooled_client(pool, pool, 1, 0, phase, deadline=fake_clock.time() + 5)
 
     assert pool.acquire.await_count == 2  # None → retry, acquire journaled it
     pool.release.assert_called_once_with(conn, broken=True)  # do_op returned False

@@ -1,0 +1,6 @@
+# Reads via a read-only PgBouncer pooler (pg-pooler-ro -> replicas): read
+# offload plus connection multiplexing in front of the replicas.
+extends: ../_scenario.yaml
+name: read-scaling-replicas-pooler
+load:
+  endpoint_ro: pg-pooler-ro

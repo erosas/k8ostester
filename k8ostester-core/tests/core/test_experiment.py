@@ -60,3 +60,53 @@ def test_load_experiment(tmp_path):
     spec = load_experiment(d)
     assert spec.name == "t"
     assert spec.dir == d.resolve()
+
+
+def test_extends_merges_scenario_over_child(tmp_path):
+    from k8ostester.core.experiment import load_experiment
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "_scenario.yaml").write_text(
+        "technology: postgres-cnpg\n"
+        "group: suite\n"
+        "load:\n"
+        "  endpoint: auto\n"
+        "  clients: {count: 20, mode: persistent}\n"
+        "  phases:\n"
+        "    - {duration: 30s, rate: 10/s}\n"
+        "faults:\n"
+        "  - {at: 10s, worker: pod_kill, target: {role: primary}}\n"
+        "goals:\n"
+        "  - {metric: rpo, max: 0}\n"
+    )
+    (tmp_path / "experiment.yaml").write_text(
+        "extends: ./_scenario.yaml\n"
+        "name: variant-a\n"
+        "load:\n"
+        "  endpoint_ro: pg-ro\n"       # child adds to the inherited load dict
+    )
+    spec = load_experiment(tmp_path)
+    assert spec.name == "variant-a"                  # child-only
+    assert spec.technology == "postgres-cnpg"        # inherited
+    assert spec.group == "suite"                     # inherited
+    assert len(spec.load.phases) == 1                # inherited scenario load
+    assert spec.load.endpoint == "auto"              # inherited (deep-merged)
+    assert spec.load.endpoint_ro == "pg-ro"          # child override merged in
+    assert len(spec.faults) == 1 and spec.goals[0].metric == "rpo"
+
+
+def test_extends_missing_target(tmp_path):
+    from k8ostester.core.experiment import load_experiment
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "experiment.yaml").write_text("extends: ./nope.yaml\nname: x\ntechnology: generic\n")
+    with pytest.raises(FileNotFoundError, match="extends target not found"):
+        load_experiment(tmp_path)
+
+
+def test_extends_circular(tmp_path):
+    from k8ostester.core.experiment import load_experiment
+    from k8ostester.core.exceptions import K8osConfigError
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "a.yaml").write_text("extends: ./experiment.yaml\n")
+    (tmp_path / "experiment.yaml").write_text("extends: ./a.yaml\nname: x\ntechnology: generic\n")
+    with pytest.raises(K8osConfigError, match="circular extends"):
+        load_experiment(tmp_path)

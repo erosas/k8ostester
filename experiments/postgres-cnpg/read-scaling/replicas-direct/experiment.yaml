@@ -1,0 +1,7 @@
+# Reads to the replica-only service (pg-ro): offloaded from the primary and
+# expected to survive a primary kill (replicas keep serving reads).
+extends: ../_scenario.yaml
+name: read-scaling-replicas-direct
+config: {manifests: ../_cluster}
+load:
+  endpoint_ro: pg-ro

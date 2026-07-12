@@ -1,0 +1,31 @@
+# Shared read-scaling scenario (referenced via `extends:`). Identical load,
+# fault and goals for every read-topology config — writes always hit the
+# primary (endpoint auto = pg-rw); each config overrides load.endpoint_ro to
+# route READS somewhere different, so the comparison isolates the read path.
+#
+# The write-latency goal is the interesting one: the -ro path load-balances
+# across BOTH replicas incl. the quorum-sync member, so read load there can
+# back-pressure commits. This scenario is how we measure whether it does.
+technology: postgres-cnpg
+group: read-scaling
+cluster:
+  context: docker-desktop
+infra:
+  - operator: cnpg
+load:
+  endpoint: auto                 # writes -> primary (pg-rw)
+  clients: {count: 20, mode: persistent}
+  phases:
+    - {duration: 45s, rate: 60/s, mix: {read: 0.8, write: 0.2}}   # read-heavy baseline
+    - {duration: 60s, rate: 60/s, mix: {read: 0.8, write: 0.2}}   # primary killed at +45s
+faults:
+  - at: 45s
+    worker: pod_kill
+    target: {role: primary}
+verify:
+  - integrity
+goals:
+  - {metric: rpo, max: 0}
+  - {metric: read_latency_p99, max: 100ms, window: steady-state}
+  - {metric: write_latency_p99, max: 150ms, window: steady-state}
+  - {metric: error_rate, max: 5%}

@@ -20,8 +20,14 @@ is what the direct-vs-pooler comparison experiments measure.
 A pool-acquire timeout journals as a failed connect (err=PoolTimeout) —
 from the app's perspective that IS a connection failure.
 
+Split datasource (real read/write routing): with K8OST_DSN_RO set, reads go to
+that endpoint (a read-only replica service / ro pooler) and writes to K8OST_DSN
+(the primary), exactly like an app with a read replica. Unset → reads use the
+write DSN (single-endpoint behavior, unchanged).
+
 Env:
-  K8OST_DSN     postgres connection string
+  K8OST_DSN     postgres connection string (writes; reads too if no _RO)
+  K8OST_DSN_RO  optional read-only connection string (reads route here)
   K8OST_PHASES  JSON: [{"duration_s": 60, "rate": 20.0, "mix": {"read": 0.5,
                 "write": 0.5}, "clients": 5, "mode": "persistent"}, ...]
                 rate 0/null with no clients → pause phase.
@@ -41,6 +47,7 @@ import psycopg
 # populated from the environment at startup (main), not at import, so the
 # module imports cleanly outside the Job (tests, tooling)
 DSN = ""
+DSN_RO = ""  # optional read endpoint; "" → reads use DSN
 PHASES: list = []
 # worker pool sharding (Indexed Job): this pod runs its slice of the global
 # client count, with rate scaled to its share so per-client pacing is unchanged
@@ -49,8 +56,9 @@ INDEX = 0
 
 
 def read_env_config():
-    global DSN, PHASES, WORKERS, INDEX
+    global DSN, DSN_RO, PHASES, WORKERS, INDEX
     DSN = os.environ["K8OST_DSN"]
+    DSN_RO = os.environ.get("K8OST_DSN_RO") or ""
     PHASES = json.loads(os.environ["K8OST_PHASES"])
     WORKERS = int(os.environ.get("K8OST_WORKERS", "1"))
     INDEX = int(os.environ.get("JOB_COMPLETION_INDEX") or 0)
@@ -97,13 +105,13 @@ async def safe_close(conn):
         pass
 
 
-async def connect(phase):
+async def connect(phase, dsn=None):
     t0 = time.time()
     try:
         # prepare_threshold=None: server-side prepared statements break
         # PgBouncer transaction pooling; disabled everywhere for comparability
         conn = await psycopg.AsyncConnection.connect(
-            DSN, autocommit=True, connect_timeout=CONNECT_TIMEOUT, prepare_threshold=None
+            dsn or DSN, autocommit=True, connect_timeout=CONNECT_TIMEOUT, prepare_threshold=None
         )
         record("connect", phase, t0, True)
         return conn
@@ -114,10 +122,12 @@ async def connect(phase):
 
 class Pool:
     """Hikari-like fixed-size pool: one permit per live connection slot,
-    idle stack, validate-on-checkout outside the alive-bypass window."""
+    idle stack, validate-on-checkout outside the alive-bypass window. Bound to
+    one DSN (a read pool and a write pool are separate instances)."""
 
-    def __init__(self, size, phase_i):
+    def __init__(self, size, phase_i, dsn=None):
         self.phase_i = phase_i
+        self.dsn = dsn
         self.idle = []  # [(conn, last_used)]
         self.slots = asyncio.Semaphore(size)
 
@@ -146,7 +156,7 @@ class Pool:
             self.slots.release()
             record("connect", self.phase_i, t0, False, err="PoolTimeout")
             return None
-        conn = await connect(self.phase_i)  # journals the real connect
+        conn = await connect(self.phase_i, self.dsn)  # journals the real connect
         if conn is None:
             self.slots.release()
         return conn
@@ -200,10 +210,14 @@ async def read_op(conn, phase):
     record("read", phase, t0, ok, err=None if ok else "checksum_mismatch")
 
 
-async def do_op(conn, client_id, phase_i, phase):
-    """One read/write under the statement bound; returns False if the
-    connection must be discarded."""
-    op = "write" if random.random() < phase["mix"].get("write", 0.5) else "read"
+def pick_op(phase):
+    return "write" if random.random() < phase["mix"].get("write", 0.5) else "read"
+
+
+async def do_op(conn, client_id, phase_i, op):
+    """Run the (already chosen) op under the statement bound; returns False if
+    the connection must be discarded. op is decided by the caller so it can
+    route reads and writes to different pools/endpoints."""
     t0 = time.time()
     try:
         if op == "write":
@@ -216,16 +230,18 @@ async def do_op(conn, client_id, phase_i, phase):
         return False
 
 
-async def pooled_client(pool, client_id, phase_i, phase, deadline):
+async def pooled_client(write_pool, read_pool, client_id, phase_i, phase, deadline):
     interval = phase["clients"] / phase["rate"] if phase["rate"] else None
     while time.time() < deadline:
         if interval:
             # aggregate ≈ rate: each client sleeps clients/rate with jitter
             await asyncio.sleep(interval * random.uniform(0.5, 1.5))
+        op = pick_op(phase)
+        pool = write_pool if op == "write" else read_pool
         conn = await pool.acquire()
         if conn is None:
             continue  # acquire journaled the failure; pool refills on next try
-        ok = await do_op(conn, client_id, phase_i, phase)
+        ok = await do_op(conn, client_id, phase_i, op)
         pool.release(conn, broken=not ok)
 
 
@@ -234,11 +250,13 @@ async def churn_client(client_id, phase_i, phase, deadline):
     while time.time() < deadline:
         if interval:
             await asyncio.sleep(interval * random.uniform(0.5, 1.5))
-        conn = await connect(phase_i)
+        op = pick_op(phase)
+        dsn = DSN_RO if (op == "read" and DSN_RO) else DSN
+        conn = await connect(phase_i, dsn)
         if conn is None:
             await asyncio.sleep(1)
             continue
-        await do_op(conn, client_id, phase_i, phase)
+        await do_op(conn, client_id, phase_i, op)
         await safe_close(conn)
 
 
@@ -254,11 +272,15 @@ def shard(phase):
 
 
 async def run_phase(i, phase, deadline):
-    pool = Pool(phase["clients"], i) if phase["mode"] == "persistent" else None
+    write_pool = read_pool = None
+    if phase["mode"] == "persistent":
+        write_pool = Pool(phase["clients"], i)
+        # a separate read pool only when reads route elsewhere; else share one
+        read_pool = Pool(phase["clients"], i, dsn=DSN_RO) if DSN_RO else write_pool
     tasks = [
         asyncio.create_task(
-            pooled_client(pool, INDEX * 100000 + c, i, phase, deadline)
-            if pool
+            pooled_client(write_pool, read_pool, INDEX * 100000 + c, i, phase, deadline)
+            if write_pool
             else churn_client(INDEX * 100000 + c, i, phase, deadline)
         )
         for c in range(phase["clients"])
@@ -271,8 +293,9 @@ async def run_phase(i, phase, deadline):
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
         out(kind="stragglers", phase=i, cancelled=len(pending), t=time.time())
-    if pool:
-        await pool.close()
+    for pool in {id(write_pool): write_pool, id(read_pool): read_pool}.values():
+        if pool:
+            await pool.close()
 
 
 async def main():

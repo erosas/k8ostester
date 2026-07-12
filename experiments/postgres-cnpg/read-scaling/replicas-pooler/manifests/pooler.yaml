@@ -1,0 +1,15 @@
+# Read-only pooler: PgBouncer fronting the cluster's -ro service (replicas).
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler-ro
+spec:
+  cluster:
+    name: pg
+  instances: 2          # HA: two PgBouncer pods behind one Service
+  type: ro              # routes to the -ro (replicas) service
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"

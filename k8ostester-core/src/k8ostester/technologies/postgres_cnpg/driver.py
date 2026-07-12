@@ -374,6 +374,7 @@ class CnpgDriver(TechnologyDriver):
                 "IMAGE": _loadgen_image(spec.image),
                 "PSYCOPG_PIN": PSYCOPG_PIN,
                 "DSN": self._app_dsn(spec.endpoint),
+                "DSN_RO": self._app_dsn(spec.endpoint_ro) if spec.endpoint_ro else "",
                 "PHASES_JSON": json.dumps(phases),
                 "WORKERS": str(spec.workers),
                 "PULL_SECRETS": json.dumps(
@@ -439,6 +440,7 @@ class CnpgDriver(TechnologyDriver):
                 "IMAGE": _loadgen_image(spec.image if spec else None),
                 "PSYCOPG_PIN": PSYCOPG_PIN,
                 "DSN": self._app_dsn(spec.endpoint if spec else "auto"),
+                "DSN_RO": self._app_dsn(spec.endpoint_ro) if spec and spec.endpoint_ro else "",
                 "PHASES_JSON": json.dumps([phase]),
                 "REPLICAS": str(replicas),
                 "RATE": str(rate),

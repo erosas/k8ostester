@@ -95,6 +95,12 @@ class ClusterClient:
         )
         self.core.create_namespace(body)
 
+    def set_namespace_labels(self, name: str, labels: dict[str, str | None]) -> None:
+        """Patch namespace labels (a value of None removes the label). Used to
+        make an attached namespace discoverable by the concurrent-run guard
+        without owning it — the labels are reverted at teardown."""
+        self.core.patch_namespace(name, {"metadata": {"labels": labels}})
+
     def delete_namespace(self, name: str, wait: bool = True, timeout: float = 300) -> None:
         try:
             self.core.delete_namespace(name)

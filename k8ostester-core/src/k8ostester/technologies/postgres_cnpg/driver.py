@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kubernetes import client
+
 from k8ostester.core.exceptions import K8osConfigError
 from k8ostester.core.experiment import parse_rate
 from k8ostester.core.goals import _LATENCY_RE, evaluate_goals
@@ -545,6 +547,14 @@ class CnpgDriver(TechnologyDriver):
             target_ts = float((params or {}).get("target", now - 120))
             target_ts = min(max(target_ts, start), now)  # clamp into the window
             restore = self._restore_cluster_at(target_ts)
+            # k8ost_ops only exists if a k8ost loadgen pod ran; in attach mode
+            # (apps drive the load, pods=0) it is absent — a successful restore,
+            # not a failure. Report row count when present.
+            present = self._psql(
+                "select to_regclass('k8ost_ops') is not null", pod=f"{restore}-1"
+            ).strip() == "t"
+            if not present:
+                return f"{restore} restored to {_clock(target_ts)} — healthy (no k8ost_ops table; k8ost load never ran here)"
             rows = self._psql("select count(*) from k8ost_ops", pod=f"{restore}-1").strip()
             return f"{restore} restored to {_clock(target_ts)} — {rows} rows in k8ost_ops"
         raise ValueError(f"unknown session action {action_id!r}")
@@ -552,31 +562,42 @@ class CnpgDriver(TechnologyDriver):
     def stop_load_session(self) -> str:
         """Remove every k8ost artifact from the namespace (load pool,
         configmap, any PITR restore cluster) — in attach mode this is ALL the
-        teardown there is. Returns the pool's collected logs."""
+        teardown there is, so failures are recorded on self.cleanup_failures
+        (not swallowed) for the session to surface. Returns the collected logs.
+        A 404 is success (already gone)."""
+        self.cleanup_failures: list[str] = []
         logs = ""
         try:
             logs = self._loadgen_logs()
         except Exception:
             pass
-        cleanups = [
-            lambda: self.k8s.apps.delete_namespaced_deployment("k8ost-loadgen", self.namespace),
-            lambda: self.k8s.core.delete_namespaced_config_map("k8ost-loadgen", self.namespace),
+
+        artifacts: list[tuple[str, Any]] = [
+            ("deployment/k8ost-loadgen",
+             lambda: self.k8s.apps.delete_namespaced_deployment("k8ost-loadgen", self.namespace)),
+            ("configmap/k8ost-loadgen",
+             lambda: self.k8s.core.delete_namespaced_config_map("k8ost-loadgen", self.namespace)),
         ]
         try:
-            cleanups += [
-                (lambda name=c["metadata"]["name"]:
-                 self.k8s.custom.delete_namespaced_custom_object(
-                     CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters", name))
+            artifacts += [
+                (f"cluster/{c['metadata']['name']}",
+                 lambda name=c["metadata"]["name"]:
+                     self.k8s.custom.delete_namespaced_custom_object(
+                         CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters", name))
                 for c in self._clusters()["items"]
                 if c["metadata"]["name"].endswith("-pitr")
             ]
-        except Exception:
-            pass
-        for cleanup in cleanups:
+        except Exception as e:
+            self.cleanup_failures.append(f"pitr restore cluster(s) (could not list: {e})")
+
+        for desc, delete in artifacts:
             try:
-                cleanup()
+                delete()
+            except client.ApiException as e:
+                if e.status != 404:  # already gone is success
+                    self.cleanup_failures.append(desc)
             except Exception:
-                pass  # best effort; managed mode deletes the namespace anyway
+                self.cleanup_failures.append(desc)
         return logs
 
     def _start_pgbench(self, run_dir: Path) -> None:
@@ -900,6 +921,26 @@ class CnpgDriver(TechnologyDriver):
             f"beginLSN={status.get('beginLSN')}, endLSN={status.get('endLSN')}",
         )
 
+    def _delete_cluster_if_exists(self, name: str) -> None:
+        """Delete a CNPG Cluster and wait until it is gone (idempotent restore)."""
+        try:
+            self.k8s.custom.delete_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters", name
+            )
+        except client.ApiException as e:
+            if e.status == 404:
+                return
+            raise
+
+        def gone() -> bool:
+            try:
+                self._cluster(name)
+                return False
+            except client.ApiException as e:
+                return e.status == 404
+
+        wait_until(gone, timeout=120, interval=3, desc=f"restore cluster {name} still terminating")
+
     def _restore_cluster_at(self, target_ts: float) -> str:
         """Bootstrap `<cluster>-pitr` from the object store at target_ts;
         returns the restore cluster's name once it is healthy."""
@@ -916,6 +957,10 @@ class CnpgDriver(TechnologyDriver):
         source = self._cluster(self.cluster_name)
         store = source["spec"]["backup"]["barmanObjectStore"]
         restore_name = f"{self.cluster_name}-pitr"
+        # a session can restore repeatedly; the previous restore cluster keeps
+        # the fixed name, so drop it first (and wait for it to be gone) or the
+        # create 409s
+        self._delete_cluster_if_exists(restore_name)
         self.k8s.custom.create_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, self.namespace, "clusters",
             load_resource(

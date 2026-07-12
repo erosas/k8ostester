@@ -3,6 +3,7 @@ import json
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch, ANY
+from kubernetes import client
 from k8ostester.technologies.postgres_cnpg.driver import CnpgDriver
 from k8ostester.core.experiment import (
     ExperimentSpec, FaultSpec, GoalSpec, LoadSpec, ClusterSpec,
@@ -271,6 +272,8 @@ def test_cnpg_verify_pitr(mock_context, fake_clock):
     ]
 
     stub_clusters(k8s, "my-cluster")
+    # no prior restore cluster: the pre-create delete-if-exists is a 404 no-op
+    k8s.custom.delete_namespaced_custom_object.side_effect = client.ApiException(status=404)
     k8s.custom.get_namespaced_custom_object.side_effect = [
         {
             "spec": {
@@ -921,21 +924,29 @@ def test_cnpg_run_session_action(mock_context):
     stub_clusters(k8s, "pg")  # no backups
     assert "take 'base backup' first" in driver.run_session_action("restore")
 
-    # a picked target inside the window is honored exactly
+    # a picked target inside the window is honored exactly; k8ost_ops present
+    # → row count reported (presence probe returns 't', then the count)
     old_stop = _dt.fromtimestamp(_time.time() - 3600, _tz.utc).isoformat().replace("+00:00", "Z")
     stub_clusters(k8s, "pg", backups=[("k8ost-1200", old_stop)])
     target = _time.time() - 1800
     with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
-         patch.object(driver, "_psql", return_value="585\n"):
+         patch.object(driver, "_psql", side_effect=["t\n", "585\n"]):
         summary = driver.run_session_action("restore", {"target": f"{target:.0f}"})
         assert "pg-pitr" in summary and "585" in summary
         assert abs(restore.call_args[0][0] - target) < 2
+
+    # attach mode (pods=0): k8ost_ops never created → a SUCCESSFUL restore must
+    # not be reported as a failure
+    with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr"), \
+         patch.object(driver, "_psql", return_value="f\n"):  # to_regclass is null
+        summary = driver.run_session_action("restore", {"target": f"{target:.0f}"})
+        assert "pg-pitr" in summary and "healthy" in summary and "no k8ost_ops" in summary
 
     # a target before the window clamps to the window start
     recent_stop = _dt.fromtimestamp(_time.time() - 30, _tz.utc).isoformat().replace("+00:00", "Z")
     stub_clusters(k8s, "pg", backups=[("k8ost-1200", recent_stop)])
     with patch.object(driver, "_restore_cluster_at", return_value="pg-pitr") as restore, \
-         patch.object(driver, "_psql", return_value="12\n"):
+         patch.object(driver, "_psql", side_effect=["t\n", "12\n"]):
         driver.run_session_action("restore", {"target": f"{_time.time() - 7200:.0f}"})
         assert restore.call_args[0][0] >= _time.time() - 30 + 8  # clamped into window
 
@@ -991,3 +1002,27 @@ def test_cnpg_loadgen_image_resolution(mock_context, monkeypatch):
     deployment = k8s.apps.create_namespaced_deployment.call_args[0][1]
     image = deployment["spec"]["template"]["spec"]["containers"][0]["image"]
     assert image == "artifactory.local/k8ost-loadgen:3.2"
+
+def test_cnpg_restore_replaces_existing_pitr_cluster(mock_context, fake_clock):
+    """Finding 4: a repeat restore must delete the fixed-name <cluster>-pitr
+    before creating it, or the create 409s."""
+    k8s, events, spec, ns = mock_context
+    driver = CnpgDriver(k8s, spec, ns, events)
+    stub_clusters(k8s, "pg")
+
+    healthy = {"status": {"phase": "Cluster in healthy state", "instances": 1, "readyInstances": 1}}
+    source = {"spec": {"backup": {"barmanObjectStore": {}}, "storage": {"size": "1Gi"}}}
+    k8s.custom.get_namespaced_custom_object.side_effect = [
+        source,                                   # read source for the restore body
+        {"status": {"phase": "terminating"}},     # delete-wait: still there
+        client.ApiException(status=404),          # delete-wait: gone
+        healthy,                                  # restore cluster becomes healthy
+    ]
+
+    with patch.object(driver, "_psql"):
+        name = driver._restore_cluster_at(1000.0)
+
+    assert name == "pg-pitr"
+    k8s.custom.delete_namespaced_custom_object.assert_called_once_with(
+        "postgresql.cnpg.io", "v1", ns, "clusters", "pg-pitr")
+    k8s.custom.create_namespaced_custom_object.assert_called_once()

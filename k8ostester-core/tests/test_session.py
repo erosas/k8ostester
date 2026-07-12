@@ -10,6 +10,7 @@ import pytest
 
 from k8ostester.core.events import EventLog
 from k8ostester.core.experiment import ExperimentSpec, GoalSpec
+from k8ostester.core.runner import RUN_LABEL
 from k8ostester.core.session import Session
 
 
@@ -356,6 +357,9 @@ def test_session_attach_mode(mock_k8s_cls, mock_get_driver, mock_detect, tmp_pat
     # discovery instead of deployment
     mock_detect.assert_called_once()
     assert spec.technology == "postgres-cnpg"
+    # builtin-only resolution: NO experiment dir passed, so a stray driver.py
+    # in the cwd can never be exec'd against a live cluster
+    mock_get_driver.assert_called_once_with("postgres-cnpg")
     driver.topology.assert_called()          # fail-fast discovery check
     driver.install_prereqs.assert_not_called()
     driver.deploy.assert_not_called()
@@ -364,6 +368,12 @@ def test_session_attach_mode(mock_k8s_cls, mock_get_driver, mock_detect, tmp_pat
 
     # load pool created inert (0 pods) so it can be dialed up later
     driver.start_load_session.assert_called_once_with(session.run_dir, 20.0, 5, 0)
+
+    # discoverable to a later scored run: labeled on attach, reverted on teardown
+    label_calls = mock_k8s.set_namespace_labels.call_args_list
+    assert label_calls[0].args[0] == "prod-db"
+    assert list(label_calls[0].args[1].values())[0] == session.session_id
+    assert label_calls[-1].args[1] == {RUN_LABEL: None}       # reverted
 
     # teardown: artifacts removed, namespace untouched
     driver.stop_load_session.assert_called_once()
@@ -476,3 +486,79 @@ def test_recorded_spec_timeline(spec, tmp_path):
     assert doc["verify"] == ["integrity", "backup"]
     # the export round-trips through the spec model
     ExperimentSpec.model_validate(doc)
+
+
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_attach_honors_concurrent_run_guard(mock_k8s_cls, mock_get_driver, tmp_path):
+    """Attach must not silently corrupt a scored run already on the cluster."""
+    from k8ostester.core.exceptions import K8osInfraError
+
+    mock_k8s = mock_k8s_cls.return_value
+    occupied = MagicMock()
+    occupied.metadata.name = "exp-something-live"
+    mock_k8s.core.list_namespace.return_value.items = [occupied]
+
+    spec = ExperimentSpec(name="attach-prod", technology="postgres-cnpg")
+    session = Session(spec, results_root=tmp_path / "results",
+                      attach_namespace="prod-db", pods=0)
+    with pytest.raises(K8osInfraError, match="already occupies this cluster"):
+        session.start()
+    mock_get_driver.return_value.return_value.start_load_session.assert_not_called()
+
+
+@patch("k8ostester.core.session.detect_technology", return_value="postgres-cnpg")
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_attach_teardown_reports_cleanup_failure(mock_k8s_cls, mock_get_driver, mock_detect, tmp_path):
+    """When artifact removal fails, teardown must NOT claim success."""
+    mock_k8s_cls.return_value.core.list_namespace.return_value.items = []
+    driver = mock_get_driver.return_value.return_value
+    driver.stop_load_session.return_value = ""
+    driver.cleanup_failures = ["deployment/k8ost-loadgen"]
+
+    spec = ExperimentSpec(name="attach-prod-db", technology="auto")
+    session = Session(spec, results_root=tmp_path / "results",
+                      attach_namespace="prod-db", pods=0)
+    session.stop()
+    session.start()
+
+    events = EventLog.read(session.run_dir / "events.jsonl")
+    errors = [e for e in events if e["type"] == "teardown.error"]
+    assert any("deployment/k8ost-loadgen" in e["msg"] for e in errors)
+    assert any("could NOT be removed" in e["msg"] for e in errors)
+    assert not any(e["type"] == "teardown.skip" for e in events)  # no false success
+
+
+@patch("k8ostester.core.session.get_driver")
+@patch("k8ostester.core.session.ClusterClient")
+def test_session_tech_ops_serialized(mock_k8s_cls, mock_get_driver, spec, tmp_path):
+    """A long-running tech op runs off the loop thread; a second op while one
+    holds the lock is rejected rather than queued behind a 10-minute wait."""
+    mock_k8s_cls.return_value.core.list_namespace.return_value.items = []
+    driver = mock_get_driver.return_value.return_value
+    driver.session_actions.return_value = []
+    driver.stop_load_session.return_value = ""
+
+    release = threading.Event()
+    started = threading.Event()
+
+    def slow_action(action_id, params):
+        started.set()
+        assert release.wait(timeout=5)
+        return "done"
+    driver.run_session_action.side_effect = slow_action
+
+    session = make_session(spec, tmp_path)
+    session._ready_at = 1.0  # let it act like a live session for dispatch
+
+    # drive the two dispatches directly (no real loop needed)
+    session._start_tech_action(driver, "backup", "base backup", None)
+    assert started.wait(timeout=5)                 # first op running on its thread
+    session._start_tech_action(driver, "backup", "base backup", None)  # lock held
+    release.set()
+    import time as _t
+    _t.sleep(0.2)
+
+    # exactly one action actually ran; the second was rejected with an error
+    assert driver.run_session_action.call_count == 1

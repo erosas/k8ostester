@@ -12,20 +12,30 @@ cluster:
   context: docker-desktop
 infra:
   - operator: cnpg
+  - chaos-mesh                   # the primary is PARTITIONED (slow failover) so
+                                 # the read-offload downtime difference is visible
 load:
   endpoint: auto                 # writes -> primary (pg-rw)
   clients: {count: 20, mode: persistent}
   phases:
-    - {duration: 45s, rate: 60/s, mix: {read: 0.8, write: 0.2}}   # read-heavy baseline
-    - {duration: 60s, rate: 60/s, mix: {read: 0.8, write: 0.2}}   # primary killed at +45s
+    - {duration: 45s, rate: 60/s, mix: {read: 0.9, write: 0.1}}   # read-heavy baseline
+    - {duration: 75s, rate: 60/s, mix: {read: 0.9, write: 0.1}}   # primary partitioned at +45s
 faults:
+  # a partition (not a clean kill): detection+promotion takes 15-45s, during
+  # which pg-rw has no primary — reads routed there go down too, while reads on
+  # the replicas keep succeeding. This is where read offload earns its keep.
   - at: 45s
-    worker: pod_kill
+    worker: network_partition
     target: {role: primary}
+    duration: 40s
 verify:
   - integrity
 goals:
+  # the headline: with reads offloaded to replicas they keep succeeding through
+  # the primary kill, so downtime/uptime barely move; routing reads at the
+  # primary means the kill takes everything down for the promotion window
+  - {metric: uptime, min: 95%}
+  - {metric: downtime_total, max: 5s}
   - {metric: rpo, max: 0}
   - {metric: read_latency_p99, max: 100ms, window: steady-state}
-  - {metric: write_latency_p99, max: 150ms, window: steady-state}
   - {metric: error_rate, max: 5%}

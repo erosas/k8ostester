@@ -42,3 +42,18 @@ def fake_clock(monkeypatch):
     monkeypatch.setattr(time, "monotonic", clock.monotonic)
     monkeypatch.setattr(time, "sleep", clock.sleep)
     return clock
+
+@pytest.fixture(autouse=True)
+def non_interactive_console(monkeypatch):
+    """CLI tests must not depend on whether the test runner happens to have a
+    TTY (k8ost run auto-launches the full-screen TUI on a terminal — inside
+    pytest that hangs). Default every rich Console to non-terminal; tests
+    that exercise terminal-only behavior patch is_terminal themselves."""
+    from rich.console import Console
+
+    monkeypatch.setattr(Console, "is_terminal", property(lambda self: False))
+    # color support is decided at Console construction (import time) — reset
+    # the CLI singleton so a PTY-launched test runner doesn't bake ANSI codes
+    # into CliRunner output assertions
+    from k8ostester.cli.app import console as app_console
+    monkeypatch.setattr(app_console, "_color_system", None)

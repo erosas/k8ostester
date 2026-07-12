@@ -12,7 +12,6 @@ cluster:
 
 infra:
   - operator: cnpg
-  - chaos-mesh
 
 config:
   manifests: ./manifests

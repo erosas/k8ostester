@@ -23,6 +23,13 @@ OPERATOR_CRDS = {
 
 SNAPSHOT_CRD = "volumesnapshotclasses.snapshot.storage.k8s.io"
 
+# CRDs whose presence means the CNI enforces NetworkPolicy (native partition
+# actually drops traffic). kindnet (kind/docker-desktop) ships none of these.
+POLICY_CNI_CRDS = (
+    "felixconfigurations.crd.projectcalico.org",  # Calico
+    "ciliumnetworkpolicies.cilium.io",            # Cilium
+)
+
 
 class NodeInfo(BaseModel):
     name: str
@@ -49,6 +56,7 @@ class Capabilities(BaseModel):
     operators: dict[str, bool]
     helm_version: str | None
     kubectl_version: str | None
+    network_policy_enforced: bool = False  # CNI enforces NetworkPolicy (native partition)
 
     @property
     def worker_count(self) -> int:
@@ -151,4 +159,5 @@ def probe(context: str | None = None) -> Capabilities:
         operators={name: k8s.has_crd(crd) for name, crd in OPERATOR_CRDS.items()},
         helm_version=_helm_version(),
         kubectl_version=_kubectl_version(),
+        network_policy_enforced=any(k8s.has_crd(c) for c in POLICY_CNI_CRDS),
     )

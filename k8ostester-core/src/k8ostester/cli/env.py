@@ -79,6 +79,13 @@ def env_check(
         f"{caps.worker_count} worker node(s)",
     )
     verdict(
+        caps.network_policy_enforced,
+        "network partition (native)",
+        "CNI enforces NetworkPolicy"
+        if caps.network_policy_enforced
+        else "CNI does not enforce NetworkPolicy — partition needs params: {engine: chaos-mesh}",
+    )
+    verdict(
         caps.snapshots_supported,
         "volume snapshots",
         "snapshot CRDs + class present"

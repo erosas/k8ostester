@@ -99,7 +99,7 @@ k8ost session experiments/postgres-cnpg/17-cnpg-dr-drill-sync-first --pods 1 --r
 | `rate −` / `rate +` | `[` / `]` | change ops/s **per pod** ±5 — the pool rolls at the new rate |
 | target dropdown | — | `primary (auto)`, `any replica (auto)`, or a specific instance |
 | `kill` | `k` | pod_kill the selected target (grace 0) |
-| `partition 30s` | `p` | full network partition of the target (needs `chaos-mesh` in the experiment's infra) |
+| `partition 30s` | `p` | full L4 partition of the target — native NetworkPolicy where the CNI enforces it, else Chaos Mesh if installed (auto); no dependency on most clusters |
 | `q` | `q` | stop, collect artifacts, tear down |
 
 The dashboard shows live ops/s + error %, live goal scores (same evaluator as the verdict),
@@ -159,7 +159,7 @@ k8ost session --attach my-namespace --context prod-cluster --technology postgres
 The load pool starts at **0 pods**: your applications drive the load and you drive the
 chaos, watching their telemetry. Press `load +` at any moment to add k8ost's own
 journaled load against the cluster's `rw` service (its metrics then appear in the
-dashboard). Network faults require chaos-mesh on that cluster.
+dashboard). Partitioning needs a policy-enforcing CNI (Calico/Cilium) or chaos-mesh present; `k8ost env check` reports which. Loss/delay always need chaos-mesh.
 
 ## Results
 
@@ -202,7 +202,7 @@ clusters behave identically and the laptop can drive load tests without carrying
 | `ghcr.io/cloudnative-pg/postgresql:<v>` | database pods **and** the pgbench runner (D17: no extra image) | your manifests deploy | your `cluster.yaml` (`imageName`) | fully manifest-controlled |
 | CNPG's default PgBouncer image | Pooler pods | pooler experiments | operator default | `Pooler` spec in your manifests |
 | `chrislusf/seaweedfs:latest` | object store (`k8ost-infra` ns) | infra `- seaweedfs` | **unpinned (known TODO)** | place `infra/seaweedfs/` under your CWD to override the packaged manifests |
-| `ghcr.io/chaos-mesh/*:v2.8.3` | chaos controller + per-node daemons | infra `- chaos-mesh` | helm chart `2.8.3` | `infra/chaos-mesh/values.yaml` under CWD (e.g. different containerd socket); preinstalled release tolerated |
+| `ghcr.io/chaos-mesh/*:v2.8.3` | chaos controller + per-node daemons | **only** when an experiment declares `infra: - chaos-mesh` (loss/delay, or partition with `engine: chaos-mesh`) — native NetworkPolicy partitions need none of this | helm chart `2.8.3` | `infra/chaos-mesh/values.yaml` under CWD; preinstalled release tolerated |
 
 ### Private / air-gapped clusters
 

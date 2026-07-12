@@ -17,7 +17,6 @@ cluster:
 infra:
   - operator: cnpg
   - seaweedfs
-  - chaos-mesh
 
 config:
   manifests: ./manifests

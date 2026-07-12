@@ -77,6 +77,10 @@ class ClusterClient:
     def version(self) -> client.VersionApi:
         return client.VersionApi(self._api_client)
 
+    @cached_property
+    def networking(self) -> client.NetworkingV1Api:
+        return client.NetworkingV1Api(self._api_client)
+
     def has_crd(self, name: str) -> bool:
         """True if a CustomResourceDefinition with this full name exists."""
         try:

@@ -95,14 +95,22 @@ operator chart) live in the tech driver; core `InfraManager` only owns **common*
 (SeaweedFS, monitoring) and drivers delegate those entries to it. Future: per-tech Python
 dependencies declared in the tech dir (uv extras) — not needed yet.
 
-## D16 — Network faults wrap Chaos Mesh; one CR template per action
-Per D4: tc/iptables-level injection inside a pod's netns is genuinely hard, so `network_partition`
-/ `network_loss` / `network_delay` are thin workers that render a NetworkChaos CR into the run
-namespace — same `Worker` interface as the built-ins, so experiments only swap the `worker:` name.
-Chaos Mesh (Apache 2.0, pinned chart) is a **common infra** entry (`chaos-mesh`) since any
-technology can use it; the daemon attaches to the node's containerd socket. Faults carry a
-required `duration` (Chaos Mesh auto-heals) plus a cleanup that deletes the CR, so an aborted run
-can't leave a partition behind. Each action gets its own complete template file (D-templates rule)
+## D16 — Network faults: native NetworkPolicy partition; Chaos Mesh opt-in (revised)
+**Revised:** `network_partition` is now a native deny-all `NetworkPolicy` by default — a full L4
+partition with zero cluster dependencies, which is the only network fault any experiment uses.
+`engine: auto` (default) uses the native policy where the CNI enforces NetworkPolicy
+(Calico/Cilium), and falls back to Chaos Mesh **only if it is already installed** (never installs
+it) on a CNI that doesn't (kindnet — kind/docker-desktop); `engine: netpol`/`chaos-mesh` force a
+path. The native partition marks the target pod with a `k8ostester.io/partition` label the policy
+selects, heals via a timer after `duration` (NetworkPolicy has no auto-heal), and removes the
+label + policy on cleanup. `capabilities.probe` reports whether the CNI enforces policy, surfaced
+by `env check` and as a runtime `capability.warn`.
+
+`network_loss` / `network_delay` still need tc-level packet manipulation in the pod's netns, which
+has no native API, so they remain thin **Chaos Mesh** NetworkChaos workers (auto-healed by the CR's
+`duration`, cleanup deletes the CR). Chaos Mesh (Apache 2.0, pinned chart) is therefore **opt-in
+common infra** (`chaos-mesh`): nothing installs it unless an experiment declares a chaos-backed
+fault. Each Chaos action keeps its own complete template file (D-templates rule)
 rather than one template mutated in Python. Workers now receive the whole `FaultSpec`, not just
 the target — duration and worker-specific `params` (loss %, latency) ride along.
 

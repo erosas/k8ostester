@@ -86,16 +86,24 @@ def test_runner_concurrent_run_error(mock_k8s_cls, dummy_spec, tmp_path):
 @patch("k8ostester.core.runner.ClusterClient")
 @patch("k8ostester.core.runner.get_driver")
 @patch("k8ostester.core.runner.probe")
-def test_runner_teardown_failure(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+def test_runner_teardown_failure_keeps_verdict(mock_probe, mock_get_driver, mock_k8s_cls, dummy_spec, tmp_path):
+    """A slow/failed namespace delete is cleanup hygiene, not the verdict — a
+    passed run stays passed, with the trouble recorded in teardown_error."""
     mock_k8s = mock_k8s_cls.return_value
     mock_k8s.core.list_namespace.return_value.items = []
-    mock_k8s.delete_namespace.side_effect = Exception("delete failed")
-    
+    mock_k8s.delete_namespace.side_effect = Exception("still terminating after 900s")
+
     runner = Runner(dummy_spec, results_root=tmp_path)
     res = runner.run()
-    
-    assert res.status == "error"
-    assert "delete failed" in res.error
+
+    assert res.status == "passed"                       # verdict survives
+    assert res.error is None
+    assert "still terminating" in res.teardown_error
+    import json
+    summary = json.loads((res.run_dir / "summary.json").read_text())
+    assert summary["status"] == "passed"
+    assert "still terminating" in summary["teardown_error"]
+    assert any(e["type"] == "teardown.error" for e in EventLog.read(res.run_dir / "events.jsonl"))
 
 @patch("k8ostester.core.runner.ClusterClient")
 @patch("k8ostester.core.runner.get_driver")

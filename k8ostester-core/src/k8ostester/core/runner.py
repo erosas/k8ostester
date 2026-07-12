@@ -34,6 +34,7 @@ class RunResult:
         self.status = "unknown"
         self.namespace: str | None = None
         self.error: str | None = None
+        self.teardown_error: str | None = None  # cleanup trouble; does not change the verdict
         self.verifications: list[dict] = []
         self.goals: list[dict] = []
 
@@ -215,13 +216,17 @@ class Runner:
             return
         try:
             self.events.emit("teardown.start", f"deleting namespace {self.namespace}")
-            k8s.delete_namespace(self.namespace)
+            # heavy namespaces (operator CRs + chaos CRs + PVC finalizers) can
+            # take many minutes to finish terminating on a small cluster
+            k8s.delete_namespace(self.namespace, timeout=900)
             self.events.emit("teardown.ok", "namespace deleted")
-        except Exception as e:  # teardown failure must not mask the run error
+        except Exception as e:
+            # teardown is cleanup hygiene, NOT part of the verdict — a slow or
+            # failed namespace delete must not turn a passed/failed run into an
+            # error and mask its goals. Record it; the concurrent-run guard
+            # catches any real leftover on the next run.
             self.events.emit("teardown.error", str(e))
-            if result.status == "passed":
-                result.status = "error"
-                result.error = f"teardown failed: {e}"
+            result.teardown_error = str(e)
 
     def _write_summary(self, result: RunResult, started: float) -> None:
         summary = {
@@ -233,6 +238,7 @@ class Runner:
             "namespace": self.namespace,
             "status": result.status,
             "error": result.error,
+            "teardown_error": result.teardown_error,
             "verifications": result.verifications,
             "goals": result.goals,
             "duration_s": round(time.time() - started, 1),

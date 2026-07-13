@@ -21,8 +21,13 @@ kubeconfig and the current directory, allocates a TTY for the dashboard, and
 transparently reroutes 127.0.0.1 kubeconfigs (docker-desktop/kind) via the
 host gateway with TLS still verified. Results land in your CWD as usual.
 
+Pull the published image (private — `docker login` first) or build it locally:
+
 ```bash
-docker build -t k8os-tester:local k8ostester-core
+docker pull bytestream89/k8os-tester:0.1.0
+export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.0
+export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.0   # Postgres experiments
+# — or build it yourself:  docker build -t k8os-tester:local k8ostester-core
 ```
 
 ```bash
@@ -33,8 +38,9 @@ docker build -t k8os-tester:local k8ostester-core
 ./k8ost-docker run experiments/generic/01-nginx-smoke --view plain
 ```
 
-Distribute it by pushing the image and pointing the shim at your registry:
-`K8OST_TOOL_IMAGE=my-registry/k8os-tester:0.1 ./k8ost-docker session --attach prod-db`.
+Or run it straight against an existing cluster with no experiment files:
+`./k8ost-docker session --attach prod-db`. To distribute through your own
+registry, mirror the image and point the shim at it via `K8OST_TOOL_IMAGE`.
 Caveat: kubeconfigs that authenticate via exec plugins (aws/gcloud/az) need those
 binaries in the image — extend the Dockerfile (a comment in it shows how).
 

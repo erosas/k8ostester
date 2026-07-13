@@ -45,12 +45,34 @@ Two images are published on each version tag (see `.github/workflows/release.yml
 
 | Image | What it is | Override |
 | --- | --- | --- |
-| `<namespace>/k8os-tester` | the tool — CLI/TUI with `kubectl` + `helm` baked in | `K8OST_TOOL_IMAGE` (the `k8ost-docker` shim) |
-| `<namespace>/k8os-loadgen` | the app-perspective load generator (python + psycopg) | `load.image` per experiment, or `K8OST_LOADGEN_IMAGE` globally |
+| [`bytestream89/k8os-tester`](https://hub.docker.com/r/bytestream89/k8os-tester) | the tool — CLI/TUI with `kubectl` + `helm` baked in | `K8OST_TOOL_IMAGE` (the `k8ost-docker` shim) |
+| [`bytestream89/k8os-loadgen`](https://hub.docker.com/r/bytestream89/k8os-loadgen) | the app-perspective load generator (python + psycopg) | `load.image` per experiment, or `K8OST_LOADGEN_IMAGE` globally |
 
-Both are built multi-arch (amd64 + arm64). To publish, set the repo secrets
-`DOCKERHUB_NAMESPACE`, `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`, then push a
-`v<version>` tag.
+Both are built multi-arch (amd64 + arm64), with an SBOM + build provenance
+attached. To publish, set the repo secrets `DOCKERHUB_NAMESPACE`,
+`DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`, then push a `v<version>` tag.
+
+### Run from the published image
+
+No local build needed — pull the tool image and point the `k8ost-docker` shim
+at it (it mounts your kubeconfig + CWD and allocates a TTY):
+
+```bash
+docker pull bytestream89/k8os-tester:0.1.0
+export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.0
+export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.0   # used by Postgres experiments
+curl -fsSLO https://raw.githubusercontent.com/erosas/k8ostester/main/k8ost-docker && chmod +x k8ost-docker
+
+./k8ost-docker env check                 # only needs a kubeconfig
+./k8ost-docker session --attach my-ns    # chaos control plane on an existing cluster — no files needed
+```
+
+Experiments are read from the mounted CWD, so to run the bundled ones launch
+from a checkout of this repo (`./k8ost-docker run experiments/...`); for your
+own configs, run from your experiment repo.
+
+The images are private — `docker login` first, or mirror them into your own
+registry (below) and override the two env vars.
 
 ### Running through a mirror (Artifactory / Nexus)
 

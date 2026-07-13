@@ -20,8 +20,8 @@ jobs:
       run:
         working-directory: k8ostester-core
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest -q
@@ -43,9 +43,9 @@ jobs:
             context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg
             dockerfile: k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -53,7 +53,7 @@ jobs:
           tags: ${{ matrix.name }}:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ matrix.name }}:scan
           severity: HIGH,CRITICAL
@@ -66,8 +66,8 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - uses: helm/kind-action@v1          # a real cluster on the runner
         with:
           install_only: true

@@ -63,5 +63,7 @@ jobs:
           tags: |
             ${{ vars.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}:${{ steps.v.outputs.version }}
             ${{ vars.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}:latest
+          sbom: true                 # attach a signed bill-of-materials
+          provenance: mode=max       # + full build provenance (SLSA)
           cache-from: type=gha
           cache-to: type=gha,mode=max

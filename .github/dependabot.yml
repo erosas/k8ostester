@@ -1,0 +1,35 @@
+# Keeps the pinned/hardened surface current so it doesn't rot silently:
+# GitHub Actions, the python deps (uv), and the base-image digests in both
+# Dockerfiles. Grouped into one PR per ecosystem to cut noise.
+#
+# NOTE: Dependabot's docker updater only bumps FROM base-image references (the
+# pinned digests). The kubectl/helm ARG versions in the tool Dockerfile are not
+# FROM lines, so bump those by hand when a patched release lands (which also
+# clears the .trivyignore.yaml kubectl exceptions).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: uv
+    directory: /k8ostester-core
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /k8ostester-core                    # tool image base digest
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /k8ostester-core/src/k8ostester/technologies/postgres_cnpg   # loadgen base digest
+    schedule:
+      interval: weekly

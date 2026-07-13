@@ -3,7 +3,7 @@
 # `k8ost-docker` shim at the repo root (mounts kubeconfig + CWD, allocates a
 # TTY for the dashboard, reroutes 127.0.0.1 kubeconfigs via the host gateway).
 #
-#   docker build -t k8ostester:local k8ostester-core
+#   docker build -t k8os-tester:local k8ostester-core
 #   ./k8ost-docker env check
 #
 # Hardened for a small, auditable footprint:

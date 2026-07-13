@@ -22,7 +22,7 @@ transparently reroutes 127.0.0.1 kubeconfigs (docker-desktop/kind) via the
 host gateway with TLS still verified. Results land in your CWD as usual.
 
 ```bash
-docker build -t k8ostester:local k8ostester-core
+docker build -t k8os-tester:local k8ostester-core
 ```
 
 ```bash
@@ -34,7 +34,7 @@ docker build -t k8ostester:local k8ostester-core
 ```
 
 Distribute it by pushing the image and pointing the shim at your registry:
-`K8OST_TOOL_IMAGE=my-registry/k8ostester:0.1 ./k8ost-docker session --attach prod-db`.
+`K8OST_TOOL_IMAGE=my-registry/k8os-tester:0.1 ./k8ost-docker session --attach prod-db`.
 Caveat: kubeconfigs that authenticate via exec plugins (aws/gcloud/az) need those
 binaries in the image — extend the Dockerfile (a comment in it shows how).
 
@@ -268,18 +268,18 @@ experiment at it:
 
 ```bash
 docker build -f k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile \
-  -t my-registry.example.com/k8ost-loadgen:latest \
+  -t my-registry.example.com/k8os-loadgen:latest \
   k8ostester-core/src/k8ostester/technologies/postgres_cnpg
 ```
 
 ```bash
-docker push my-registry.example.com/k8ost-loadgen:latest
+docker push my-registry.example.com/k8os-loadgen:latest
 ```
 
 ```yaml
 # experiment.yaml
 load:
-  image: my-registry.example.com/k8ost-loadgen:latest
+  image: my-registry.example.com/k8os-loadgen:latest
   pull_secret: my-registry-creds        # imagePullSecret in the run namespace
 ```
 
@@ -287,7 +287,7 @@ Or set it once for every run and session (the artifactory knob — the experimen
 `load.image` still wins when present):
 
 ```bash
-export K8OST_LOADGEN_IMAGE=my-registry.example.com/k8ost-loadgen:latest
+export K8OST_LOADGEN_IMAGE=my-registry.example.com/k8os-loadgen:latest
 ```
 
 Mirror-list for a fully air-gapped install: the loadgen image (above), your postgres

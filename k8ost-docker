@@ -3,13 +3,13 @@
 # and the current directory mounted. The dashboard/TUI works (TTY allocated);
 # results/ land in the CWD as usual.
 #
-#   docker build -t k8ostester:local k8ostester-core     # once
+#   docker build -t k8os-tester:local k8ostester-core     # once
 #   ./k8ost-docker env check
 #   ./k8ost-docker run experiments/postgres-cnpg/03-cnpg-ha-3node
-#   K8OST_TOOL_IMAGE=my-registry/k8ostester:0.1 ./k8ost-docker session --attach prod-db
+#   K8OST_TOOL_IMAGE=my-registry/k8os-tester:0.1 ./k8ost-docker session --attach prod-db
 set -euo pipefail
 
-IMAGE="${K8OST_TOOL_IMAGE:-k8ostester:local}"
+IMAGE="${K8OST_TOOL_IMAGE:-k8os-tester:local}"
 KUBECONFIG_SRC="${KUBECONFIG:-$HOME/.kube/config}"
 
 if [ ! -f "$KUBECONFIG_SRC" ]; then

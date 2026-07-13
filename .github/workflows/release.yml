@@ -1,7 +1,7 @@
 # Publish the two images we own, multi-arch (amd64 + arm64), on a version tag.
 #
-#   <namespace>/k8ostester    — the tool (CLI/TUI, kubectl + helm baked in)
-#   <namespace>/k8ost-loadgen — the app-perspective load generator
+#   <namespace>/k8os-tester   — the tool (CLI/TUI, kubectl + helm baked in)
+#   <namespace>/k8os-loadgen  — the app-perspective load generator
 #
 # Both get :<version> (from the tag, minus the leading v) and :latest.
 #
@@ -31,10 +31,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: k8ostester
+          - name: k8os-tester
             context: k8ostester-core
             dockerfile: k8ostester-core/Dockerfile
-          - name: k8ost-loadgen
+          - name: k8os-loadgen
             context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg
             dockerfile: k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile
     steps:

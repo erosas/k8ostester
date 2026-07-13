@@ -36,10 +36,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: k8ostester
+          - name: k8os-tester
             context: k8ostester-core
             dockerfile: k8ostester-core/Dockerfile
-          - name: k8ost-loadgen
+          - name: k8os-loadgen
             context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg
             dockerfile: k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile
     steps:

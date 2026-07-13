@@ -2,16 +2,16 @@
 # python + psycopg baked in — the loadgen script itself still ships per-run via
 # ConfigMap, so this image changes only when the psycopg pin does.
 #
-# The release workflow publishes this as <namespace>/k8ost-loadgen. To build it
+# The release workflow publishes this as <namespace>/k8os-loadgen. To build it
 # yourself (or mirror it into a private registry):
 #
-#   docker build -f loadgen.Dockerfile -t <your-repo>/k8ost-loadgen:<version> .
-#   docker push <your-repo>/k8ost-loadgen:<version>
+#   docker build -f loadgen.Dockerfile -t <your-repo>/k8os-loadgen:<version> .
+#   docker push <your-repo>/k8os-loadgen:<version>
 #
 # then point the framework at it — per experiment, or globally via
 # K8OST_LOADGEN_IMAGE:
 #   load:
-#     image: <your-repo>/k8ost-loadgen:<version>
+#     image: <your-repo>/k8os-loadgen:<version>
 #     pull_secret: <secret-name>          # if the repo needs auth
 #
 # Stays on 3.12 (not the tool's 3.14): psycopg[binary] ships cp312 wheels, so

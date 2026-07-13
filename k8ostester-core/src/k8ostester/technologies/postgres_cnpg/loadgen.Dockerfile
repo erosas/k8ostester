@@ -14,10 +14,10 @@
 #     image: <your-repo>/k8os-loadgen:<version>
 #     pull_secret: <secret-name>          # if the repo needs auth
 #
-# Stays on 3.12 (not the tool's 3.14): psycopg[binary] ships cp312 wheels, so
-# the build is a fast wheel install rather than a from-source compile.
-# Base pinned by digest; runs as a non-root user. Nothing but python + psycopg,
-# so the footprint is minimal already.
+# Shares the tool's python:3.14-slim base (one base image to mirror).
+# psycopg[binary] ships cp314 wheels, so this is a fast wheel install, not a
+# from-source compile. Base pinned by digest; runs as a non-root user. Nothing
+# but python + psycopg, so the footprint is minimal already.
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
 RUN pip install --no-cache-dir 'psycopg[binary]==3.2.*' \
     && useradd --create-home --uid 10001 loadgen

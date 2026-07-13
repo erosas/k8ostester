@@ -1,5 +1,10 @@
 # K8osTester
 
+[![ci](https://github.com/erosas/k8ostester/actions/workflows/ci.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/ci.yml)
+[![release](https://github.com/erosas/k8ostester/actions/workflows/release.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/release.yml)
+[![coverage](https://img.shields.io/badge/coverage-97%25-brightgreen.svg)](#docs)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Validate Kubernetes configurations of stateful technologies (Postgres first; Kafka,
 Elasticsearch, MongoDB later) against explicit resilience and performance goals: run a config
 under load, inject faults (kill the primary, fail a node…), verify data integrity and
@@ -53,7 +58,7 @@ overridable, so it runs fully behind a proxy:
 
 - **tool** — `export K8OST_TOOL_IMAGE=registry.example.com/k8os-tester:<version>`
 - **loadgen** — `export K8OST_LOADGEN_IMAGE=registry.example.com/k8os-loadgen:<version>` (or per-experiment `load.image`)
-- **base images** the Dockerfiles pull (`python:3.14-slim`, `python:3.12-slim`) — set build ARGs / mirror your Docker daemon's registry
+- **base image** the Dockerfiles pull (`python:3.14-slim`, shared by both) — mirror it or set build ARGs
 - **infra manifests** (SeaweedFS, OTEL collector) — drop overriding copies in the experiment's `infra/` dir (D20); the pinned refs are the only ones we ship
 - **helm-chart images** (CNPG operator, optional Chaos Mesh) — point the chart's `image.repository` values at your mirror
 

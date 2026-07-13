@@ -24,21 +24,16 @@ updates:
       python:
         patterns: ["*"]
 
-  # Base images: digest/patch updates only. Both images track python 3.14-slim
-  # (one base to mirror); the python minor is bumped deliberately, so ignore
-  # minor/major here and let Dependabot re-digest within 3.14 instead of jumping.
+  # Base image (cgr.dev/chainguard/wolfi-base, shared by both Dockerfiles):
+  # re-digest daily so Chainguard's continuous rebuilds — the whole point of the
+  # Wolfi base — land fast. The python runtime is a floating apk package
+  # (`python-3.14`), so it already picks up patches at build time.
   - package-ecosystem: docker
     directory: /k8ostester-core                    # tool image base digest
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: python
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      interval: daily
 
   - package-ecosystem: docker
     directory: /k8ostester-core/src/k8ostester/technologies/postgres_cnpg   # loadgen base digest
     schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: python
-        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      interval: daily

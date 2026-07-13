@@ -6,27 +6,26 @@
 #   docker build -t k8os-tester:local k8ostester-core
 #   ./k8ost-docker env check
 #
-# Hardened for a small, auditable footprint:
-#   - two stages: curl/tar and the download cruft stay in the builder; the
-#     final image carries only the two verified binaries + the python runtime
+# Built on Chainguard's Wolfi (glibc, so python wheels/psycopg work) for a
+# minimal, low-CVE base that is rebuilt continuously — OS-package CVEs stay at
+# ~0 without us patching. Hardened further:
+#   - two stages: curl/tar and download cruft stay in the builder; the final
+#     image carries only the two verified binaries + the python runtime
 #   - kubectl/helm downloads are sha256-checked against upstream (supply chain)
-#   - base pinned by digest (reproducible; bump deliberately, e.g. via renovate)
+#   - base pinned by digest (reproducible; bumped frequently by Dependabot)
 #   - runs as a non-root user
 #
 # Note: kubeconfigs that authenticate via exec plugins (aws/gcloud/az) need
-# those binaries too — extend the final stage, e.g.:
-#   RUN curl -fsSL ...aws-iam-authenticator... -o /usr/local/bin/aws-iam-authenticator
+# those binaries too — extend the final stage (`apk add ...` on Wolfi).
 
 # ---- builder: fetch + verify kubectl and helm, then throw the toolchain away ----
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795 AS tools
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.36.2
 ARG HELM_VERSION=v4.2.3
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache curl
 
 WORKDIR /out
 RUN set -eux; \
@@ -41,23 +40,19 @@ RUN set -eux; \
     sha256sum -c "${htar}.sha256sum"; \
     tar -xzf "$htar"; \
     mv "linux-${TARGETARCH}/helm" helm; \
-    chmod +x helm; \
-    rm -rf "$htar" "${htar}.sha256sum" kubectl.sha256 "linux-${TARGETARCH}"
+    chmod +x helm
 
-# ---- final: slim runtime, no curl/apt lists, non-root ----
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
+# ---- final: minimal Wolfi runtime, non-root ----
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+
+RUN apk add --no-cache python-3.14 py3.14-pip ca-certificates-bundle
 
 COPY --from=tools /out/kubectl /out/helm /usr/local/bin/
 
 COPY . /src
-RUN pip install --no-cache-dir /src \
+RUN pip install --break-system-packages --no-cache-dir /src \
     && rm -rf /src \
-    && useradd --create-home --uid 10001 k8ost
-
-# Drop perl-base: nothing here uses it, but its two unfixed (Debian-deferred)
-# CVEs show up as CRITICAL in image scanners. Force-removed since it's flagged
-# Essential yet has no installed reverse-deps.
-RUN dpkg --purge --force-remove-essential perl-base 2>/dev/null || true
+    && adduser -D -u 10001 k8ost
 
 USER 10001
 WORKDIR /work

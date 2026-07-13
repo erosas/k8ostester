@@ -14,13 +14,11 @@
 #     image: <your-repo>/k8os-loadgen:<version>
 #     pull_secret: <secret-name>          # if the repo needs auth
 #
-# Shares the tool's python:3.14-slim base (one base image to mirror).
-# psycopg[binary] ships cp314 wheels, so this is a fast wheel install, not a
-# from-source compile. Base pinned by digest; runs as a non-root user. Nothing
-# but python + psycopg, so the footprint is minimal already.
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
-RUN pip install --no-cache-dir 'psycopg[binary]==3.2.*' \
-    && useradd --create-home --uid 10001 loadgen
-# Drop perl-base (unused; its unfixed CVEs scan as CRITICAL). See tool Dockerfile.
-RUN dpkg --purge --force-remove-essential perl-base 2>/dev/null || true
+# Built on Chainguard's Wolfi (glibc, so psycopg[binary] wheels install
+# directly): a minimal, continuously-rebuilt base with ~0 OS-package CVEs.
+# Digest-pinned (Dependabot bumps it); runs as a non-root user.
+FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+RUN apk add --no-cache python-3.14 py3.14-pip \
+    && pip install --break-system-packages --no-cache-dir 'psycopg[binary]==3.2.*' \
+    && adduser -D -u 10001 loadgen
 USER 10001

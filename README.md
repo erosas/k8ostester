@@ -50,8 +50,11 @@ Two images are published on each version tag (see `.github/workflows/release.yml
 | [`bytestream89/k8os-tester`](https://hub.docker.com/r/bytestream89/k8os-tester) | the tool — CLI/TUI with `kubectl` + `helm` baked in | `K8OST_TOOL_IMAGE` (the `k8ost-docker` shim) |
 | [`bytestream89/k8os-loadgen`](https://hub.docker.com/r/bytestream89/k8os-loadgen) | the app-perspective load generator (python + psycopg) | `load.image` per experiment, or `K8OST_LOADGEN_IMAGE` globally |
 
-Both are built multi-arch (amd64 + arm64), with an SBOM + build provenance
-attached. To publish, set the repo secrets `DOCKERHUB_NAMESPACE`,
+Both are built multi-arch (amd64 + arm64) on a minimal [Chainguard
+Wolfi](https://github.com/wolfi-dev) base (glibc, continuously rebuilt →
+~0 OS-package CVEs), with an SBOM + build provenance attached. The only CVEs
+that surface are in the bundled `kubectl`/`helm` binaries, tracked in
+`.trivyignore.yaml`. To publish, set the repo secrets `DOCKERHUB_NAMESPACE`,
 `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`, then push a `v<version>` tag.
 
 ### Run from the published image
@@ -83,7 +86,7 @@ overridable, so it runs fully behind a proxy:
 
 - **tool** — `export K8OST_TOOL_IMAGE=registry.example.com/k8os-tester:<version>`
 - **loadgen** — `export K8OST_LOADGEN_IMAGE=registry.example.com/k8os-loadgen:<version>` (or per-experiment `load.image`)
-- **base image** the Dockerfiles pull (`python:3.14-slim`, shared by both) — mirror it or set build ARGs
+- **base image** the Dockerfiles pull (`cgr.dev/chainguard/wolfi-base`, shared by both) — proxy `cgr.dev` through your mirror or set build ARGs
 - **infra manifests** (SeaweedFS, OTEL collector) — drop overriding copies in the experiment's `infra/` dir (D20); the pinned refs are the only ones we ship
 - **helm-chart images** (CNPG operator, optional Chaos Mesh) — point the chart's `image.repository` values at your mirror
 

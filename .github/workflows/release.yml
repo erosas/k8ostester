@@ -9,11 +9,9 @@
 # point the framework at the mirror — see README "Running through a mirror".
 #
 # Setup (once, in repo → Settings → Secrets and variables → Actions → Secrets):
-#   DOCKERHUB_NAMESPACE  the Docker Hub account/org the images live under; also
-#                        used as the login username (personal-account case)
-#   DOCKERHUB_TOKEN      a Docker Hub access token (not the password)
-# (Pushing to an org under a different login? Add a DOCKERHUB_USERNAME secret and
-#  swap it into the login step below.)
+#   DOCKERHUB_NAMESPACE  the Docker Hub org/account the images live under
+#   DOCKERHUB_USERNAME   the account used to log in (an org member with push)
+#   DOCKERHUB_TOKEN      that account's Docker Hub access token (not password)
 name: release
 
 on:
@@ -56,7 +54,7 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          username: ${{ env.NAMESPACE }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6

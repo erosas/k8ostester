@@ -63,9 +63,9 @@ No local build needed — pull the tool image and point the `k8ost-docker` shim
 at it (it mounts your kubeconfig + CWD and allocates a TTY):
 
 ```bash
-docker pull bytestream89/k8os-tester:0.1.0
-export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.0
-export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.0   # used by Postgres experiments
+docker pull bytestream89/k8os-tester:0.1.1
+export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.1
+export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.1   # used by Postgres experiments
 curl -fsSLO https://raw.githubusercontent.com/erosas/k8ostester/main/k8ost-docker && chmod +x k8ost-docker
 
 ./k8ost-docker env check                 # only needs a kubeconfig
@@ -76,7 +76,7 @@ Experiments are read from the mounted CWD, so to run the bundled ones launch
 from a checkout of this repo (`./k8ost-docker run experiments/...`); for your
 own configs, run from your experiment repo.
 
-The images are private — `docker login` first, or mirror them into your own
+The images are public on Docker Hub; behind a proxy, mirror them into your own
 registry (below) and override the two env vars.
 
 ### Running through a mirror (Artifactory / Nexus)

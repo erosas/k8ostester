@@ -21,12 +21,12 @@ kubeconfig and the current directory, allocates a TTY for the dashboard, and
 transparently reroutes 127.0.0.1 kubeconfigs (docker-desktop/kind) via the
 host gateway with TLS still verified. Results land in your CWD as usual.
 
-Pull the published image (private — `docker login` first) or build it locally:
+Pull the published image (public on Docker Hub) or build it locally:
 
 ```bash
-docker pull bytestream89/k8os-tester:0.1.0
-export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.0
-export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.0   # Postgres experiments
+docker pull bytestream89/k8os-tester:0.1.1
+export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.1
+export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.1   # Postgres experiments
 # — or build it yourself:  docker build -t k8os-tester:local k8ostester-core
 ```
 

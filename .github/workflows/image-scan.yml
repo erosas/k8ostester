@@ -1,0 +1,33 @@
+# Weekly re-scan of the PUBLISHED :latest images. The ci `scan` job only checks
+# images at build time; this catches CVEs disclosed AFTER a release, in images
+# already in the wild. A failure here = a notification to go cut a patched
+# release (bump the base digest / kubectl / helm). Same gate as ci: fixable
+# HIGH/CRITICAL, with the scoped kubectl exceptions.
+name: image-scan
+
+on:
+  schedule:
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [k8os-tester, k8os-loadgen]
+    steps:
+      - uses: actions/checkout@v7          # for .trivyignore.yaml
+      - uses: docker/login-action@v4       # images may be private
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_NAMESPACE }}/${{ matrix.image }}:latest
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          trivyignores: .trivyignore.yaml

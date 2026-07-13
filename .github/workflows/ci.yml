@@ -63,6 +63,35 @@ jobs:
           vuln-type: os,library
           trivyignores: .trivyignore.yaml   # scoped, expiring kubectl-binary exceptions
 
+  # Regenerate the coverage badge on every push to main and force-push it to a
+  # single-commit `badges` branch (referenced by the README). Self-contained —
+  # no external coverage service. Only runs post-merge, so it never gates a PR.
+  coverage:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Generate badge
+        working-directory: k8ostester-core
+        run: |
+          uv sync
+          uv run pytest --cov=k8ostester --cov-report=xml -q
+          uv run --with 'genbadge[coverage]' genbadge coverage -i coverage.xml -o ../coverage.svg
+      - name: Publish to badges branch
+        run: |
+          cp coverage.svg "$RUNNER_TEMP/coverage.svg"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan badges
+          git rm -rf . >/dev/null 2>&1 || true
+          cp "$RUNNER_TEMP/coverage.svg" coverage.svg
+          git add -f coverage.svg
+          git commit -m "coverage badge"
+          git push -f origin badges
+
   e2e:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

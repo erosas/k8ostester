@@ -31,6 +31,7 @@ jobs:
   # base-image CVEs with no upstream patch yet — bump the pinned digest to clear
   # those. Mirrors the two build contexts in release.yml.
   scan:
+    name: scan (${{ matrix.name }})   # stable check name (not the full matrix tuple)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

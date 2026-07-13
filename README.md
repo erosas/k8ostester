@@ -33,6 +33,33 @@ for reporting.
 
 To develop the framework itself: `cd k8ostester-core && uv run pytest`.
 
+## Images
+
+Two images are published on each version tag (see `.github/workflows/release.yml`):
+
+| Image | What it is | Override |
+| --- | --- | --- |
+| `<namespace>/k8ostester` | the tool — CLI/TUI with `kubectl` + `helm` baked in | `K8OST_TOOL_IMAGE` (the `k8ost-docker` shim) |
+| `<namespace>/k8ost-loadgen` | the app-perspective load generator (python + psycopg) | `load.image` per experiment, or `K8OST_LOADGEN_IMAGE` globally |
+
+Both are built multi-arch (amd64 + arm64). To publish, set the repo variables
+`DOCKERHUB_NAMESPACE` / `DOCKERHUB_USERNAME` and secret `DOCKERHUB_TOKEN`, then
+push a `v<version>` tag.
+
+### Running through a mirror (Artifactory / Nexus)
+
+Nothing is hardcoded to Docker Hub — every image the framework pulls is
+overridable, so it runs fully behind a proxy:
+
+- **tool** — `export K8OST_TOOL_IMAGE=registry.example.com/k8ostester:<version>`
+- **loadgen** — `export K8OST_LOADGEN_IMAGE=registry.example.com/k8ost-loadgen:<version>` (or per-experiment `load.image`)
+- **base images** the Dockerfiles pull (`python:3.14-slim`, `python:3.12-slim`) — set build ARGs / mirror your Docker daemon's registry
+- **infra manifests** (SeaweedFS, OTEL collector) — drop overriding copies in the experiment's `infra/` dir (D20); the pinned refs are the only ones we ship
+- **helm-chart images** (CNPG operator, optional Chaos Mesh) — point the chart's `image.repository` values at your mirror
+
+Mirror the two images above plus whichever base/infra/chart images your
+experiments actually use, and set the two env vars.
+
 ## Layout
 
 Platform code and experiments are strictly separated: `k8ostester-core/` is the framework

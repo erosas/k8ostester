@@ -1,0 +1,41 @@
+# Test gate: ruff + the full suite on every push/PR. The e2e job spins a real
+# kind cluster and runs the framework end to end — heavier, so nightly + manual
+# only (CNPG experiments need more than a GitHub-hosted runner; nginx-smoke
+# proves the deploy/verify/teardown lifecycle).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *"   # nightly e2e
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: k8ostester-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+
+  e2e:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: helm/kind-action@v1          # a real cluster on the runner
+        with:
+          install_only: true
+      - run: kind create cluster --name k8ost-e2e
+      - name: smoke — deploy, verify, teardown a real workload
+        run: |
+          uv --project k8ostester-core run k8ost run \
+            experiments/generic/01-nginx-smoke --view plain --context kind-k8ost-e2e

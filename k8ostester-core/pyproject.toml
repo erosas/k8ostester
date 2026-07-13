@@ -2,10 +2,9 @@
 name = "k8ostester"
 version = "0.1.0"
 description = "Validate Kubernetes configurations of stateful technologies against resilience and performance goals"
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.14"
 license = "MIT"
-authors = [{ name = "Erick Rosas", email = "erickrosas89@gmail.com" }]
 keywords = ["kubernetes", "resilience", "chaos", "postgres", "cloudnative-pg"]
 dependencies = [
     "typer>=0.15",

@@ -1,0 +1,67 @@
+# Publish the two images we own, multi-arch (amd64 + arm64), on a version tag.
+#
+#   <namespace>/k8ostester    — the tool (CLI/TUI, kubectl + helm baked in)
+#   <namespace>/k8ost-loadgen — the app-perspective load generator
+#
+# Both get :<version> (from the tag, minus the leading v) and :latest.
+#
+# External users behind an Artifactory/Nexus proxy mirror these two paths and
+# point the framework at the mirror — see README "Running through a mirror".
+#
+# Setup (once, in repo settings):
+#   Variables → DOCKERHUB_NAMESPACE, DOCKERHUB_USERNAME
+#   Secrets   → DOCKERHUB_TOKEN  (a Docker Hub access token, not the password)
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (without leading v), e.g. 0.1.0"
+        required: true
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: k8ostester
+            context: k8ostester-core
+            dockerfile: k8ostester-core/Dockerfile
+          - name: k8ost-loadgen
+            context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg
+            dockerfile: k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3      # arm64 emulation for the build
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ vars.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}:${{ steps.v.outputs.version }}
+            ${{ vars.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

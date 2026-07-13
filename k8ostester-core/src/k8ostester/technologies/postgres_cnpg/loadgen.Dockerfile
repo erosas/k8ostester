@@ -21,4 +21,6 @@
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1
 RUN pip install --no-cache-dir 'psycopg[binary]==3.2.*' \
     && useradd --create-home --uid 10001 loadgen
+# Drop perl-base (unused; its unfixed CVEs scan as CRITICAL). See tool Dockerfile.
+RUN dpkg --purge --force-remove-essential perl-base 2>/dev/null || true
 USER 10001

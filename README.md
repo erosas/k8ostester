@@ -4,6 +4,8 @@
 [![codeql](https://github.com/erosas/k8ostester/actions/workflows/codeql.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/codeql.yml)
 [![release](https://github.com/erosas/k8ostester/actions/workflows/release.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/release.yml)
 [![coverage](https://raw.githubusercontent.com/erosas/k8ostester/badges/coverage.svg)](https://github.com/erosas/k8ostester/actions/workflows/ci.yml)
+[![docker image](https://img.shields.io/docker/v/bytestream89/k8os-tester?sort=semver&label=docker&logo=docker)](https://hub.docker.com/r/bytestream89/k8os-tester)
+[![docker pulls](https://img.shields.io/docker/pulls/bytestream89/k8os-tester)](https://hub.docker.com/r/bytestream89/k8os-tester)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Validate Kubernetes configurations of stateful technologies (Postgres first; Kafka,

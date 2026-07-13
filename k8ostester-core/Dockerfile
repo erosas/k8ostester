@@ -54,6 +54,11 @@ RUN pip install --no-cache-dir /src \
     && rm -rf /src \
     && useradd --create-home --uid 10001 k8ost
 
+# Drop perl-base: nothing here uses it, but its two unfixed (Debian-deferred)
+# CVEs show up as CRITICAL in image scanners. Force-removed since it's flagged
+# Essential yet has no installed reverse-deps.
+RUN dpkg --purge --force-remove-essential perl-base 2>/dev/null || true
+
 USER 10001
 WORKDIR /work
 ENTRYPOINT ["k8ost"]

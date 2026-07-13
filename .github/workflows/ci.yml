@@ -26,10 +26,9 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest -q
 
-  # Build both images (single-arch, for the runner) and fail the build on any
-  # fixable HIGH/CRITICAL vuln. ignore-unfixed keeps us from being blocked by
-  # base-image CVEs with no upstream patch yet — bump the pinned digest to clear
-  # those. Mirrors the two build contexts in release.yml.
+  # Build both images (single-arch, for the runner) and fail on any fixable
+  # HIGH/CRITICAL vuln. ignore-unfixed avoids blocking on CVEs with no upstream
+  # patch yet. Mirrors the two build contexts in release.yml.
   scan:
     name: scan (${{ matrix.name }})   # stable check name (not the full matrix tuple)
     runs-on: ubuntu-latest
@@ -61,7 +60,6 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           vuln-type: os,library
-          trivyignores: .trivyignore.yaml   # scoped, expiring kubectl-binary exceptions
 
   # Regenerate the coverage badge on every push to main and force-push it to a
   # single-commit `badges` branch (referenced by the README). Self-contained —

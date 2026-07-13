@@ -2,10 +2,8 @@
 # GitHub Actions, the python deps (uv), and the base-image digests in both
 # Dockerfiles. Grouped into one PR per ecosystem to cut noise.
 #
-# NOTE: Dependabot's docker updater only bumps FROM base-image references (the
-# pinned digests). The kubectl/helm ARG versions in the tool Dockerfile are not
-# FROM lines, so bump those by hand when a patched release lands (which also
-# clears the .trivyignore.yaml kubectl exceptions).
+# NOTE: kubectl and helm come from Wolfi's apk repo (not a FROM/ARG), so they
+# ride the base-image digest bumps below — no manual version tracking needed.
 version: 2
 updates:
   - package-ecosystem: github-actions

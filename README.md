@@ -52,9 +52,9 @@ Two images are published on each version tag (see `.github/workflows/release.yml
 
 Both are built multi-arch (amd64 + arm64) on a minimal [Chainguard
 Wolfi](https://github.com/wolfi-dev) base (glibc, continuously rebuilt →
-~0 OS-package CVEs), with an SBOM + build provenance attached. The only CVEs
-that surface are in the bundled `kubectl`/`helm` binaries, tracked in
-`.trivyignore.yaml`. To publish, set the repo secrets `DOCKERHUB_NAMESPACE`,
+~0 CVEs), with an SBOM + build provenance attached. `kubectl` and `helm` come
+from Wolfi's apk repo (rebuilt against patched Go), so even the tool binaries
+scan clean. To publish, set the repo secrets `DOCKERHUB_NAMESPACE`,
 `DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`, then push a `v<version>` tag.
 
 ### Run from the published image
@@ -63,9 +63,9 @@ No local build needed — pull the tool image and point the `k8ost-docker` shim
 at it (it mounts your kubeconfig + CWD and allocates a TTY):
 
 ```bash
-docker pull bytestream89/k8os-tester:0.1.1
-export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.1
-export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.1   # used by Postgres experiments
+docker pull bytestream89/k8os-tester:0.1.2
+export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.2
+export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.2   # used by Postgres experiments
 curl -fsSLO https://raw.githubusercontent.com/erosas/k8ostester/main/k8ost-docker && chmod +x k8ost-docker
 
 ./k8ost-docker env check                 # only needs a kubeconfig

@@ -1,0 +1,31 @@
+# Scoped, expiring exceptions for the CI Trivy gate (fails on HIGH/CRITICAL).
+#
+# Every entry here is a vuln in the UPSTREAM kubectl binary we bundle — we can't
+# patch it ourselves; it clears when a kubectl built against Go >= 1.26.5 and
+# x/net >= 0.55.0 ships (bump KUBECTL_VERSION in k8ostester-core/Dockerfile).
+# Each is scoped to the kubectl path and EXPIRES, so it stops suppressing on
+# that date and the gate re-fails — forcing a recheck. Anything not listed here
+# (our python deps, the Debian base, new disclosures) still fails the build.
+#
+# Recheck: bump kubectl, rebuild, rescan; drop any CVE trivy no longer reports.
+vulnerabilities:
+  - id: CVE-2026-25681      # x/net/html XSS — kubectl parses no untrusted HTML
+    paths: ["usr/local/bin/kubectl"]
+    statement: "Not reachable: kubectl is an API client, not an HTML parser. Fixed in x/net 0.55.0."
+    expires: 2026-10-01
+  - id: CVE-2026-27136      # x/net/html XSS bypass — same path as above
+    paths: ["usr/local/bin/kubectl"]
+    statement: "Not reachable: kubectl is an API client, not an HTML parser. Fixed in x/net 0.55.0."
+    expires: 2026-10-01
+  - id: CVE-2026-33814      # x/net HTTP/2 server DoS — kubectl is a client
+    paths: ["usr/local/bin/kubectl"]
+    statement: "Not reachable: server-side HTTP/2 DoS; kubectl only makes client calls. Fixed in x/net 0.53.0."
+    expires: 2026-10-01
+  - id: CVE-2026-39821      # x/net/idna punycode privilege escalation
+    paths: ["usr/local/bin/kubectl"]
+    statement: "Low relevance: idna label processing; kubectl talks to a configured API server. Fixed in x/net 0.55.0."
+    expires: 2026-10-01
+  - id: CVE-2026-39822      # Go stdlib os.Root symlink traversal
+    paths: ["usr/local/bin/kubectl"]
+    statement: "Low relevance: os.Root symlink traversal in kubectl file ops. Fixed in Go 1.26.5; awaiting a kubectl rebuilt with it."
+    expires: 2026-10-01

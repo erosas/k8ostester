@@ -1,7 +1,8 @@
-# Test gate: ruff + the full suite on every push/PR. The e2e job spins a real
-# kind cluster and runs the framework end to end — heavier, so nightly + manual
-# only (CNPG experiments need more than a GitHub-hosted runner; nginx-smoke
-# proves the deploy/verify/teardown lifecycle).
+# Test gate: ruff + the full suite, and a Trivy scan that fails on fixable
+# HIGH/CRITICAL vulns, on every push/PR. The e2e job spins a real kind cluster
+# and runs the framework end to end — heavier, so nightly + manual only (CNPG
+# experiments need more than a GitHub-hosted runner; nginx-smoke proves the
+# deploy/verify/teardown lifecycle).
 name: ci
 
 on:
@@ -24,6 +25,42 @@ jobs:
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run pytest -q
+
+  # Build both images (single-arch, for the runner) and fail the build on any
+  # fixable HIGH/CRITICAL vuln. ignore-unfixed keeps us from being blocked by
+  # base-image CVEs with no upstream patch yet — bump the pinned digest to clear
+  # those. Mirrors the two build contexts in release.yml.
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: k8ostester
+            context: k8ostester-core
+            dockerfile: k8ostester-core/Dockerfile
+          - name: k8ost-loadgen
+            context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg
+            dockerfile: k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          load: true                       # into the local daemon, not pushed
+          tags: ${{ matrix.name }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ matrix.name }}:scan
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: os,library
+          trivyignores: .trivyignore.yaml   # scoped, expiring kubectl-binary exceptions
 
   e2e:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

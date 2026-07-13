@@ -8,9 +8,12 @@
 # External users behind an Artifactory/Nexus proxy mirror these two paths and
 # point the framework at the mirror — see README "Running through a mirror".
 #
-# Setup (once, in repo settings):
-#   Variables → DOCKERHUB_NAMESPACE, DOCKERHUB_USERNAME
-#   Secrets   → DOCKERHUB_TOKEN  (a Docker Hub access token, not the password)
+# Setup (once, in repo → Settings → Secrets and variables → Actions → Secrets):
+#   DOCKERHUB_NAMESPACE  the Docker Hub account/org the images live under; also
+#                        used as the login username (personal-account case)
+#   DOCKERHUB_TOKEN      a Docker Hub access token (not the password)
+# (Pushing to an org under a different login? Add a DOCKERHUB_USERNAME secret and
+#  swap it into the login step below.)
 name: release
 
 on:
@@ -25,6 +28,8 @@ on:
 jobs:
   images:
     runs-on: ubuntu-latest
+    env:
+      NAMESPACE: ${{ secrets.DOCKERHUB_NAMESPACE }}
     strategy:
       matrix:
         include:
@@ -51,7 +56,7 @@ jobs:
 
       - uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ env.NAMESPACE }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - uses: docker/build-push-action@v6
@@ -61,8 +66,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ vars.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}:${{ steps.v.outputs.version }}
-            ${{ vars.DOCKERHUB_NAMESPACE }}/${{ matrix.name }}:latest
+            ${{ env.NAMESPACE }}/${{ matrix.name }}:${{ steps.v.outputs.version }}
+            ${{ env.NAMESPACE }}/${{ matrix.name }}:latest
           sbom: true                 # attach a signed bill-of-materials
           provenance: mode=max       # + full build provenance (SLSA)
           cache-from: type=gha

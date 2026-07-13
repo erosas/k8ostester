@@ -24,12 +24,22 @@ updates:
       python:
         patterns: ["*"]
 
+  # Base images: digest/patch updates only. The python minor is chosen
+  # deliberately (tool 3.14, loadgen 3.12 for psycopg wheels) — ignore
+  # minor/major bumps so Dependabot re-digests within the pinned line instead
+  # of jumping versions (a 3.14 bump already broke the loadgen build).
   - package-ecosystem: docker
     directory: /k8ostester-core                    # tool image base digest
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: docker
     directory: /k8ostester-core/src/k8ostester/technologies/postgres_cnpg   # loadgen base digest
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]

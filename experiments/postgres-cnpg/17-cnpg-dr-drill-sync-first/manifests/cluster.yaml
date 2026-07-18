@@ -51,7 +51,22 @@ spec:
           key: SECRET_KEY
       wal:
         compression: gzip
+    # Retention prunes base backups + orphaned WAL past this window (see 16's
+    # cluster.yaml for the base-cadence vs retention reasoning).
     retentionPolicy: 7d
+---
+# Periodic base backups (6-field cron; leading field is SECONDS). Inert in a
+# short drill; the on-demand backup (verify: backup) is what runs here.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pg-nightly
+spec:
+  schedule: "0 0 2 * * *"        # 02:00 daily
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: pg
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler

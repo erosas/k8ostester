@@ -51,7 +51,26 @@ spec:
           key: SECRET_KEY
       wal:
         compression: gzip
+    # Barman prunes base backups AND their now-orphaned WAL past this window:
+    # recovery-to-latest replays from the most recent base, so base cadence
+    # (ScheduledBackup below) bounds replay time; retention bounds how far back
+    # PITR can rewind and how much WAL is retained.
     retentionPolicy: 7d
+---
+# Periodic base backups. The operator's backup controller creates a Backup on
+# this cron (6 fields — the leading one is SECONDS, a CNPG gotcha). Won't fire
+# during a short drill run; the on-demand base backup (verify: backup) is what
+# the drill exercises. In production this is what keeps WAL replay bounded.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pg-nightly
+spec:
+  schedule: "0 0 2 * * *"        # 02:00 daily
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster:
+    name: pg
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Pooler

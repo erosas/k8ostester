@@ -15,9 +15,15 @@ backup/PITR, and get a pass/fail verdict per goal.
 
 ## Docs
 
+- **[docs/usage.md](docs/usage.md)** — the two ways to use this: deploy-and-test, or attach-and-break (start here)
 - **[docs/plan.md](docs/plan.md)** — the north star: full plan, phases, current status
 - **[docs/architecture.md](docs/architecture.md)** — components and how a run works
 - **[docs/decisions.md](docs/decisions.md)** — why it is this way (D1–D11)
+
+The canonical best-practice config to copy is
+[`experiments/postgres-cnpg/20-cnpg-reference`](experiments/postgres-cnpg/20-cnpg-reference)
+— HA + quorum sync, backup/WAL/PITR with periodic base backups + retention, and
+rw + ro pooling, every block commented with why.
 
 ## Quick start
 

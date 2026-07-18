@@ -16,6 +16,7 @@ backup/PITR, and get a pass/fail verdict per goal.
 ## Docs
 
 - **[docs/usage.md](docs/usage.md)** — the two ways to use this: deploy-and-test, or attach-and-break (start here)
+- **[docs/productionization.md](docs/productionization.md)** — design for `k8os-testbed`: a k8s-native golden-path testbed proving the ideal config is operable (rotate creds, upgrade, restore) with a SCADA console
 - **[docs/plan.md](docs/plan.md)** — the north star: full plan, phases, current status
 - **[docs/architecture.md](docs/architecture.md)** — components and how a run works
 - **[docs/decisions.md](docs/decisions.md)** — why it is this way (D1–D11)

@@ -56,16 +56,32 @@ manifests/
                       managed from a secret so rotation is a one-line update
   03-app.yaml         the dummy app — reuses the k8os-loadgen image, pooled
                       read/write with split routing, exposes /metrics on :8000
+monitoring/
+  prometheus.yaml     scrapes the app + CNPG DB metrics (in-pod k8s SD)
+  grafana.yaml        the console — datasource + dashboard as code, step
+                      annotations, a PG-version-over-time panel
 flow.py               the linear golden path
-events.jsonl          written per run; the console's annotation source (phase 2)
+events.jsonl          written per run; local record of the step annotations
 ```
+
+## The console (phase 2)
+
+Provisioned automatically. `flow.py` POSTs a Grafana annotation per step, so the
+dashboard overlays the backup/rotate/upgrade/restore markers as vertical lines
+over the app + DB metrics — you *see* the app dip the instant creds rotate, and
+recover.
+
+```bash
+kubectl -n k8os-testbed port-forward svc/grafana 3000:3000
+# → http://localhost:3000  (admin/admin), dashboard "k8os-testbed — production readiness"
+```
+
+Panels: app throughput/latency, app up, DB instances up, PG-version-over-time.
+(The version panel reads `cnpg_collector_postgres_version` — adjust the metric
+name in the dashboard if your operator differs.)
 
 ## Notes / next phases
 
-- **Phase 2 — console:** Prometheus scrapes the app `/metrics` + the CNPG
-  `:9187` DB metrics; Grafana renders it, with `flow.py`'s step events as
-  annotation lines and a PG-version-over-time panel. (`flow.py` will POST a
-  Grafana annotation per step.)
 - **Phase 3 — major upgrade:** the `pg_upgrade` path (CNPG ≥ 1.26), added as a
   step after the minor upgrade.
 - **PG image tags** (`PG_IMAGE_FROM`/`PG_IMAGE_TO` in `flow.py`) — adjust to a

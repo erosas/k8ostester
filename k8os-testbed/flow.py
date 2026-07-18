@@ -21,10 +21,12 @@ Needs: kubectl, helm on PATH. See README.md.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +40,10 @@ PG_IMAGE_FROM = "ghcr.io/cloudnative-pg/postgresql:16.4"
 PG_IMAGE_TO = "ghcr.io/cloudnative-pg/postgresql:16.6"   # minor upgrade target
 
 CONTEXT: list[str] = []                # filled from --context
+
+GF_LOCAL_PORT = 3000                   # local port for the Grafana port-forward
+ANNOTATE_KINDS = {"backup", "rotate", "version", "restore", "summary"}
+_gf_pf: subprocess.Popen | None = None  # persistent Grafana port-forward
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +110,45 @@ def event(step: str, kind: str, status: str, detail: str, **extra) -> None:
         f.write(json.dumps(rec) + "\n")
     mark = {"ok": "✔", "fail": "✗", "info": "•"}.get(status, "•")
     print(f"  {mark} [{step}] {detail}")
+    if kind in ANNOTATE_KINDS:
+        annotate(f"{step}: {detail}", ["k8os-testbed", kind, status])
+
+
+# --------------------------------------------------------------------------- #
+# grafana annotations (best-effort — never break the flow)
+# --------------------------------------------------------------------------- #
+def start_grafana_pf() -> None:
+    global _gf_pf
+    try:
+        _gf_pf = subprocess.Popen(
+            ["kubectl", *CONTEXT, "-n", NS, "port-forward",
+             "svc/grafana", f"{GF_LOCAL_PORT}:3000"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(3)
+    except Exception:
+        _gf_pf = None
+
+
+def stop_grafana_pf() -> None:
+    if _gf_pf is not None:
+        _gf_pf.terminate()
+
+
+def annotate(text: str, tags: list[str]) -> None:
+    if _gf_pf is None:
+        return
+    try:
+        data = json.dumps(
+            {"text": text, "tags": tags, "time": int(time.time() * 1000)}
+        ).encode()
+        auth = base64.b64encode(b"admin:admin").decode()
+        req = urllib.request.Request(
+            f"http://localhost:{GF_LOCAL_PORT}/api/annotations", data=data,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Basic {auth}"})
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:
+        pass  # annotations are a convenience, not a gate
 
 
 def app_metrics() -> dict[str, float]:
@@ -161,6 +206,14 @@ def provision() -> None:
     kns("apply", "-f", str(MANIFESTS / "03-app.yaml"))
     kns("rollout", "status", "deploy/app", "--timeout=180s")
     event("provision", "provision", "ok", "dummy app running")
+
+    # the console: Prometheus + Grafana (dashboards-as-code)
+    monitoring = Path(__file__).parent / "monitoring"
+    kns("apply", "-f", str(monitoring / "prometheus.yaml"))
+    kns("apply", "-f", str(monitoring / "grafana.yaml"))
+    kns("rollout", "status", "deploy/prometheus", "--timeout=180s")
+    kns("rollout", "status", "deploy/grafana", "--timeout=180s")
+    event("provision", "provision", "ok", "prometheus + grafana console up")
 
 
 def steady(seconds: int = 30) -> None:
@@ -301,27 +354,33 @@ def cleanup() -> None:
 def run(keep: bool) -> int:
     EVENTS.write_text("")   # fresh event log per run
     provision()
-    steady(30)
-    results = {
-        "backup": step_backup(),
-        "rotate": step_rotate_credentials(),
-        "upgrade": step_minor_upgrade(),
-        "restore": step_restore_pitr(),
-        "verify": verify(),
-    }
-    passed = all(results.values())
-    print("\n" + "=" * 60)
-    print("GOLDEN PATH:", "PASS ✔" if passed else "FAIL ✗")
-    for step, ok in results.items():
-        print(f"  {'✔' if ok else '✗'} {step}")
-    print("=" * 60)
-    event("summary", "summary", "ok" if passed else "fail",
-          "golden path " + ("PASSED" if passed else "FAILED"),
-          results=results)
+    start_grafana_pf()      # so step events annotate the console
+    try:
+        steady(30)
+        results = {
+            "backup": step_backup(),
+            "rotate": step_rotate_credentials(),
+            "upgrade": step_minor_upgrade(),
+            "restore": step_restore_pitr(),
+            "verify": verify(),
+        }
+        passed = all(results.values())
+        print("\n" + "=" * 60)
+        print("GOLDEN PATH:", "PASS ✔" if passed else "FAIL ✗")
+        for step, ok in results.items():
+            print(f"  {'✔' if ok else '✗'} {step}")
+        print("=" * 60)
+        event("summary", "summary", "ok" if passed else "fail",
+              "golden path " + ("PASSED" if passed else "FAILED"),
+              results=results)
+    finally:
+        stop_grafana_pf()
+    print("\nConsole:  kubectl -n {0} port-forward svc/grafana 3000:3000  "
+          "→ http://localhost:3000 (admin/admin)".format(NS))
     if not keep:
         cleanup()
     else:
-        print(f"\n[--keep] namespace {NS} left running; `python flow.py cleanup` to remove")
+        print(f"[--keep] namespace {NS} left running; `python flow.py cleanup` to remove")
     return 0 if passed else 1
 
 

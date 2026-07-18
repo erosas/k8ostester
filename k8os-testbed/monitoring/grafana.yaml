@@ -1,0 +1,142 @@
+# Grafana — the console. Datasource + dashboard are provisioned as code (no
+# click-ops). flow.py POSTs an annotation per golden-path step (tag
+# "k8os-testbed"), which the dashboard overlays as marker lines. Admin creds are
+# test-only (admin/admin). Applied into the testbed namespace by flow.py.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: testbed
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard
+data:
+  testbed.json: |
+    {
+      "title": "k8os-testbed — production readiness",
+      "uid": "k8os-testbed",
+      "editable": true,
+      "refresh": "5s",
+      "time": {"from": "now-30m", "to": "now"},
+      "annotations": {
+        "list": [
+          {
+            "name": "flow steps",
+            "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": true,
+            "iconColor": "yellow",
+            "target": {"type": "tags", "tags": ["k8os-testbed"], "limit": 100, "matchAny": false}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1, "type": "timeseries", "title": "App throughput (ops/s)",
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {"expr": "sum by (op) (rate(app_ops_total{result=\"ok\"}[1m]))", "legendFormat": "{{op}} ok"},
+            {"expr": "sum by (op) (rate(app_ops_total{result=\"err\"}[1m]))", "legendFormat": "{{op}} err"}
+          ]
+        },
+        {
+          "id": 2, "type": "timeseries", "title": "App latency (s)",
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [
+            {"expr": "app_last_latency_seconds", "legendFormat": "{{op}}"}
+          ]
+        },
+        {
+          "id": 3, "type": "stat", "title": "App up",
+          "gridPos": {"h": 4, "w": 6, "x": 0, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "app_up"}]
+        },
+        {
+          "id": 4, "type": "timeseries", "title": "DB instances up",
+          "gridPos": {"h": 8, "w": 12, "x": 6, "y": 8},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{"expr": "up{job=\"cnpg\"}", "legendFormat": "{{instance}}"}]
+        },
+        {
+          "id": 5, "type": "state-timeline", "title": "PostgreSQL version over time",
+          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 16},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "Fed by cnpg_collector_postgres_version — adjust the metric name if your operator differs.",
+          "targets": [
+            {"expr": "cnpg_collector_postgres_version", "legendFormat": "{{full}}"}
+          ]
+        }
+      ],
+      "schemaVersion": 39,
+      "version": 1
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: grafana}
+  template:
+    metadata:
+      labels: {app: grafana}
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.4.0
+          env:
+            - {name: GF_SECURITY_ADMIN_USER, value: admin}
+            - {name: GF_SECURITY_ADMIN_PASSWORD, value: admin}
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "true"}
+            - {name: GF_AUTH_ANONYMOUS_ORG_ROLE, value: Viewer}
+          ports:
+            - {containerPort: 3000, name: http}
+          volumeMounts:
+            - {name: provisioning-ds, mountPath: /etc/grafana/provisioning/datasources}
+            - {name: provisioning-db, mountPath: /etc/grafana/provisioning/dashboards}
+            - {name: dashboard, mountPath: /var/lib/grafana/dashboards}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: "1", memory: 512Mi}
+      volumes:
+        - name: provisioning-ds
+          configMap:
+            name: grafana-provisioning
+            items: [{key: datasource.yaml, path: datasource.yaml}]
+        - name: provisioning-db
+          configMap:
+            name: grafana-provisioning
+            items: [{key: dashboards.yaml, path: dashboards.yaml}]
+        - name: dashboard
+          configMap: {name: grafana-dashboard}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector: {app: grafana}
+  ports:
+    - {name: http, port: 3000, targetPort: 3000}

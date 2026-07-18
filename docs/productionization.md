@@ -24,8 +24,8 @@ abstractions. Simplicity over DRY.
   Everything else — the dummy app, the OTEL collector, the console — deploys as
   ordinary k8s workloads. One substrate.
 - **Linear.** The flow reads top-to-bottom. No engine, no plugin registry.
-- **Owned, self-contained console.** No Grafana (AGPL — see the license policy).
-  A small web view we own, reading OTEL metrics + our own event stream.
+- **Grafana for the dashboards.** In-cluster, dashboards-as-code. (Local test
+  tool, not a shipped dep — the AGPL policy doesn't bite here.)
 - **Single config.** It tests `20-cnpg-reference` (the ideal), nothing else.
 
 ## Module layout
@@ -115,40 +115,51 @@ flat and boring — the console needs nothing more.
 
 ## Observability + the console (later phase)
 
-Two metric sources, one substrate:
+**Stack: Prometheus → Grafana, all in-cluster** (k8s-native, same substrate).
+This replaces the earlier "build our own web app" plan — one mature tool instead
+of hand-rolled panels. Grafana's annotation API + state-timeline/node-graph
+panels are exactly the pieces we lean on (Perses, the permissive alternative, is
+weaker there — so Grafana wins on simplicity).
 
-- **DB metrics** — the CNPG `:9187` Prometheus endpoint, scraped by the in-cluster
-  OTEL collector (exactly like experiment 19).
-- **App metrics** — the dummy app exports OTLP directly (ops/s, error %, p99,
-  live connection count). App-perspective is the truth that matters.
+Metric sources (two, one substrate):
 
-The **console** is a self-contained web view (owned, no Grafana) showing:
+- **DB metrics** — the CNPG `:9187` Prometheus endpoint.
+- **App metrics** — the dummy app exposes `/metrics` (ops/s, error %, p99, live
+  connection count). App-perspective is the truth that matters.
 
-- **SCADA-style live component status** — the topology (client → poolers →
-  primary → replicas) with per-node health color. This is the same topology graph
-  the core TUI already computes, rendered for the web.
+Prometheus scrapes both; Grafana reads Prometheus. (If we want the metrics to
+*also* land in your external OTEL endpoint, add an OTEL collector that scrapes
+the same targets and exports OTLP — additive, not required for the console.)
+
+The Grafana dashboard (provisioned as JSON, in-cluster) shows:
+
 - **Metric panels** — app ops/error/latency + DB metrics, side by side.
-- **Event-annotation timeline** — vertical markers for backup/rotate/upgrade/
-  restore from `events.jsonl`, so you *see* "app dipped exactly when we rotated,
-  recovered in 4s."
-- **PG-version-over-time** — a step line from the `version` events.
+- **Event-annotation timeline** — `flow.py` POSTs a Grafana **annotation** at
+  each step (backup/rotate/upgrade/restore), so every panel gets vertical marker
+  lines for free. You *see* "app dipped exactly when we rotated, recovered in 4s."
+  (`events.jsonl` stays the local record; the annotation API is the render path.)
+- **PG-version-over-time** — a native **state-timeline** panel fed by a
+  `pg_version` gauge (or the `version` annotations).
+- **Component status (SCADA)** — v1 uses Grafana's **Canvas / Node Graph** panel
+  driven by per-instance `up`/role/connection metrics: client → poolers →
+  primary → replicas with health color. If that isn't clear enough, v2 is a small
+  bespoke page reusing the topology graph the core TUI already computes — but we
+  try the built-in panel first (simplicity).
 
-**Open decision (defer to the console phase):** the web stack. Options range from
-a static SPA polling the k8s API + Prometheus, to a tiny Python server (SSE for
-live events + a metrics proxy) serving the SPA. Chosen when we build it; the
-event schema above is stable regardless.
+So `flow.py`'s only console responsibility is: expose app `/metrics`, and POST an
+annotation per step. Everything else is Grafana config.
 
 ## Sequencing
 
 1. **Skeleton + golden path** (this design → code): `manifests/` + `flow.py`
    doing steps 1–7 with text/JSONL output. Proves the operations run end to end.
-2. **Console**: the SCADA web view over `events.jsonl` + OTEL.
+2. **Console**: Prometheus + Grafana in-cluster, dashboard-as-JSON, `flow.py`
+   posting step annotations; SCADA via a Canvas/Node-Graph panel.
 3. **Major upgrade** (step 5b): the `pg_upgrade` path, operator-version gated.
 
 ## Open questions
 
-- Dummy app: extend the existing loadgen (add OTLP export) or a purpose-built
-  tiny app? Leaning reuse-the-concept, simplest export.
-- Console web stack (above) — decided at phase 2.
-- Does the testbed self-provision the operator + OTEL collector, or assume the
-  cluster already has them (like the attach scenario)?
+- Dummy app: extend the existing loadgen (add a `/metrics` endpoint) or a
+  purpose-built tiny app? Leaning reuse-the-concept, simplest export.
+- Does the testbed self-provision the operator + Prometheus/Grafana, or assume
+  the cluster already has them (like the attach scenario)?

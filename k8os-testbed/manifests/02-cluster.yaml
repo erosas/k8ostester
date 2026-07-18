@@ -2,20 +2,30 @@
 # testbed golden path:
 #   - imageName PINNED to a specific minor, so flow.py's upgrade step is a
 #     deterministic bump (16.4 -> 16.6)
-#   - the app role's password is MANAGED from a secret we own (app-credentials),
-#     so credential rotation is CNPG-native: update the secret -> operator runs
-#     ALTER ROLE. The dummy app reads the same secret.
+#   - BLUE/GREEN credentials: two login roles app_a / app_b, each with its own
+#     secret, BOTH members of the object-owning `app` role (so they share access
+#     to the tables). A selector config (03-app.yaml) picks the active one.
+#     Rotation = refresh the idle role's password, flip the selector, restart —
+#     both roles valid throughout, so no failed auth (see flow.py rotate step).
 # ---------------------------------------------------------------------------
-# App role credentials — a basic-auth secret CNPG reconciles onto the `app`
-# role, and the dummy app authenticates with. Rotating this is step 4.
+# One secret per role. Rotation only ever touches the IDLE role's secret.
 apiVersion: v1
 kind: Secret
 type: kubernetes.io/basic-auth
 metadata:
-  name: app-credentials
+  name: app-cred-a
 stringData:
-  username: app
-  password: app-initial-pw
+  username: app_a
+  password: app-a-initial-pw
+---
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/basic-auth
+metadata:
+  name: app-cred-b
+stringData:
+  username: app_b
+  password: app-b-initial-pw
 ---
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -37,16 +47,33 @@ spec:
     parameters:
       max_connections: "200"
 
-  # The app role, password sourced from the secret above. ensure: present means
-  # CNPG keeps the role's password in sync with app-credentials — the hook that
-  # makes rotation a one-line secret update.
+  # Blue/green login roles. Both are members of `app` (the CNPG-created owner of
+  # the app database) and INHERIT its privileges, so either can read/write the
+  # shared tables. Each password is sourced from its own secret; CNPG keeps the
+  # role in sync — refreshing a secret is the rotation primitive.
   managed:
     roles:
-      - name: app
+      - name: app_a
         ensure: present
         login: true
-        passwordSecret:
-          name: app-credentials
+        inRoles: [app]
+        passwordSecret: {name: app-cred-a}
+      - name: app_b
+        ensure: present
+        login: true
+        inRoles: [app]
+        passwordSecret: {name: app-cred-b}
+
+  # Pre-create the table owned by `app` (runs as superuser at bootstrap), so
+  # objects belong to the shared owner rather than whichever login role happened
+  # to create them — and grant the members what they need.
+  bootstrap:
+    initdb:
+      postInitApplicationSQL:
+        - CREATE TABLE IF NOT EXISTS app_writes (id bigserial primary key, ts timestamptz default now(), payload text)
+        - ALTER TABLE app_writes OWNER TO app
+        - ALTER SEQUENCE app_writes_id_seq OWNER TO app
+        - GRANT USAGE, CREATE ON SCHEMA public TO app
 
   # Tuned failover detection (see experiments 10-13).
   probes:

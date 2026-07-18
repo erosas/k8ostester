@@ -240,24 +240,32 @@ def step_backup() -> bool:
 
 
 def step_rotate_credentials() -> bool:
-    print("→ rotate-credentials: rotate the app password, app must recover")
-    new_pw = "app-rotated-" + datetime.now(timezone.utc).strftime("%H%M%S")
-    # 1) update the secret CNPG reconciles onto the app role
-    kns("patch", "secret", "app-credentials", "--type", "merge",
+    print("→ rotate-credentials: blue/green switch (both roles valid → no auth gap)")
+    # blue/green: the app uses app_<active>; we refresh the IDLE role's password
+    # (safe — nothing is using it), then flip the selector and roll the app onto
+    # it. Both roles stay valid throughout, so the rolling restart never hits a
+    # rejected auth. Rollback = flip the selector back (old role untouched).
+    active = kns("get", "configmap", "app-active", "-o", "jsonpath={.data.active}")
+    idle = "b" if active == "a" else "a"
+    new_pw = f"app-{idle}-" + datetime.now(timezone.utc).strftime("%H%M%S")
+    # 1) refresh the idle role's password; operator reconciles ALTER ROLE
+    kns("patch", "secret", f"app-cred-{idle}", "--type", "merge",
         "-p", json.dumps({"stringData": {"password": new_pw}}))
-    # 2) let the operator apply ALTER ROLE (managed role reconcile)
     time.sleep(20)
-    # 3) cycle the app so new connections use the rotated credential
     before = app_ok_ops(app_metrics())
+    # 2) flip the selector to the idle role and roll the app onto it
+    kns("patch", "configmap", "app-active", "--type", "merge",
+        "-p", json.dumps({"data": {"active": idle}}))
     kns("rollout", "restart", "deploy/app")
     kns("rollout", "status", "deploy/app", "--timeout=180s")
-    # 4) assert the app recovers: ok ops climb again and it reports up
+    # 3) assert the app recovered on the new role
     time.sleep(15)
     m = app_metrics()
     recovered = app_ok_ops(m) > before and int(m.get("app_up", 0)) == 1
     event("rotate", "rotate", "ok" if recovered else "fail",
-          "app password rotated; app "
-          + ("recovered on new credential" if recovered else "did NOT recover"))
+          f"blue/green app_{active} → app_{idle} "
+          + ("(recovered, both creds valid → no auth gap)" if recovered
+             else "(app did NOT recover)"))
     return recovered
 
 

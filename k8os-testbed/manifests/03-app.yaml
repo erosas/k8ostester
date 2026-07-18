@@ -1,8 +1,19 @@
 # The dummy application: reuses the k8os-loadgen image (python + psycopg) and
 # models a real app client — a small connection pool, low timeouts, split
 # read/write routing (writes -> rw pooler, reads -> ro pooler), running forever.
-# Exposes Prometheus /metrics on :8000 (app-perspective ops/errors/latency) for
-# the phase-2 Grafana console. Ships as a ConfigMap so the image stays generic.
+# Exposes Prometheus /metrics on :8000 for the Grafana console.
+#
+# Blue/green credentials: it mounts BOTH role secrets and an `app-active`
+# selector config, and authenticates as whichever role the selector names. A
+# rotation flips the selector + restarts the app (flow.py) — because both roles
+# stay valid, the rolling restart sees no failed auth (near-zero downtime).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-active
+data:
+  active: "a"          # which role the app uses; flow.py flips this to rotate
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -16,15 +27,22 @@ data:
     HOST_RO = os.environ.get("PGHOST_RO") or HOST   # read endpoint (ro pooler)
     PORT    = os.environ.get("PGPORT", "5432")
     DB      = os.environ.get("PGDATABASE", "app")
-    USER    = os.environ["PGUSER"]           # from app-credentials secret
-    PW      = os.environ["PGPASSWORD"]       # from app-credentials secret
     WORKERS = int(os.environ.get("APP_WORKERS", "5"))
     RATE    = float(os.environ.get("APP_RATE", "20"))   # ops/s per worker
+
+    def load_creds():
+        # blue/green: read the selector, then the named role's secret (files)
+        active = open("/config/active").read().strip()
+        base = f"/creds/{active}"
+        user = open(f"{base}/username").read().strip()
+        pw = open(f"{base}/password").read().strip()
+        return active, user, pw
+
+    ACTIVE, USER, PW = load_creds()
 
     def dsn(host):
         return f"host={host} port={PORT} dbname={DB} user={USER} password={PW} connect_timeout=3"
 
-    # counters shared with the metrics server (GIL + lock keeps them consistent)
     lock = threading.Lock()
     ops  = {("read", "ok"): 0, ("read", "err"): 0, ("write", "ok"): 0, ("write", "err"): 0}
     last_latency = {"read": 0.0, "write": 0.0}
@@ -34,11 +52,6 @@ data:
         with lock:
             ops[(op, result)] += 1
             last_latency[op] = dt
-
-    def ensure_schema():
-        with psycopg.connect(dsn(HOST), autocommit=True, connect_timeout=5) as c:
-            c.execute("create table if not exists app_writes "
-                      "(id bigserial primary key, ts timestamptz default now(), payload text)")
 
     def worker(i):
         global live
@@ -62,7 +75,6 @@ data:
                 bump(op, "ok", time.time() - t0)
             except Exception:
                 bump(op, "err", time.time() - t0)
-                # drop the broken connection so the next iteration reconnects
                 for c in (wc, rc):
                     try:
                         if c and not c.closed:
@@ -75,7 +87,7 @@ data:
             time.sleep(interval)
 
     class Metrics(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *a):  # silence access logs
+        def log_message(self, *a):
             pass
         def do_GET(self):
             with lock:
@@ -83,6 +95,7 @@ data:
             lines = [
                 "# HELP app_up 1 if the app has a live DB connection", "# TYPE app_up gauge",
                 f"app_up {up}", f"app_workers {WORKERS}",
+                f'app_active_role{{role="{ACTIVE}"}} 1',
                 "# TYPE app_ops_total counter",
             ]
             for (op, res), n in snap.items():
@@ -97,12 +110,6 @@ data:
             self.wfile.write(body)
 
     if __name__ == "__main__":
-        # wait for the DB to accept connections, then create the schema
-        for _ in range(60):
-            try:
-                ensure_schema(); break
-            except Exception:
-                time.sleep(2)
         for i in range(WORKERS):
             threading.Thread(target=worker, args=(i,), daemon=True).start()
         http.server.HTTPServer(("0.0.0.0", 8000), Metrics).serve_forever()
@@ -113,7 +120,7 @@ metadata:
   name: app
   labels: {app: dummy-app}
 spec:
-  replicas: 1
+  replicas: 2                 # 2 → the rolling restart cycles one pod at a time
   selector:
     matchLabels: {app: dummy-app}
   template:
@@ -122,27 +129,31 @@ spec:
     spec:
       containers:
         - name: app
-          # reuses the loadgen image (python + psycopg); override for a mirror
-          image: bytestream89/k8os-loadgen:0.1.2
+          image: bytestream89/k8os-loadgen:0.1.2   # override for a mirror
           command: [python, /app/app.py]
           env:
             - {name: PGHOST, value: pg-pooler}          # writes → rw pooler
             - {name: PGHOST_RO, value: pg-pooler-ro}    # reads  → ro pooler
             - {name: PGDATABASE, value: app}
-            - name: PGUSER
-              valueFrom: {secretKeyRef: {name: app-credentials, key: username}}
-            - name: PGPASSWORD
-              valueFrom: {secretKeyRef: {name: app-credentials, key: password}}
           ports:
             - {containerPort: 8000, name: metrics}
           volumeMounts:
             - {name: script, mountPath: /app}
+            - {name: active, mountPath: /config}
+            - {name: cred-a, mountPath: /creds/a}
+            - {name: cred-b, mountPath: /creds/b}
           resources:
             requests: {cpu: 50m, memory: 64Mi}
             limits: {cpu: "500m", memory: 256Mi}
       volumes:
         - name: script
           configMap: {name: app-script}
+        - name: active
+          configMap: {name: app-active}
+        - name: cred-a
+          secret: {secretName: app-cred-a}
+        - name: cred-b
+          secret: {secretName: app-cred-b}
 ---
 apiVersion: v1
 kind: Service

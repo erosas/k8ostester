@@ -79,11 +79,20 @@ data:
         },
         {
           "id": 5, "type": "state-timeline", "title": "PostgreSQL version over time",
-          "gridPos": {"h": 6, "w": 24, "x": 0, "y": 16},
+          "gridPos": {"h": 6, "w": 12, "x": 0, "y": 16},
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "description": "Fed by cnpg_collector_postgres_version — adjust the metric name if your operator differs.",
           "targets": [
             {"expr": "cnpg_collector_postgres_version", "legendFormat": "{{full}}"}
+          ]
+        },
+        {
+          "id": 6, "type": "state-timeline", "title": "Active app role (blue/green)",
+          "gridPos": {"h": 6, "w": 12, "x": 12, "y": 16},
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "description": "Which credential/role the app authenticates as — flips at the rotate annotation.",
+          "targets": [
+            {"expr": "app_active_role", "legendFormat": "{{role}}"}
           ]
         }
       ],

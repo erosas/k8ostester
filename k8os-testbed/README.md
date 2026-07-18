@@ -25,7 +25,7 @@ What each step proves:
 | --- | --- |
 | provision | operator + object store + the ideal cluster + a real app come up clean |
 | backup | a Barman base backup completes to the object store |
-| rotate-credentials | rotating the app password (CNPG-managed role) recovers — the app rides it |
+| rotate-credentials | **blue/green** switch between two valid roles — near-zero downtime, no failed auth |
 | minor-upgrade | an `imageName` bump rolls the cluster and the PG version actually moves |
 | restore-pitr | a second cluster restored to a chosen point holds rows up to (not past) it |
 | verify | cluster healthy + app serving at the end |
@@ -79,6 +79,22 @@ kubectl -n k8os-testbed port-forward svc/grafana 3000:3000
 Panels: app throughput/latency, app up, DB instances up, PG-version-over-time.
 (The version panel reads `cnpg_collector_postgres_version` — adjust the metric
 name in the dashboard if your operator differs.)
+
+## Credential rotation (blue/green)
+
+Two login roles `app_a` / `app_b`, each with its own secret, both members of the
+object-owning `app` role (so they share the tables). An `app-active` ConfigMap
+selects which role the app authenticates as. Rotation:
+
+1. refresh the **idle** role's password (safe — nothing uses it)
+2. flip the `app-active` selector to it
+3. rolling-restart the app (2 replicas → one pod at a time)
+
+Because **both roles stay valid the whole time**, no connection is ever rejected
+— the switch is near-zero downtime (a single role can never do this: one role
+has one password, so it always has a hard cutover). **Rollback** is flipping the
+selector back — the previous role's password was never touched. The dashboard's
+"Active app role" panel shows the flip at the `rotate` annotation.
 
 ## Notes / next phases
 

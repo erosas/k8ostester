@@ -68,8 +68,11 @@ def kns(*args: str, input: str | None = None, check: bool = True) -> str:
     return kubectl("-n", NS, *args, input=input, check=check)
 
 
-def helm(*args: str) -> str:
-    return sh("helm", *CONTEXT, *args)
+def helm(*args: str, cluster: bool = True) -> str:
+    # helm uses --kube-context (not kubectl's --context), and only for commands
+    # that talk to a cluster; `repo add/update` are local (cluster=False).
+    ctx = ["--kube-context", CONTEXT[1]] if (cluster and CONTEXT) else []
+    return sh("helm", *args, *ctx)
 
 
 def primary_pod() -> str:
@@ -180,8 +183,8 @@ def app_ok_ops(m: dict[str, float]) -> float:
 # --------------------------------------------------------------------------- #
 def provision() -> None:
     print("→ provision: operator, object store, cluster, app")
-    helm("repo", "add", "cnpg", CNPG_REPO)
-    helm("repo", "update", "cnpg")
+    helm("repo", "add", "cnpg", CNPG_REPO, cluster=False)
+    helm("repo", "update", "cnpg", cluster=False)
     helm("upgrade", "--install", "cnpg", "cnpg/cloudnative-pg",
          "-n", "cnpg-system", "--create-namespace",
          "--version", CNPG_CHART_VERSION, "--wait")

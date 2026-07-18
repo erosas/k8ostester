@@ -307,15 +307,17 @@ def step_minor_upgrade() -> bool:
     v_from = psql("show server_version").split()[0]
     kns("patch", "cluster", "pg", "--type", "merge",
         "-p", json.dumps({"spec": {"imageName": PG_IMAGE_TO}}))
-    # operator rolls replicas then switches over; wait for all pods on the new
-    # image and the cluster healthy again
-    poll("all instances on new image",
-         lambda: PG_IMAGE_TO in kns(
-             "get", "pods", "-l", "cnpg.io/cluster=pg",
-             "-o", "jsonpath={.items[*].spec.containers[0].image}")
-         and kns("get", "cluster", "pg",
-                 "-o", "jsonpath={.status.readyInstances}") == "3",
-         timeout=900)
+
+    # CNPG rolls replicas first and switches the primary over LAST, so wait until
+    # EVERY instance is on the new image (not just any) and all are ready — else
+    # we'd read the not-yet-upgraded primary's version.
+    def all_upgraded() -> bool:
+        imgs = kns("get", "pods", "-l", "cnpg.io/cluster=pg",
+                   "-o", "jsonpath={.items[*].spec.containers[0].image}").split()
+        ready = kns("get", "cluster", "pg", "-o", "jsonpath={.status.readyInstances}")
+        return bool(imgs) and all(i == PG_IMAGE_TO for i in imgs) and ready == "3"
+
+    poll("all instances on new image", all_upgraded, timeout=900)
     v_to = psql("show server_version").split()[0]
     ok = v_to != v_from
     event("upgrade", "version", "ok" if ok else "fail",

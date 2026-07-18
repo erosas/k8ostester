@@ -277,11 +277,14 @@ def step_rotate_credentials() -> bool:
     active = kns("get", "configmap", "app-active", "-o", "jsonpath={.data.active}")
     idle = "b" if active == "a" else "a"
     new_pw = f"app-{idle}-" + datetime.now(timezone.utc).strftime("%H%M%S")
-    # 1) refresh the idle role's password, then WAIT until it actually works
-    #    (operator reconcile time varies) before switching the app onto it
+    # 1) rotate the IDLE role's password. Do the ALTER ROLE directly (immediate
+    #    and deterministic — CNPG's managed-role reconcile of a bare secret patch
+    #    is not prompt), and set the secret to the same value so the app reads it
+    #    and CNPG stays consistent on its next reconcile.
+    psql(f"alter role app_{idle} password '{new_pw}'", db="postgres")
     kns("patch", "secret", f"app-cred-{idle}", "--type", "merge",
         "-p", json.dumps({"stringData": {"password": new_pw}}))
-    wait_cred(f"app_{idle}", new_pw)
+    wait_cred(f"app_{idle}", new_pw)   # confirm it authenticates end-to-end
     before = app_ok_ops(app_metrics())
     # 2) flip the selector to the idle role and roll the app onto it
     kns("patch", "configmap", "app-active", "--type", "merge",

@@ -251,6 +251,23 @@ def step_backup() -> bool:
     return bool(ok)
 
 
+def wait_cred(user: str, pw: str, timeout: int = 150) -> None:
+    """Poll until (user, pw) actually authenticates through the pooler — i.e. the
+    operator has reconciled the new password onto the role. Replaces a fixed
+    sleep: the reconcile is slower on constrained clusters, and racing it makes
+    the app restart onto a not-yet-valid credential."""
+    primary = primary_pod()
+
+    def works() -> bool:
+        out = kns("exec", primary, "-c", "postgres", "--",
+                  "env", f"PGPASSWORD={pw}",
+                  "psql", f"host=pg-pooler user={user} dbname=app",
+                  "-tAqc", "select 1", check=False)
+        return out.strip() == "1"
+
+    poll(f"credential for {user} active", works, timeout=timeout, interval=5)
+
+
 def step_rotate_credentials() -> bool:
     print("→ rotate-credentials: blue/green switch (both roles valid → no auth gap)")
     # blue/green: the app uses app_<active>; we refresh the IDLE role's password
@@ -260,10 +277,11 @@ def step_rotate_credentials() -> bool:
     active = kns("get", "configmap", "app-active", "-o", "jsonpath={.data.active}")
     idle = "b" if active == "a" else "a"
     new_pw = f"app-{idle}-" + datetime.now(timezone.utc).strftime("%H%M%S")
-    # 1) refresh the idle role's password; operator reconciles ALTER ROLE
+    # 1) refresh the idle role's password, then WAIT until it actually works
+    #    (operator reconcile time varies) before switching the app onto it
     kns("patch", "secret", f"app-cred-{idle}", "--type", "merge",
         "-p", json.dumps({"stringData": {"password": new_pw}}))
-    time.sleep(20)
+    wait_cred(f"app_{idle}", new_pw)
     before = app_ok_ops(app_metrics())
     # 2) flip the selector to the idle role and roll the app onto it
     kns("patch", "configmap", "app-active", "--type", "merge",

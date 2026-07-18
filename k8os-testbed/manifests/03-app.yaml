@@ -1,0 +1,155 @@
+# The dummy application: reuses the k8os-loadgen image (python + psycopg) and
+# models a real app client — a small connection pool, low timeouts, split
+# read/write routing (writes -> rw pooler, reads -> ro pooler), running forever.
+# Exposes Prometheus /metrics on :8000 (app-perspective ops/errors/latency) for
+# the phase-2 Grafana console. Ships as a ConfigMap so the image stays generic.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-script
+data:
+  app.py: |
+    import http.server, os, threading, time, random, string
+    import psycopg
+
+    HOST    = os.environ["PGHOST"]           # write endpoint (rw pooler)
+    HOST_RO = os.environ.get("PGHOST_RO") or HOST   # read endpoint (ro pooler)
+    PORT    = os.environ.get("PGPORT", "5432")
+    DB      = os.environ.get("PGDATABASE", "app")
+    USER    = os.environ["PGUSER"]           # from app-credentials secret
+    PW      = os.environ["PGPASSWORD"]       # from app-credentials secret
+    WORKERS = int(os.environ.get("APP_WORKERS", "5"))
+    RATE    = float(os.environ.get("APP_RATE", "20"))   # ops/s per worker
+
+    def dsn(host):
+        return f"host={host} port={PORT} dbname={DB} user={USER} password={PW} connect_timeout=3"
+
+    # counters shared with the metrics server (GIL + lock keeps them consistent)
+    lock = threading.Lock()
+    ops  = {("read", "ok"): 0, ("read", "err"): 0, ("write", "ok"): 0, ("write", "err"): 0}
+    last_latency = {"read": 0.0, "write": 0.0}
+    live = 0
+
+    def bump(op, result, dt):
+        with lock:
+            ops[(op, result)] += 1
+            last_latency[op] = dt
+
+    def ensure_schema():
+        with psycopg.connect(dsn(HOST), autocommit=True, connect_timeout=5) as c:
+            c.execute("create table if not exists app_writes "
+                      "(id bigserial primary key, ts timestamptz default now(), payload text)")
+
+    def worker(i):
+        global live
+        rc = wc = None
+        interval = 1.0 / RATE if RATE > 0 else 0.05
+        while True:
+            op = "write" if random.random() < 0.3 else "read"
+            t0 = time.time()
+            try:
+                if op == "write":
+                    if wc is None or wc.closed:
+                        wc = psycopg.connect(dsn(HOST), autocommit=True, connect_timeout=3)
+                        with lock: live += 1
+                    payload = "".join(random.choices(string.ascii_lowercase, k=16))
+                    wc.execute("insert into app_writes (payload) values (%s)", (payload,))
+                else:
+                    if rc is None or rc.closed:
+                        rc = psycopg.connect(dsn(HOST_RO), autocommit=True, connect_timeout=3)
+                        with lock: live += 1
+                    rc.execute("select count(*) from app_writes").fetchone()
+                bump(op, "ok", time.time() - t0)
+            except Exception:
+                bump(op, "err", time.time() - t0)
+                # drop the broken connection so the next iteration reconnects
+                for c in (wc, rc):
+                    try:
+                        if c and not c.closed:
+                            c.close()
+                    except Exception:
+                        pass
+                wc = rc = None
+                with lock: live = max(0, live - 1)
+                time.sleep(0.2)
+            time.sleep(interval)
+
+    class Metrics(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):  # silence access logs
+            pass
+        def do_GET(self):
+            with lock:
+                snap = dict(ops); lat = dict(last_latency); up = 1 if live > 0 else 0
+            lines = [
+                "# HELP app_up 1 if the app has a live DB connection", "# TYPE app_up gauge",
+                f"app_up {up}", f"app_workers {WORKERS}",
+                "# TYPE app_ops_total counter",
+            ]
+            for (op, res), n in snap.items():
+                lines.append(f'app_ops_total{{op="{op}",result="{res}"}} {n}')
+            lines.append("# TYPE app_last_latency_seconds gauge")
+            for op, v in lat.items():
+                lines.append(f'app_last_latency_seconds{{op="{op}"}} {v:.6f}')
+            body = ("\n".join(lines) + "\n").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4")
+            self.end_headers()
+            self.wfile.write(body)
+
+    if __name__ == "__main__":
+        # wait for the DB to accept connections, then create the schema
+        for _ in range(60):
+            try:
+                ensure_schema(); break
+            except Exception:
+                time.sleep(2)
+        for i in range(WORKERS):
+            threading.Thread(target=worker, args=(i,), daemon=True).start()
+        http.server.HTTPServer(("0.0.0.0", 8000), Metrics).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+  labels: {app: dummy-app}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: dummy-app}
+  template:
+    metadata:
+      labels: {app: dummy-app}
+    spec:
+      containers:
+        - name: app
+          # reuses the loadgen image (python + psycopg); override for a mirror
+          image: bytestream89/k8os-loadgen:0.1.2
+          command: [python, /app/app.py]
+          env:
+            - {name: PGHOST, value: pg-pooler}          # writes → rw pooler
+            - {name: PGHOST_RO, value: pg-pooler-ro}    # reads  → ro pooler
+            - {name: PGDATABASE, value: app}
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: app-credentials, key: username}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: app-credentials, key: password}}
+          ports:
+            - {containerPort: 8000, name: metrics}
+          volumeMounts:
+            - {name: script, mountPath: /app}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "500m", memory: 256Mi}
+      volumes:
+        - name: script
+          configMap: {name: app-script}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app
+  labels: {app: dummy-app}
+spec:
+  selector: {app: dummy-app}
+  ports:
+    - {name: metrics, port: 8000, targetPort: 8000}

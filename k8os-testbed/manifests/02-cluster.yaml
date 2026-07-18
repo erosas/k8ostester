@@ -1,0 +1,119 @@
+# The ideal config under test (from 20-cnpg-reference), specialized for the
+# testbed golden path:
+#   - imageName PINNED to a specific minor, so flow.py's upgrade step is a
+#     deterministic bump (16.4 -> 16.6)
+#   - the app role's password is MANAGED from a secret we own (app-credentials),
+#     so credential rotation is CNPG-native: update the secret -> operator runs
+#     ALTER ROLE. The dummy app reads the same secret.
+# ---------------------------------------------------------------------------
+# App role credentials — a basic-auth secret CNPG reconciles onto the `app`
+# role, and the dummy app authenticates with. Rotating this is step 4.
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/basic-auth
+metadata:
+  name: app-credentials
+stringData:
+  username: app
+  password: app-initial-pw
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg
+spec:
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4   # pinned; flow.py bumps this
+  storage:
+    size: 1Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 512Mi}
+
+  postgresql:
+    synchronous:               # quorum sync: 1 sync + 1 async, RPO 0
+      method: any
+      number: 1
+    parameters:
+      max_connections: "200"
+
+  # The app role, password sourced from the secret above. ensure: present means
+  # CNPG keeps the role's password in sync with app-credentials — the hook that
+  # makes rotation a one-line secret update.
+  managed:
+    roles:
+      - name: app
+        ensure: present
+        login: true
+        passwordSecret:
+          name: app-credentials
+
+  # Tuned failover detection (see experiments 10-13).
+  probes:
+    readiness: {periodSeconds: 3, failureThreshold: 2}
+    liveness:
+      periodSeconds: 3
+      timeoutSeconds: 3
+      failureThreshold: 2
+      isolationCheck: {enabled: true, connectionTimeout: 2000, requestTimeout: 2000}
+
+  # Continuous WAL archiving + base backups to the in-testbed SeaweedFS.
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://backups/testbed
+      endpointURL: http://seaweedfs.k8os-testbed.svc:8333
+      s3Credentials:
+        accessKeyId: {name: seaweed-s3, key: ACCESS_KEY}
+        secretAccessKey: {name: seaweed-s3, key: SECRET_KEY}
+      wal:
+        compression: gzip
+    retentionPolicy: 7d
+---
+# Periodic base backups (6-field cron; leading field is SECONDS).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: pg-nightly
+spec:
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  method: barmanObjectStore
+  cluster: {name: pg}
+---
+# Read/WRITE pooler (app write datasource).
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler
+spec:
+  cluster: {name: pg}
+  instances: 2
+  type: rw
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"
+      server_login_retry: "1"
+      server_connect_timeout: "3"
+      server_fast_close: "1"
+      query_wait_timeout: "30"
+---
+# Read-ONLY pooler (app read datasource → replicas).
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: pg-pooler-ro
+spec:
+  cluster: {name: pg}
+  instances: 2
+  type: ro
+  pgbouncer:
+    poolMode: transaction
+    parameters:
+      max_client_conn: "500"
+      default_pool_size: "20"
+      server_login_retry: "1"
+      server_connect_timeout: "3"
+      server_fast_close: "1"
+      query_wait_timeout: "30"

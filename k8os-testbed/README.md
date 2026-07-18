@@ -96,8 +96,37 @@ has one password, so it always has a hard cutover). **Rollback** is flipping the
 selector back — the previous role's password was never touched. The dashboard's
 "Active app role" panel shows the flip at the `rotate` annotation.
 
+## AZ spread (`--az`, multi-node)
+
+Proves the config survives an availability-zone failure — mirrors a self-managed
+cluster in AWS, where nodes carry `topology.kubernetes.io/zone` labels.
+
+```bash
+kind create cluster --config kind/kind-az.yaml     # 3 workers, zones k8os-az-a/b/c
+python flow.py --context kind-k8os-testbed --az --keep
+kind delete cluster --name k8os-testbed
+```
+
+**Making the sync replica always cross-AZ — the simple trick.** Instead of tuning
+the synchronous config to "prefer" a different-zone replica, `--az` enforces
+**one instance per zone** (hard `topologySpreadConstraints`, `manifests/az/spread.yaml`).
+The primary is then *alone* in its AZ, so **every** replica is in a different AZ —
+which means the existing `any/1` quorum sync is *automatically* satisfied by a
+cross-AZ replica, with no sync-config knob at all. Placement makes the guarantee
+structural. `maxSkew 1 + DoNotSchedule` keeps it true through an AZ outage (the
+lost instance stays Pending rather than doubling up).
+
+`verify_sync_az` then *proves* it: it maps each streaming standby → node → zone
+and asserts they all differ from the primary's zone. (In production you'd run the
+same check as a CronJob guardrail — an external process that continuously asserts
+the invariant.) The object store is regional, so backups/WAL survive the AZ loss.
+
+(The single-node default run skips all this — spread needs real zones.)
+
 ## Notes / next phases
 
+- **AZ-failure drill:** cordon+drain a whole zone and assert failover with RPO 0
+  (the natural next fault, on top of `--az` spread).
 - **Phase 3 — major upgrade:** the `pg_upgrade` path (CNPG ≥ 1.26), added as a
   step after the minor upgrade.
 - **PG image tags** (`PG_IMAGE_FROM`/`PG_IMAGE_TO` in `flow.py`) — adjust to a

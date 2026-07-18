@@ -1,0 +1,23 @@
+# A 3-zone kind cluster for rehearsing AZ spread locally. Each worker carries a
+# distinct topology.kubernetes.io/zone label — the same label AWS nodes have — so
+# CNPG's topology-spread lands one instance per "AZ" exactly as it would on a
+# real self-managed cluster in AWS.
+#
+#   kind create cluster --config kind/kind-az.yaml
+#   python flow.py --context kind-k8os-testbed --az --keep
+#
+# Delete with:  kind delete cluster --name k8os-testbed
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: k8os-testbed
+nodes:
+  - role: control-plane
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: k8os-az-a
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: k8os-az-b
+  - role: worker
+    labels:
+      topology.kubernetes.io/zone: k8os-az-c

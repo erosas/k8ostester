@@ -1,0 +1,24 @@
+# AZ spread — applied as a merge patch onto the `pg` cluster in --az mode.
+#
+# The trick for "the sync replica is always in a different AZ" without any
+# synchronous-config tuning: enforce ONE instance per zone (hard spread). Then
+# the primary is alone in its AZ, so EVERY replica is in a different AZ — and the
+# existing quorum sync (any/1) is therefore always satisfied by a cross-AZ
+# replica, for free. Placement makes the guarantee structural instead of a knob.
+#
+# maxSkew 1 + DoNotSchedule means: during an AZ outage the lost instance stays
+# Pending rather than doubling up in a surviving AZ — the cross-AZ invariant is
+# preserved (you run degraded until the AZ returns, which is the correct trade
+# for durability). flow.py's verify_sync_az asserts the invariant holds.
+#
+# (CNPG also has a native `postgresql.syncReplicaElectionConstraint` with zone
+# anti-affinity — an alternative that pins the sync election directly. We use
+# placement instead: simpler, no sync-API coupling, and it also spreads reads.)
+spec:
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: pg

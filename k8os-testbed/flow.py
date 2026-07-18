@@ -40,6 +40,7 @@ PG_IMAGE_FROM = "ghcr.io/cloudnative-pg/postgresql:16.4"
 PG_IMAGE_TO = "ghcr.io/cloudnative-pg/postgresql:16.6"   # minor upgrade target
 
 CONTEXT: list[str] = []                # filled from --context
+AZ = False                             # --az: spread across zones + verify cross-AZ sync
 
 GF_LOCAL_PORT = 3000                   # local port for the Grafana port-forward
 ANNOTATE_KINDS = {"backup", "rotate", "version", "restore", "summary"}
@@ -197,6 +198,14 @@ def provision() -> None:
     event("provision", "provision", "ok", "seaweedfs + backups bucket ready")
 
     kns("apply", "-f", str(MANIFESTS / "02-cluster.yaml"))
+    if AZ:
+        # one instance per zone → primary alone in its AZ → sync is always cross-AZ
+        poll("cluster object exists",
+             lambda: kns("get", "cluster", "pg", "-o", "jsonpath={.metadata.name}") == "pg",
+             timeout=60, interval=2)
+        kns("patch", "cluster", "pg", "--type", "merge",
+            "--patch-file", str(MANIFESTS / "az" / "spread.yaml"))
+        event("provision", "provision", "ok", "AZ spread applied (1 instance/zone)")
     poll("cluster pg healthy (3/3)",
          lambda: kns("get", "cluster", "pg",
                      "-o", "jsonpath={.status.readyInstances}") == "3",
@@ -340,6 +349,29 @@ spec:
     return ok
 
 
+def pod_zone(pod: str) -> str:
+    node = kns("get", "pod", pod, "-o", "jsonpath={.spec.nodeName}")
+    return kubectl("get", "node", node, "-o",
+                   r"jsonpath={.metadata.labels.topology\.kubernetes\.io/zone}")
+
+
+def verify_sync_az() -> bool:
+    print("→ verify-sync-az: every replica in a different AZ than the primary")
+    primary = primary_pod()
+    pz = pod_zone(primary)
+    # CNPG sets application_name to the standby's pod name in pg_stat_replication
+    standbys = [s for s in psql(
+        "select application_name from pg_stat_replication", db="postgres"
+    ).splitlines() if s.strip()]
+    zones = {s: pod_zone(s) for s in standbys}
+    cross = all(z and z != pz for z in zones.values())
+    detail = (f"primary {primary}@{pz}; standbys " +
+              ", ".join(f"{s}@{z}" for s, z in zones.items()))
+    event("verify-sync-az", "verify", "ok" if cross else "fail",
+          (detail + "  → all cross-AZ" if cross else detail + "  → SAME-AZ replica present"))
+    return cross
+
+
 def verify() -> bool:
     print("→ verify: cluster healthy and app serving")
     healthy = kns("get", "cluster", "pg",
@@ -372,6 +404,8 @@ def run(keep: bool) -> int:
             "restore": step_restore_pitr(),
             "verify": verify(),
         }
+        if AZ:
+            results["sync-az"] = verify_sync_az()
         passed = all(results.values())
         print("\n" + "=" * 60)
         print("GOLDEN PATH:", "PASS ✔" if passed else "FAIL ✗")
@@ -398,7 +432,12 @@ def main() -> int:
     ap.add_argument("--context", help="kube context (default: current)")
     ap.add_argument("--keep", action="store_true",
                     help="leave the namespace running after the run")
+    ap.add_argument("--az", action="store_true",
+                    help="spread instances 1-per-zone and verify cross-AZ sync "
+                         "(needs a multi-node, zone-labeled cluster — see kind/kind-az.yaml)")
     args = ap.parse_args()
+    global AZ
+    AZ = args.az
     if args.context:
         CONTEXT[:] = ["--context", args.context]
     if args.command == "cleanup":

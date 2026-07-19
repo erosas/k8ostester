@@ -55,11 +55,31 @@ def build_snapshot(
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
         "blue_green": "app_a" in managed and "app_b" in managed,
+        "sync_policy": _sync_policy(spec),     # quorum/priority synchronous config
         "object_store": _object_store(spec),   # where backups/WAL go (part of the system)
         "fault_in_flight": partitioned,
         "busy": bool(reason),           # exclusivity: a mutating op is in progress
         "busy_reason": reason,
     }
+
+
+def _sync_policy(spec: dict) -> dict:
+    """The synchronous-replication policy CNPG is enforcing: quorum (ANY n) or
+    priority (FIRST n), or async if none. Read from spec.postgresql.synchronous
+    (current CNPG) with a fallback to the older min/maxSyncReplicas."""
+    syn = spec.get("postgresql", {}).get("synchronous")
+    if syn:
+        method = syn.get("method", "")          # "any" -> quorum, "first" -> priority
+        number = int(syn.get("number", 0) or 0)
+        mode = {"any": "quorum", "first": "priority"}.get(method, method or "sync")
+        return {"mode": mode, "method": method, "number": number,
+                "label": f"{mode} · {method} {number}".strip()}
+    mx = int(spec.get("maxSyncReplicas", 0) or 0)
+    if mx:
+        mn = int(spec.get("minSyncReplicas", 0) or 0)
+        return {"mode": "quorum", "method": "any", "number": mx,
+                "label": f"quorum · sync {mn}–{mx}"}
+    return {"mode": "async", "method": "", "number": 0, "label": "async (no sync standby)"}
 
 
 def _object_store(spec: dict) -> dict:

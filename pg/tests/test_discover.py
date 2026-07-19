@@ -69,6 +69,16 @@ def test_snapshot_drives_the_capability_map_end_to_end():
     assert caps["kill-primary"] is False   # a partition fault is in flight → interlock
 
 
+def test_sync_policy_reads_quorum_priority_and_async():
+    from k8ostester_pg.discover import _sync_policy
+    assert _sync_policy({"postgresql": {"synchronous": {"method": "any", "number": 1}}}) == {
+        "mode": "quorum", "method": "any", "number": 1, "label": "quorum · any 1"}
+    assert _sync_policy({"postgresql": {"synchronous": {"method": "first", "number": 1}}})["mode"] \
+        == "priority"
+    assert _sync_policy({"maxSyncReplicas": 2, "minSyncReplicas": 1})["mode"] == "quorum"
+    assert _sync_policy({})["mode"] == "async"
+
+
 def test_object_store_parses_bucket_path_and_endpoint():
     from k8ostester_pg.discover import _object_store
     os = _object_store({"backup": {"barmanObjectStore": {

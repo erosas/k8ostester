@@ -26,7 +26,12 @@ def test_upgrade_self_disables_after_reaching_target():
     # the gotcha: it disables because current == target, not a used-flag
     assert caps(snap(version="16.6"))["upgrade"] is False
     assert caps(snap(upgrading=True))["upgrade"] is False        # not while rolling
-    assert caps(snap(target=""))["upgrade"] is False             # nothing newer
+
+
+def test_upgrade_absent_unless_a_target_image_is_supplied():
+    # generic gate: no --target -> the control isn't offered at all (not a dead tile)
+    assert "upgrade" not in caps(snap(target=""))
+    assert "upgrade" in caps(snap())
 
 
 def test_rotate_and_backup_stay_multi_use():

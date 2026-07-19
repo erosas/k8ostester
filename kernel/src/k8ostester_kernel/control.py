@@ -27,11 +27,17 @@ class Action:
     tab: str                       # "ops" (operate) or "chaos" (attack)
     precondition: Precondition
     destructive: bool = False      # requires a typed confirmation in the UI
+    # Whether the action is *offered at all* for this deployment (vs merely
+    # enabled/disabled). Use it to keep a control generic: one that needs extra
+    # config — e.g. an upgrade needs a target image — is simply absent when that
+    # config wasn't supplied, rather than showing as a permanently-disabled tile.
+    available: Precondition = lambda _s: True
 
 
 def capabilities(actions: list[Action], state: dict) -> list[dict]:
     """The enabled-map for the current discovered state — what the UI renders and
-    the server enforces. Each action's ``enabled`` is a pure function of state."""
+    the server enforces. Actions whose ``available`` is false for this deployment
+    are omitted entirely; the rest report ``enabled`` as a pure function of state."""
     return [
         {
             "id": a.id,
@@ -41,6 +47,7 @@ def capabilities(actions: list[Action], state: dict) -> list[dict]:
             "destructive": a.destructive,
         }
         for a in actions
+        if a.available(state)
     ]
 
 
@@ -48,5 +55,5 @@ def is_enabled(actions: list[Action], action_id: str, state: dict) -> bool:
     """Server-side gate: may this action fire against the current state?"""
     for a in actions:
         if a.id == action_id:
-            return bool(a.precondition(state))
+            return bool(a.available(state) and a.precondition(state))
     return False

@@ -45,11 +45,14 @@ CNPG_ACTIONS: list[Action] = [
            lambda s: s.get("backups_completed", 0) > 0 and s.get("pitr_window")
            and not s.get("busy"),
            destructive=True),
+    # Minor upgrade is only offered when the operator supplied a target image
+    # (server --target). Without one it's absent, not a dead disabled tile — the
+    # control stays generic: "give me an upgrade image and I'll expose the button".
     Action("upgrade", "Minor upgrade", "chaos",
-           lambda s: s.get("ready") and bool(s.get("target"))
-           and s.get("version") != s.get("target") and not s.get("upgrading")
-           and not s.get("busy"),
-           destructive=True),
+           lambda s: s.get("ready") and s.get("version") != s.get("target")
+           and not s.get("upgrading") and not s.get("busy"),
+           destructive=True,
+           available=lambda s: bool(s.get("target"))),
     Action("kill-primary", "Kill primary", "chaos",
            lambda s: bool(s.get("primary")) and not s.get("fault_in_flight"),
            destructive=True),

@@ -79,7 +79,8 @@
     background:linear-gradient(90deg,rgba(51,209,214,.10),rgba(51,209,214,.26));
     box-shadow:inset 0 0 0 1px rgba(51,209,214,.35)}
   .tick{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ok);border-radius:2px;
-    cursor:help}
+    cursor:pointer}
+  .tick::before{content:"";position:absolute;inset:-8px -7px}   /* fat, invisible hover target */
   .tick::after{content:"▽";position:absolute;top:-15px;left:-4px;font-size:9px;color:var(--ok)}
   .marker{position:absolute;top:-7px;bottom:-7px;width:2px;background:var(--accent);
     box-shadow:0 0 8px var(--accent)}
@@ -135,6 +136,12 @@
     border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer}
   .mbtns .go{background:var(--crit);border-color:var(--crit);color:#fff;font-weight:600}
   .mbtns button:hover{filter:brightness(1.1)}
+
+  /* custom tooltip — reliable and multi-line, unlike native title on thin ticks */
+  #tip{position:fixed;z-index:50;display:none;max-width:320px;pointer-events:none;
+    background:#05080c;border:1px solid var(--border);border-left:3px solid var(--accent);
+    color:var(--ink);border-radius:8px;padding:8px 11px;font-family:var(--mono);font-size:11.5px;
+    line-height:1.5;white-space:pre-line;box-shadow:0 10px 30px rgba(0,0,0,.55)}
 </style>
 </head>
 <body>
@@ -169,6 +176,8 @@
 
   <div class="log" id="log"><div class="line">— no actions yet —</div></div>
 </div>
+
+<div id="tip"></div>
 
 <!-- PITR restore modal -->
 <div class="scrim" id="scrim">
@@ -266,11 +275,23 @@ function renderActions(){
   });
 }
 
-function node(role, name, zone, cls, title){
-  return `<div class="node ${cls}"${title?` title="${esc(title)}"`:""}><div class="r">${role}</div>
+function node(role, name, zone, cls, tip){
+  return `<div class="node ${cls}"${tip?` data-tip="${esc(tip)}"`:""}><div class="r">${role}</div>
     <div class="n">${name}</div><div class="z">${zone||""}</div></div>`;
 }
 function esc(s){ return String(s).replace(/"/g,"&quot;"); }
+
+// custom tooltip: follows the cursor, works on 2px ticks and shows multi-line text
+const TIP = document.getElementById("tip");
+document.addEventListener("mousemove", e=>{
+  const el = e.target.closest("[data-tip]");
+  if(!el){ TIP.style.display="none"; return; }
+  TIP.textContent = el.getAttribute("data-tip");
+  TIP.style.display = "block";
+  const x = Math.min(e.clientX+14, window.innerWidth - TIP.offsetWidth - 12);
+  const y = Math.min(e.clientY+18, window.innerHeight - TIP.offsetHeight - 12);
+  TIP.style.left = Math.max(8,x)+"px"; TIP.style.top = Math.max(8,y)+"px";
+});
 
 // pg_stat_replication sync_state -> a clear sync/async badge
 function syncBadge(state){
@@ -293,33 +314,35 @@ function renderTopology(s){
     const lag = (r.lag_bytes!=null) ? fmtBytes(r.lag_bytes) : "";
     const sub = [r.zone, lag && ("lag "+lag)].filter(Boolean).join(" · ");
     const qual = (r.sync_state||"").toLowerCase()==="quorum" ? " (quorum candidate)" : "";
-    const title = `replica ${r.name} · ${b.label||"streaming?"}${qual} · lag ${lag||"n/a"} · `+
+    const tip = `replica ${r.name}\n${b.label||"streaming?"}${qual}\nlag ${lag||"n/a"}\n`+
       `zone ${r.zone||"—"} · ${r.healthy?"healthy":"unhealthy"}`;
-    return `<div class="node ${r.healthy?'ok':'bad'}" title="${esc(title)}">
+    return `<div class="node ${r.healthy?'ok':'bad'}" data-tip="${esc(tip)}">
       <div class="r">replica ${b.label?`<span class="badge ${b.cls}">${b.label}</span>`:""}</div>
       <div class="n">${r.name}</div><div class="z">${sub}</div></div>`;
   }).join("");
   // the client node carries the credential state: which blue/green role it uses
   const cr = s.credentials||{};
-  const ctitle = `app authenticates as ${cr.active_role||"app"}` +
-    (cr.rotated_at ? ` · last rotated ${fmtStamp(cr.rotated_at)}` : " · initial credentials");
-  const client = `<div class="node ok" title="${esc(ctitle)}"><div class="r">client · app</div>
+  const ctip = `app authenticates as ${cr.active_role||"app"}\n` +
+    (cr.rotated_at ? `last rotated ${fmtStamp(cr.rotated_at)}` : "initial credentials");
+  const client = `<div class="node ok" data-tip="${esc(ctip)}"><div class="r">client · app</div>
     <div class="n">${cr.active_role||"app"}</div>
     <div class="cr">${cr.rotated_at ? "set "+fmtStamp(cr.rotated_at) : "initial creds"}</div></div>`;
+  const sp = s.sync_policy||{};
+  const ptip = `primary ${primary?primary.name:"—"}\nPostgreSQL ${s.version}\n`+
+    `zone ${primary?primary.zone||"—":"—"}\nsync policy: ${sp.label||"?"}`;
   const pnode = primary
-    ? node("primary", primary.name, primary.zone, "primary",
-        `primary ${primary.name} · PostgreSQL ${s.version} · zone ${primary.zone||"—"}`)
+    ? node("primary", primary.name, primary.zone, "primary", ptip)
     : node("primary","—","","bad","no primary elected");
   // the object store is part of the system — discover it and show where WAL/backups land
   const os = s.object_store||{}, aw = s.archived_wal||{};
   let store = "";
   if(os.configured){
     const segs = (aw.archived!=null) ? aw.archived+" WAL segs" : "WAL archive";
-    const stitle = `object store · s3://${os.bucket}/${os.path||""} @ ${os.endpoint||"?"} · `+
+    const stip = `object store\ns3://${os.bucket}/${os.path||""}\n@ ${os.endpoint||"?"}\n`+
       `${aw.archived!=null?aw.archived+" WAL segments archived":"archiving"}`+
-      `${aw.failed?` · ${aw.failed} failed`:""}${aw.last?` · last ${aw.last}`:""}`;
+      `${aw.failed?`\n${aw.failed} archive failures (cumulative since stats reset)`:""}`;
     store = `<span class="arrow">→<small>WAL / backups</small></span>
-      <div class="col"><div class="node store" title="${esc(stitle)}">
+      <div class="col"><div class="node store" data-tip="${esc(stip)}">
         <div class="r">object store${aw.failed?` <span class="badge potential">${aw.failed} FAIL</span>`:""}</div>
         <div class="n">${os.bucket||"bucket"}</div><div class="z">${segs}</div></div></div>`;
   }
@@ -344,11 +367,12 @@ function drawTimeline(track, wal, t0, t1){
     const ms = Date.parse(b.stoppedAt);
     const pct = Math.max(0, Math.min(100, (ms-t0)/span*100));
     const d = document.createElement("div"); d.className="tick"; d.style.left=pct+"%";
-    d.title = `base backup ${b.name}\n${new Date(ms).toLocaleString()} (${ago(ms)})\n`+
-      `WAL is continuous from here to now — PITR can land anywhere after this tick.`;
+    d.setAttribute("data-tip", `base backup ${b.name}\ntaken ${new Date(ms).toLocaleString()}\n`+
+      `${ago(ms)}\nWAL is continuous from here to now — PITR can land anywhere after this tick.`);
     track.appendChild(d);
   });
-  wal.title = `Recoverable via WAL: ${new Date(t0).toLocaleString()} → now`;
+  wal.setAttribute("data-tip",
+    `recoverable via WAL\n${new Date(t0).toLocaleString()} → now\nrestore to any point in this band`);
 }
 
 function renderRecovery(s){
@@ -367,7 +391,6 @@ function renderRecovery(s){
     `<b>${n}</b> base backup${n===1?"":"s"}`,
     aw.archived!=null?`<b>${aw.archived}</b> WAL segments archived`:"",
     aw.failed?`<b style="color:var(--crit)">${aw.failed}</b> archive failures`:"",
-    aw.last?`last <b>${aw.last}</b>`:"",
     `▽ = base backup · shaded band = restorable to any point`,
   ].filter(Boolean).join("&nbsp;·&nbsp;");
 }
@@ -443,6 +466,7 @@ function render(data){
     `<span class="chip">version <b>${SNAP.version||"?"}</b>${SNAP.target?` → ${SNAP.target}`:""}</span>`,
     `<span class="chip">primary <b>${SNAP.primary||"—"}</b></span>`,
     `<span class="chip">zones <b>${(SNAP.zones||[]).join(", ")||"—"}</b></span>`,
+    `<span class="chip">sync <b>${(SNAP.sync_policy||{}).label||"?"}</b></span>`,
     `<span class="chip">backups <b>${SNAP.backups_completed||0}</b></span>`,
     SNAP.fault_in_flight?`<span class="chip" style="color:var(--warn)">fault in flight</span>`:"",
   ].join("");

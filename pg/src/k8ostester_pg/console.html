@@ -325,11 +325,6 @@ function humanCron(c){
     return `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][+dow]||dow} ${hhmm}`;
   return c;   // fall back to the raw expression
 }
-// WAL segment index from a 24-hex WAL filename (16MB segs, 256 per logical file)
-function walSeg(name){
-  if(!name || name.length<24) return null;
-  return parseInt(name.slice(8,16),16)*256 + parseInt(name.slice(16,24),16);
-}
 // the base backup a PITR to time t would bootstrap from: newest completed at/before t
 function baseBackupFor(t){
   let base = null;
@@ -516,6 +511,7 @@ function openModal(){
   document.querySelector('input[name=rmode][value=latest]').checked = true;
   syncModeUI();
   T0 = Date.parse(SNAP.recoverability_point); T1 = Date.now();
+  Object.keys(WALX).forEach(k=>delete WALX[k]);   // recompute fresh each open
   document.getElementById("latest-when").textContent =
     `≈ ${new Date(T1).toLocaleString()} · just now`;
   document.getElementById("mstart").textContent = new Date(T0).toLocaleTimeString();
@@ -547,26 +543,42 @@ function onSlide(){
   for(const tk of TICKS){ if(Math.abs(tk.value - v) <= 16){ v = tk.value; sl.value = v; snapName = tk.name; break; } }
   updateSlider(snapName);
 }
+// exact WAL-segment counts from the server, cached per base backup for this modal
+const WALX = {}, WALINFLIGHT = new Set();
+let LAST_SNAP = "";
+function ensureWal(endWal){
+  if(!endWal || endWal in WALX || WALINFLIGHT.has(endWal)) return;
+  WALINFLIGHT.add(endWal);
+  fetch("/api/wal-count", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({from_wal:endWal})})
+    .then(r=>r.json())
+    .then(j=>{ WALX[endWal] = (j.ok && j.segments!=null) ? j.segments : "err"; })
+    .catch(()=>{ WALX[endWal] = "err"; })
+    .finally(()=>{ WALINFLIGHT.delete(endWal);
+      if(document.getElementById("scrim").classList.contains("on")) renderPitInfo(); });
+}
+function renderPitInfo(){
+  const t = sliderTime(), base = baseBackupFor(t), info = document.getElementById("pitinfo");
+  if(!base){ info.textContent = "no base backup at or before this point — pick a later time"; return; }
+  const sz = SNAP.data_size!=null ? fmtBytes(SNAP.data_size) : "?";
+  const v = WALX[base.endWal];
+  let seg;
+  if(typeof v === "number") seg = `<b>${v}</b> WAL segments (~${fmtBytes(v*16*1048576)}) generated since`;
+  else if(v === "err") seg = "WAL count unavailable";
+  else { seg = "counting WAL segments…"; ensureWal(base.endWal); }
+  info.innerHTML =
+    `restores from base backup <b>${base.name}</b> (${ago(base.ms)}, ~${sz})` +
+    `<br>${seg} — replayed forward to your target` +
+    (LAST_SNAP ? ` · <span style="color:var(--accent)">snapped to this backup</span>` : "");
+}
 function updateSlider(snapName){
+  LAST_SNAP = snapName || "";
   const t = sliderTime();
   document.getElementById("mmarker").style.left = (t-T0)/((T1-T0)||1)*100 + "%";
   document.getElementById("seltime").textContent = new Date(t).toLocaleString();
   const near = (T1-t) < 1500;
   document.getElementById("selago").textContent = near ? "now (latest)" : ago(t);
-  // which base backup PITR uses, how much WAL it replays, how much data it carries
-  const info = document.getElementById("pitinfo"), base = baseBackupFor(t);
-  if(!base){ info.textContent = "no base backup at or before this point — pick a later time"; return; }
-  const segNow = walSeg((SNAP.archived_wal||{}).last), segBase = walSeg(base.endWal);
-  let parts = "?";
-  if(segNow!=null && segBase!=null){
-    const f = Math.max(0, Math.min(1, (t-base.ms) / ((T1-base.ms)||1)));  // fraction: est. is fine
-    parts = "~" + Math.max(0, Math.round(f*(segNow-segBase)));
-  }
-  const sz = SNAP.data_size!=null ? fmtBytes(SNAP.data_size) : "?";
-  info.innerHTML =
-    `restores from base backup <b>${base.name}</b> (${ago(base.ms)}, ~${sz})` +
-    `<br>then replays <b>${parts}</b> WAL segments forward to the target` +
-    (snapName ? ` · <span style="color:var(--accent)">snapped to this backup</span>` : "");
+  renderPitInfo();
 }
 document.addEventListener("change", e=>{ if(e.target.name==="rmode") syncModeUI(); });
 document.addEventListener("input", e=>{ if(e.target.id==="slider") onSlide(); });

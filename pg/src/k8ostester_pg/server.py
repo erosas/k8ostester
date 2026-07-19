@@ -40,6 +40,13 @@ class Console:
         snap = discover.snapshot(self.k8s, self.ns, target=self.target)
         return execute.execute(self.k8s, self.ns, action_id, snap, params)
 
+    def wal_count(self, from_wal: str) -> dict:
+        """Exact WAL segments from a base backup to the current WAL position."""
+        cluster = self.k8s.custom.get_namespaced_custom_object(
+            discover.CNPG_GROUP, discover.CNPG_VERSION, self.ns, "clusters", "pg")
+        primary = cluster.get("status", {}).get("currentPrimary", "")
+        return discover.wal_segments_since(self.k8s, self.ns, from_wal, primary)
+
 
 def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
     class H(BaseHTTPRequestHandler):
@@ -76,7 +83,7 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self._send(404, "text/plain", b"not found")
 
         def do_POST(self):
-            if self.path not in ("/api/action", "/api/manifest"):
+            if self.path not in ("/api/action", "/api/manifest", "/api/wal-count"):
                 self._send(404, "text/plain", b"not found")
                 return
             n = int(self.headers.get("Content-Length", 0) or 0)
@@ -86,6 +93,14 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 try:
                     body.setdefault("namespace", console.ns)
                     out = {"ok": True, "manifest": builder.build_manifest(body)}
+                except Exception as e:
+                    out = {"ok": False, "error": str(e).splitlines()[0][:200]}
+                self._send(200, "application/json", json.dumps(out).encode())
+                return
+            if self.path == "/api/wal-count":
+                # exact WAL segments from a base backup to now (queries the primary)
+                try:
+                    out = {"ok": True, **console.wal_count(body.get("from_wal", ""))}
                 except Exception as e:
                     out = {"ok": False, "error": str(e).splitlines()[0][:200]}
                 self._send(200, "application/json", json.dumps(out).encode())

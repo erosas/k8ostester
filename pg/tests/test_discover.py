@@ -95,6 +95,15 @@ def test_object_store_parses_bucket_path_and_endpoint():
     assert _object_store({})["configured"] is False   # no backup stanza → not configured
 
 
+def test_wal_seg_index_is_lsn_ordered_and_timeline_independent():
+    from k8ostester_pg.discover import wal_seg_index
+    assert wal_seg_index("00000001000000000000001A") == 0x1A
+    assert wal_seg_index("000000010000000000000100") == 256   # logical rollover
+    # same LSN segment on a later timeline -> same index
+    assert wal_seg_index("00000002000000000000001A") == 0x1A
+    assert wal_seg_index("") is None and wal_seg_index("short") is None
+
+
 def test_parse_archiver_reads_segment_counts():
     from k8ostester_pg.discover import _parse_archiver
     assert _parse_archiver("42|000000010000000000000009|0") == {

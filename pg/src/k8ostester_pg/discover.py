@@ -170,6 +170,45 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
     return snap
 
 
+_WAL_SEG_BYTES = 16 * 1024 * 1024   # default WAL segment size
+
+
+def wal_seg_index(name: str) -> int | None:
+    """LSN-space segment index of a 24-hex WAL filename (TLI, logical, seg).
+    Independent of timeline, since the LSN of a segment doesn't depend on TLI."""
+    if not name or len(name) < 24:
+        return None
+    try:
+        return int(name[8:16], 16) * 256 + int(name[16:24], 16)
+    except ValueError:
+        return None
+
+
+def wal_segments_since(k8s: ClusterClient, namespace: str, from_wal: str,
+                       primary: str) -> dict:
+    """Exact number of WAL segments from ``from_wal`` to the primary's current WAL
+    insert position — i.e. how many segments a PITR bootstrapped from that base
+    backup replays to reach the latest recoverable point. Computed via LSN diff."""
+    frm = wal_seg_index(from_wal)
+    if frm is None or not primary:
+        return {}
+    query = ("select floor(pg_wal_lsn_diff(pg_current_wal_lsn(),'0/0'::pg_lsn)"
+             f"/{_WAL_SEG_BYTES})::bigint, pg_walfile_name(pg_current_wal_lsn())")
+    try:
+        out = k8s.exec_pod(namespace, primary,
+                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
+                           container="postgres")
+    except Exception:
+        return {}
+    parts = out.strip().split("|")
+    try:
+        current = int(parts[0])
+    except (ValueError, IndexError):
+        return {}
+    return {"segments": max(0, current - frm),
+            "current_wal": parts[1] if len(parts) > 1 else ""}
+
+
 def _schedules(k8s: ClusterClient, namespace: str) -> list[dict]:
     """Auto-backup policy: the ScheduledBackup cron(s) governing this cluster."""
     try:

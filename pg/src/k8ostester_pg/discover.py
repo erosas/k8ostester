@@ -55,9 +55,25 @@ def build_snapshot(
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
         "blue_green": "app_a" in managed and "app_b" in managed,
+        "object_store": _object_store(spec),   # where backups/WAL go (part of the system)
         "fault_in_flight": partitioned,
         "busy": bool(reason),           # exclusivity: a mutating op is in progress
         "busy_reason": reason,
+    }
+
+
+def _object_store(spec: dict) -> dict:
+    """The backup/WAL destination — bucket, path, endpoint — from barmanObjectStore."""
+    store = spec.get("backup", {}).get("barmanObjectStore", {})
+    dest = store.get("destinationPath", "")
+    bucket = path = ""
+    if dest.startswith("s3://"):
+        bucket, _, path = dest[5:].partition("/")
+    return {
+        "configured": bool(store),
+        "endpoint": store.get("endpointURL", ""),
+        "bucket": bucket,
+        "path": path,
     }
 
 
@@ -116,6 +132,7 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
     for i in snap["instances"]:
         if i["name"] in repl:
             i.update(repl[i["name"]])
+    snap["archived_wal"] = _archiver(k8s, namespace, snap["primary"])
     snap["credentials"] = _credentials(k8s, namespace, snap["blue_green"])
     # a restore cluster still bootstrapping also locks the tool
     others = k8s.custom.list_namespaced_custom_object(
@@ -126,6 +143,33 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         snap["busy"] = True
         snap["busy_reason"] = snap["busy_reason"] or "restore in progress"
     return snap
+
+
+def _parse_archiver(out: str) -> dict:
+    """Parse 'archived|last_wal|failed' from pg_stat_archiver — the WAL segments
+    (the 'parts') pushed to the object store, the newest one, and failures."""
+    p = out.strip().split("|")
+    if len(p) < 3:
+        return {}
+    try:
+        return {"archived": int(p[0] or 0), "last": p[1], "failed": int(p[2] or 0)}
+    except ValueError:
+        return {}
+
+
+def _archiver(k8s: ClusterClient, namespace: str, primary: str) -> dict:
+    """WAL-archiving stats from the primary's pg_stat_archiver."""
+    if not primary:
+        return {}
+    query = ("select archived_count, coalesce(last_archived_wal,''), failed_count "
+             "from pg_stat_archiver")
+    try:
+        out = k8s.exec_pod(namespace, primary,
+                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
+                           container="postgres")
+    except Exception:
+        return {}
+    return _parse_archiver(out)
 
 
 def _parse_replication(out: str) -> dict:

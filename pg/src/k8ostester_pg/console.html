@@ -42,28 +42,6 @@
   .lock{display:none;align-items:center;gap:9px;background:#2a2312;border:1px solid #5a4a1a;
     color:var(--warn);padding:9px 14px;border-radius:8px;font-family:var(--mono);
     font-size:12.5px;margin-bottom:16px}
-  .node .cr{font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:2px}
-  /* recovery timeline */
-  .recovery{border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px;
-    background:linear-gradient(180deg,var(--panel),var(--panel2))}
-  .rhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}
-  .rhead .t{font-size:13px;font-weight:600}
-  .rhead .w{font-family:var(--mono);font-size:11px;color:var(--dim)}
-  .track{position:relative;height:34px;background:var(--panel2);border:1px solid var(--border);
-    border-radius:7px;margin:6px 0 4px}
-  .wal{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,#123 0%,#0f2a2c 100%);
-    border-radius:6px;box-shadow:inset 0 0 0 1px #1e4d50}
-  .tick{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--ok)}
-  .tick::after{content:"backup";position:absolute;top:-13px;left:-16px;font-family:var(--mono);
-    font-size:8.5px;color:var(--ok);white-space:nowrap}
-  .tmark{position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--accent);
-    box-shadow:0 0 8px var(--accent)}
-  .tends{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;
-    color:var(--dim);margin-top:6px}
-  .picker{display:flex;align-items:center;gap:10px;margin-top:12px;font-family:var(--mono);font-size:12px}
-  .picker input{background:var(--panel2);border:1px solid var(--border);color:var(--ink);
-    border-radius:6px;padding:5px 8px;font-family:var(--mono);font-size:12px;color-scheme:dark}
-  .picker .hint{color:var(--muted)}
 
   /* SCADA topology */
   .scada{border:1px solid var(--border);border-radius:12px;padding:18px 16px;
@@ -72,14 +50,44 @@
   .flow{display:flex;align-items:center;gap:8px}
   .col{display:flex;flex-direction:column;gap:8px}
   .arrow{color:var(--dim);font-size:20px;padding:0 4px}
+  .arrow small{display:block;font-family:var(--mono);font-size:8.5px;letter-spacing:.05em;
+    text-align:center;color:var(--dim);margin-top:-4px}
   .node{border:1px solid var(--border);border-left:3px solid var(--dim);border-radius:8px;
-    padding:9px 12px;min-width:130px;background:var(--panel2)}
+    padding:9px 12px;min-width:132px;background:var(--panel2)}
   .node.ok{border-left-color:var(--ok)} .node.bad{border-left-color:var(--crit)}
-  .node.primary{border-left-color:var(--blue)}
+  .node.primary{border-left-color:var(--blue)} .node.store{border-left-color:var(--accent)}
   .node .r{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
-    text-transform:uppercase;color:var(--muted)}
+    text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
   .node .n{font-weight:600;font-size:14px}
   .node .z{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .node .cr{font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:2px}
+  .badge{font-family:var(--mono);font-size:8.5px;letter-spacing:.08em;padding:1px 5px;
+    border-radius:10px;border:1px solid transparent}
+  .badge.sync{color:var(--ok);border-color:#1e4633;background:#0f2019}
+  .badge.async{color:var(--muted);border-color:var(--border);background:var(--panel)}
+  .badge.potential{color:var(--warn);border-color:#4a3a1a}
+
+  /* recovery overview */
+  .recovery{border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:20px;
+    background:linear-gradient(180deg,var(--panel),var(--panel2))}
+  .rhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:16px}
+  .rhead .t{font-size:13px;font-weight:600}
+  .rhead .w{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .timeline{position:relative;height:8px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:5px;margin:26px 8px 8px}
+  .wal{position:absolute;top:0;bottom:0;left:0;right:0;border-radius:4px;
+    background:linear-gradient(90deg,rgba(51,209,214,.10),rgba(51,209,214,.26));
+    box-shadow:inset 0 0 0 1px rgba(51,209,214,.35)}
+  .tick{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--ok);border-radius:2px;
+    cursor:help}
+  .tick::after{content:"▽";position:absolute;top:-15px;left:-4px;font-size:9px;color:var(--ok)}
+  .marker{position:absolute;top:-7px;bottom:-7px;width:2px;background:var(--accent);
+    box-shadow:0 0 8px var(--accent)}
+  .tends{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;
+    color:var(--dim);margin:6px 8px 0}
+  .rfoot{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:12px;
+    display:flex;flex-wrap:wrap;gap:6px 16px}
+  .rfoot b{color:var(--ink)}
 
   .tabs{display:flex;gap:6px;margin-bottom:14px}
   .tab{font-family:var(--mono);font-size:13px;padding:8px 16px;border:1px solid var(--border);
@@ -99,6 +107,34 @@
     font-family:var(--mono);font-size:12.5px;color:var(--muted)}
   .log .line{padding:3px 0}
   .log .ok{color:var(--ok)} .log .fail{color:var(--crit)}
+
+  /* modal */
+  .scrim{position:fixed;inset:0;background:rgba(4,7,11,.72);display:none;align-items:center;
+    justify-content:center;padding:20px;z-index:20}
+  .scrim.on{display:flex}
+  .modal{width:min(560px,100%);background:var(--panel);border:1px solid var(--border);
+    border-radius:14px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .modal h2{margin:0 0 4px;font-size:17px}
+  .modal .lede{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:18px}
+  .modal .opt{display:flex;gap:9px;align-items:flex-start;padding:11px 13px;border:1px solid var(--border);
+    border-radius:9px;margin-bottom:9px;cursor:pointer}
+  .modal .opt.on{border-color:var(--accent);background:var(--panel2)}
+  .modal .opt input{margin-top:3px}
+  .modal .opt .ol{font-size:14px}
+  .modal .opt .os{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .pit{margin:6px 0 2px;opacity:.5;pointer-events:none;transition:opacity .15s}
+  .pit.on{opacity:1;pointer-events:auto}
+  .pit .timeline{margin-top:24px}
+  .pit input[type=range]{width:100%;margin:16px 0 4px;accent-color:var(--accent)}
+  .pit .read{display:flex;justify-content:space-between;align-items:baseline;
+    font-family:var(--mono);font-size:12px}
+  .pit .read .big{font-size:15px;color:var(--ink)}
+  .pit .read .ago{color:var(--accent)}
+  .mbtns{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
+  .mbtns button{font-family:var(--sans);font-size:13.5px;padding:9px 18px;border-radius:8px;
+    border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer}
+  .mbtns .go{background:var(--crit);border-color:var(--crit);color:#fff;font-weight:600}
+  .mbtns button:hover{filter:brightness(1.1)}
 </style>
 </head>
 <body>
@@ -119,17 +155,10 @@
   <div class="scada" id="scada"></div>
 
   <div class="recovery" id="recovery" style="display:none">
-    <div class="rhead"><span class="t">Recovery window</span>
-      <span class="w" id="rwin"></span></div>
-    <div class="track" id="track">
-      <div class="wal" id="wal"></div>
-      <div class="tmark" id="tmark"></div>
-    </div>
+    <div class="rhead"><span class="t">Recovery window</span><span class="w" id="rwin"></span></div>
+    <div class="timeline" id="timeline"><div class="wal" id="wal"></div></div>
     <div class="tends"><span id="rstart"></span><span>now</span></div>
-    <div class="picker">
-      <label>PITR target <input type="datetime-local" id="pitr" step="1"></label>
-      <span class="hint" id="pitrhint">pick a point in the window, then Restore (Break-glass)</span>
-    </div>
+    <div class="rfoot" id="rfoot"></div>
   </div>
 
   <div class="tabs">
@@ -141,8 +170,38 @@
   <div class="log" id="log"><div class="line">— no actions yet —</div></div>
 </div>
 
+<!-- PITR restore modal -->
+<div class="scrim" id="scrim">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+    <h2 id="mtitle">Point-in-time restore</h2>
+    <div class="lede">Bootstraps a new recovery cluster from the object store. The live cluster is untouched.</div>
+    <label class="opt on" id="opt-latest">
+      <input type="radio" name="rmode" value="latest" checked>
+      <div><div class="ol">Latest recoverable point</div>
+        <div class="os">Replay all archived WAL — restore as close to now as possible.</div></div>
+    </label>
+    <label class="opt" id="opt-pit">
+      <input type="radio" name="rmode" value="pit">
+      <div style="flex:1"><div class="ol">Point in time</div>
+        <div class="os">Pick a moment inside the recoverable window.</div>
+        <div class="pit" id="pit">
+          <div class="timeline" id="mtimeline"><div class="wal" id="mwal"></div>
+            <div class="marker" id="mmarker"></div></div>
+          <div class="tends"><span id="mstart"></span><span>now</span></div>
+          <input type="range" id="slider" min="0" max="1000" value="1000">
+          <div class="read"><span class="big" id="seltime"></span><span class="ago" id="selago"></span></div>
+        </div>
+      </div>
+    </label>
+    <div class="mbtns">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="go" id="mgo" onclick="confirmRestore()">Restore</button>
+    </div>
+  </div>
+</div>
+
 <script>
-let TAB = "ops", CAPS = [], SNAP = {}, pitrTouched = false;
+let TAB = "ops", CAPS = [], SNAP = {};
 
 function pick(t){
   TAB = t;
@@ -159,26 +218,39 @@ function log(msg, ok){
   el.prepend(d);
 }
 
-async function act(a){
-  let params = null;
-  let confirmMsg = `${a.label} — this mutates a real cluster. Continue?`;
-  if(a.id === "restore"){
-    const pk = document.getElementById("pitr");
-    const iso = pk.value ? new Date(pk.value).toISOString() : "";
-    params = {target_time: iso};
-    confirmMsg = `Restore to ${iso ? new Date(iso).toLocaleString() : "the latest point"} — ` +
-      `bootstraps a new recovery cluster. Continue?`;
-  }
-  // chaos stays available during an operation, but asks for an ack (your call)
-  if(a.tab === "chaos" && SNAP.busy &&
-     !confirm(`An operation is in flight (${SNAP.busy_reason}). Fire ${a.label} anyway?`)) return;
-  if(a.destructive && !confirm(confirmMsg)) return;
+function ago(ms){
+  const s = Math.max(0, (Date.now()-ms)/1000);
+  if(s<60) return Math.round(s)+"s ago";
+  if(s<3600) return Math.round(s/60)+"m ago";
+  if(s<86400) return (s/3600).toFixed(1)+"h ago";
+  return Math.round(s/86400)+"d ago";
+}
+function fmtBytes(n){
+  if(n==null) return "n/a";
+  if(n<1024) return n+" B";
+  if(n<1048576) return (n/1024).toFixed(1)+" KB";
+  return (n/1048576).toFixed(1)+" MB";
+}
+function fmtStamp(s){
+  return (s && s.length>=14) ? `${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}` : (s||"");
+}
+
+async function post(id, params){
   try{
     const r = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({id:a.id, params})});
+      body: JSON.stringify({id, params})});
     const j = await r.json();
     log(j.ok ? j.message : j.error, j.ok);
   }catch(e){ log(String(e), false); }
+}
+
+function act(a){
+  // chaos stays available during an operation, but asks for an ack (your call)
+  if(a.tab === "chaos" && SNAP.busy && a.id!=="restore" &&
+     !confirm(`An operation is in flight (${SNAP.busy_reason}). Fire ${a.label} anyway?`)) return;
+  if(a.id === "restore"){ openModal(); return; }         // PITR gets its own interface
+  if(a.destructive && !confirm(`${a.label} — this mutates a real cluster. Continue?`)) return;
+  post(a.id, null);
 }
 
 function renderActions(){
@@ -195,14 +267,160 @@ function renderActions(){
 }
 
 function node(role, name, zone, cls, title){
-  return `<div class="node ${cls}"${title?` title="${title}"`:""}><div class="r">${role}</div>
+  return `<div class="node ${cls}"${title?` title="${esc(title)}"`:""}><div class="r">${role}</div>
     <div class="n">${name}</div><div class="z">${zone||""}</div></div>`;
 }
-function fmtBytes(n){
-  if(n==null) return "n/a";
-  if(n<1024) return n+" B";
-  if(n<1048576) return (n/1024).toFixed(1)+" KB";
-  return (n/1048576).toFixed(1)+" MB";
+function esc(s){ return String(s).replace(/"/g,"&quot;"); }
+
+// pg_stat_replication sync_state -> a clear sync/async badge
+function syncBadge(state){
+  const s = (state||"").toLowerCase();
+  if(s==="sync"||s==="quorum") return {cls:"sync", label:"SYNC"};
+  if(s==="async") return {cls:"async", label:"ASYNC"};
+  if(s==="potential") return {cls:"potential", label:"STANDBY"};
+  return {cls:"", label:""};
+}
+
+function renderTopology(s){
+  const scada = document.getElementById("scada");
+  const primary = (s.instances||[]).find(i=>i.role==="primary");
+  const replicas = (s.instances||[]).filter(i=>i!==primary);
+  const poolers = (s.poolers||[]).map(p=>node("pooler · "+p.type, p.name, "", "ok",
+    `PgBouncer pooler (${p.type}) — routes app traffic to the ${p.type==="ro"?"replicas":"primary"}`)).join("");
+  // replica nodes carry the edge state: sync vs async + replication lag
+  const reps = replicas.map(r=>{
+    const b = syncBadge(r.sync_state);
+    const lag = (r.lag_bytes!=null) ? fmtBytes(r.lag_bytes) : "";
+    const sub = [r.zone, lag && ("lag "+lag)].filter(Boolean).join(" · ");
+    const qual = (r.sync_state||"").toLowerCase()==="quorum" ? " (quorum candidate)" : "";
+    const title = `replica ${r.name} · ${b.label||"streaming?"}${qual} · lag ${lag||"n/a"} · `+
+      `zone ${r.zone||"—"} · ${r.healthy?"healthy":"unhealthy"}`;
+    return `<div class="node ${r.healthy?'ok':'bad'}" title="${esc(title)}">
+      <div class="r">replica ${b.label?`<span class="badge ${b.cls}">${b.label}</span>`:""}</div>
+      <div class="n">${r.name}</div><div class="z">${sub}</div></div>`;
+  }).join("");
+  // the client node carries the credential state: which blue/green role it uses
+  const cr = s.credentials||{};
+  const ctitle = `app authenticates as ${cr.active_role||"app"}` +
+    (cr.rotated_at ? ` · last rotated ${fmtStamp(cr.rotated_at)}` : " · initial credentials");
+  const client = `<div class="node ok" title="${esc(ctitle)}"><div class="r">client · app</div>
+    <div class="n">${cr.active_role||"app"}</div>
+    <div class="cr">${cr.rotated_at ? "set "+fmtStamp(cr.rotated_at) : "initial creds"}</div></div>`;
+  const pnode = primary
+    ? node("primary", primary.name, primary.zone, "primary",
+        `primary ${primary.name} · PostgreSQL ${s.version} · zone ${primary.zone||"—"}`)
+    : node("primary","—","","bad","no primary elected");
+  // the object store is part of the system — discover it and show where WAL/backups land
+  const os = s.object_store||{}, aw = s.archived_wal||{};
+  let store = "";
+  if(os.configured){
+    const segs = (aw.archived!=null) ? aw.archived+" WAL segs" : "WAL archive";
+    const stitle = `object store · s3://${os.bucket}/${os.path||""} @ ${os.endpoint||"?"} · `+
+      `${aw.archived!=null?aw.archived+" WAL segments archived":"archiving"}`+
+      `${aw.failed?` · ${aw.failed} failed`:""}${aw.last?` · last ${aw.last}`:""}`;
+    store = `<span class="arrow">→<small>WAL / backups</small></span>
+      <div class="col"><div class="node store" title="${esc(stitle)}">
+        <div class="r">object store${aw.failed?` <span class="badge potential">${aw.failed} FAIL</span>`:""}</div>
+        <div class="n">${os.bucket||"bucket"}</div><div class="z">${segs}</div></div></div>`;
+  }
+  scada.innerHTML = `
+    <div class="flow">
+      <div class="col">${client}</div>
+      <span class="arrow">→</span>
+      <div class="col">${poolers || node("pooler","—","","")}</div>
+      <span class="arrow">→</span>
+      <div class="col">${pnode}</div>
+      <span class="arrow">⇉<small>streaming</small></span>
+      <div class="col">${reps || node("replica","—","","")}</div>
+      ${store}
+    </div>`;
+}
+
+// draw the WAL band + backup ticks into a timeline element, given the window
+function drawTimeline(track, wal, t0, t1){
+  const span = (t1-t0)||1;
+  track.querySelectorAll(".tick").forEach(e=>e.remove());
+  (SNAP.backups||[]).filter(b=>b.phase==="completed"&&b.stoppedAt).forEach(b=>{
+    const ms = Date.parse(b.stoppedAt);
+    const pct = Math.max(0, Math.min(100, (ms-t0)/span*100));
+    const d = document.createElement("div"); d.className="tick"; d.style.left=pct+"%";
+    d.title = `base backup ${b.name}\n${new Date(ms).toLocaleString()} (${ago(ms)})\n`+
+      `WAL is continuous from here to now — PITR can land anywhere after this tick.`;
+    track.appendChild(d);
+  });
+  wal.title = `Recoverable via WAL: ${new Date(t0).toLocaleString()} → now`;
+}
+
+function renderRecovery(s){
+  const rec = document.getElementById("recovery");
+  const rp = s.recoverability_point;
+  if(!rp){ rec.style.display="none"; return; }   // no window until a backup completes
+  rec.style.display="block";
+  const t0 = Date.parse(rp), t1 = Date.now();
+  document.getElementById("rstart").textContent = new Date(t0).toLocaleString();
+  document.getElementById("rwin").textContent =
+    new Date(t0).toLocaleTimeString() + " → now · " + ago(t0).replace(" ago"," of coverage");
+  drawTimeline(document.getElementById("timeline"), document.getElementById("wal"), t0, t1);
+  const aw = s.archived_wal||{}, n = (s.backups||[]).filter(b=>b.phase==="completed").length;
+  document.getElementById("rfoot").innerHTML = [
+    `recoverable from <b>${ago(t0)}</b>`,
+    `<b>${n}</b> base backup${n===1?"":"s"}`,
+    aw.archived!=null?`<b>${aw.archived}</b> WAL segments archived`:"",
+    aw.failed?`<b style="color:var(--crit)">${aw.failed}</b> archive failures`:"",
+    aw.last?`last <b>${aw.last}</b>`:"",
+    `▽ = base backup · shaded band = restorable to any point`,
+  ].filter(Boolean).join("&nbsp;·&nbsp;");
+}
+
+/* ---- PITR restore modal ---- */
+let MODE = "latest";
+function openModal(){
+  if(!SNAP.recoverability_point){ log("no recovery window yet", false); return; }
+  MODE = "latest";
+  document.querySelector('input[name=rmode][value=latest]').checked = true;
+  syncModeUI();
+  const t0 = Date.parse(SNAP.recoverability_point), t1 = Date.now();
+  document.getElementById("mstart").textContent = new Date(t0).toLocaleTimeString();
+  drawTimeline(document.getElementById("mtimeline"), document.getElementById("mwal"), t0, t1);
+  const sl = document.getElementById("slider"); sl.value = 1000; updateSlider();
+  document.getElementById("scrim").classList.add("on");
+}
+function closeModal(){ document.getElementById("scrim").classList.remove("on"); }
+
+function syncModeUI(){
+  MODE = document.querySelector('input[name=rmode]:checked').value;
+  document.getElementById("opt-latest").classList.toggle("on", MODE==="latest");
+  document.getElementById("opt-pit").classList.toggle("on", MODE==="pit");
+  document.getElementById("pit").classList.toggle("on", MODE==="pit");
+}
+function sliderTime(){
+  const t0 = Date.parse(SNAP.recoverability_point), t1 = Date.now();
+  const f = +document.getElementById("slider").value / 1000;
+  return t0 + (t1-t0)*f;
+}
+function updateSlider(){
+  const t = sliderTime(), t0 = Date.parse(SNAP.recoverability_point), t1 = Date.now();
+  const pct = (t-t0)/((t1-t0)||1)*100;
+  document.getElementById("mmarker").style.left = pct+"%";
+  document.getElementById("seltime").textContent = new Date(t).toLocaleString();
+  const near = (t1-t)<1500;
+  document.getElementById("selago").textContent = near ? "now (latest)" : ago(t);
+}
+document.addEventListener("change", e=>{ if(e.target.name==="rmode") syncModeUI(); });
+document.addEventListener("input", e=>{ if(e.target.id==="slider"){
+  document.querySelector('input[name=rmode][value=pit]').checked = true; syncModeUI(); updateSlider();
+}});
+
+function confirmRestore(){
+  let target = "", label = "the latest recoverable point";
+  if(MODE==="pit"){
+    const t = sliderTime();
+    if((Date.now()-t) < 1500){ target=""; }         // slid to the far right → latest
+    else { target = new Date(t).toISOString(); label = new Date(t).toLocaleString()+" ("+ago(t)+")"; }
+  }
+  closeModal();
+  if(!confirm(`Restore to ${label} — bootstraps a new recovery cluster. Continue?`)) return;
+  post("restore", {target_time: target});
 }
 
 function renderStatus(s){
@@ -213,93 +431,6 @@ function renderStatus(s){
   }).join("");
   el.innerHTML = (s.phase ? `<span class="phase">▸ ${s.phase}</span>` : "") + bks;
 }
-
-function fmtStamp(s){
-  return (s && s.length>=14) ? `${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}` : (s||"");
-}
-
-function renderTopology(s){
-  const scada = document.getElementById("scada");
-  const primary = (s.instances||[]).find(i=>i.role==="primary");
-  const replicas = (s.instances||[]).filter(i=>i!==primary);
-  const poolers = (s.poolers||[]).map(p=>node("pooler · "+p.type, p.name, "", "ok",
-    `PgBouncer pooler (${p.type}) — routes app traffic to the ${p.type==="ro"?"replicas":"primary"}`)).join("");
-  // replica nodes carry the edge state: sync mode + replication lag
-  const reps = replicas.map(r=>{
-    const sync = r.sync_state||"";
-    const lag = (r.lag_bytes!=null) ? fmtBytes(r.lag_bytes) : "";
-    const sub = [r.zone, lag && ("lag "+lag)].filter(Boolean).join(" · ");
-    const title = `replica ${r.name} · ${sync||"streaming?"} · lag ${lag||"n/a"} · `+
-      `zone ${r.zone||"—"} · ${r.healthy?"healthy":"unhealthy"}`;
-    return `<div class="node ${r.healthy?'ok':'bad'}" title="${title}">
-      <div class="r">replica${sync?" · "+sync:""}</div><div class="n">${r.name}</div>
-      <div class="z">${sub}</div></div>`;
-  }).join("");
-  // the client node carries the credential state: which blue/green role it uses
-  const cr = s.credentials||{};
-  const ctitle = `app authenticates as ${cr.active_role||"app"}` +
-    (cr.rotated_at ? ` · last rotated ${fmtStamp(cr.rotated_at)}` : " · initial credentials");
-  const client = `<div class="node ok" title="${ctitle}"><div class="r">client · app</div>
-    <div class="n">${cr.active_role||"app"}</div>
-    <div class="cr">${cr.rotated_at ? "set "+fmtStamp(cr.rotated_at) : "initial creds"}</div></div>`;
-  const pnode = primary
-    ? node("primary", primary.name, primary.zone, "primary",
-        `primary ${primary.name} · PostgreSQL ${s.version} · zone ${primary.zone||"—"}`)
-    : node("primary","—","","bad","no primary elected");
-  scada.innerHTML = `
-    <div class="flow">
-      <div class="col">${client}</div>
-      <span class="arrow">→</span>
-      <div class="col">${poolers || node("pooler","—","","")}</div>
-      <span class="arrow">→</span>
-      <div class="col">${pnode}</div>
-      <span class="arrow">⇉</span>
-      <div class="col">${reps || node("replica","—","","")}</div>
-    </div>`;
-}
-
-function renderRecovery(s){
-  const rec = document.getElementById("recovery");
-  const rp = s.recoverability_point;
-  if(!rp){ rec.style.display="none"; return; }   // no window until a backup completes
-  rec.style.display="block";
-  const t0 = Date.parse(rp), t1 = Date.now(), span = (t1-t0)||1;
-  document.getElementById("rstart").textContent = new Date(t0).toLocaleString();
-  document.getElementById("rwin").textContent =
-    "WAL " + new Date(t0).toLocaleTimeString() + " → now";
-  // the WAL-covered (recoverable) area: the whole span from the earliest
-  // recoverable point to now. PITR can land anywhere in here.
-  const wal = document.getElementById("wal");
-  wal.style.left = "0"; wal.style.width = "100%";
-  wal.title = `Recoverable via WAL: ${new Date(t0).toLocaleString()} → now — `+
-    `PITR can restore to any point in this window.`;
-  const track = document.getElementById("track");
-  track.querySelectorAll(".tick").forEach(e=>e.remove());
-  (s.backups||[]).filter(b=>b.phase==="completed"&&b.stoppedAt).forEach(b=>{
-    const pct = Math.max(0, Math.min(100, (Date.parse(b.stoppedAt)-t0)/span*100));
-    const d = document.createElement("div"); d.className="tick"; d.style.left=pct+"%";
-    d.title = `base backup ${b.name} — completed ${new Date(b.stoppedAt).toLocaleString()}. `+
-      `WAL covers forward from here to now.`;
-    track.appendChild(d);
-  });
-  const local = ms => { const d=new Date(ms - new Date().getTimezoneOffset()*60000);
-    return d.toISOString().slice(0,19); };
-  const pk = document.getElementById("pitr");
-  pk.min = local(t0); pk.max = local(t1);
-  if(!pitrTouched) pk.value = local(t1);   // track "now" until the user picks a time
-  updateTmark();
-}
-
-function updateTmark(){
-  const rp = SNAP.recoverability_point; if(!rp) return;
-  const t0 = Date.parse(rp), t1 = Date.now(), span=(t1-t0)||1;
-  const pk = document.getElementById("pitr");
-  const t = pk.value ? Date.parse(pk.value) : t1;
-  const tm = document.getElementById("tmark");
-  tm.style.left = Math.max(0, Math.min(100, (t-t0)/span*100)) + "%";
-  tm.title = `PITR target: ${new Date(t).toLocaleString()}`;
-}
-document.addEventListener("input", e=>{ if(e.target.id==="pitr"){ pitrTouched=true; updateTmark(); } });
 
 function render(data){
   const err = document.getElementById("err");

@@ -69,6 +69,22 @@ def test_snapshot_drives_the_capability_map_end_to_end():
     assert caps["kill-primary"] is False   # a partition fault is in flight → interlock
 
 
+def test_object_store_parses_bucket_path_and_endpoint():
+    from k8ostester_pg.discover import _object_store
+    os = _object_store({"backup": {"barmanObjectStore": {
+        "destinationPath": "s3://pgbackups/pg", "endpointURL": "http://seaweedfs:8333"}}})
+    assert os == {"configured": True, "endpoint": "http://seaweedfs:8333",
+                  "bucket": "pgbackups", "path": "pg"}
+    assert _object_store({})["configured"] is False   # no backup stanza → not configured
+
+
+def test_parse_archiver_reads_segment_counts():
+    from k8ostester_pg.discover import _parse_archiver
+    assert _parse_archiver("42|000000010000000000000009|0") == {
+        "archived": 42, "last": "000000010000000000000009", "failed": 0}
+    assert _parse_archiver("") == {}
+
+
 def test_parse_replication_maps_standby_to_sync_and_lag():
     from k8ostester_pg.discover import _parse_replication
     r = _parse_replication("pg-2|quorum|0\npg-3|async|8192\n")

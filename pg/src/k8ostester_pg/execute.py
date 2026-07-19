@@ -46,9 +46,13 @@ def _partition_primary(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str)
 
 
 def _kill_replica(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
-    replica = s["replicas"][0]
-    chaos.kill_pod(k8s, ns, replica)
-    return f"killed replica {replica}"
+    replicas = s.get("replicas", [])
+    # honour an explicit choice if it's actually a current replica, else the first
+    pod = p.get("pod") if p.get("pod") in replicas else (replicas[0] if replicas else "")
+    if not pod:
+        raise ActionDenied("no replica to kill")
+    chaos.kill_pod(k8s, ns, pod)
+    return f"killed replica {pod}"
 
 
 def _backup(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:

@@ -25,6 +25,15 @@ def test_partition_and_kill_replica_wired():
     execute(k8s, "ns", "partition-primary", snap())
     k8s.networking.create_namespaced_network_policy.assert_called_once()
     execute(k8s, "ns", "kill-replica", snap())
+    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-2"   # first by default
+
+
+def test_kill_replica_honours_an_explicit_pod():
+    k8s = MagicMock()
+    execute(k8s, "ns", "kill-replica", snap(), params={"pod": "pg-3"})
+    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-3"
+    # an unknown pod falls back to the first replica (can't kill what isn't a replica)
+    execute(k8s, "ns", "kill-replica", snap(), params={"pod": "nope"})
     assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-2"
 
 

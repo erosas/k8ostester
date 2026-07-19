@@ -191,6 +191,34 @@
   .mbtns .go{background:var(--crit);border-color:var(--crit);color:#fff;font-weight:600}
   .mbtns button:hover{filter:brightness(1.1)}
 
+  /* detail sheet (connect / credentials / pick a replica) */
+  .sheet{max-height:86vh;overflow-y:auto}
+  .sheet .sec{margin:16px 0}
+  .sheet .sec h3{font-size:11px;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;
+    color:var(--accent);margin:0 0 9px}
+  .sheet .kv{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.75}
+  .sheet .kv b{color:var(--ink)}
+  .ep{display:grid;grid-template-columns:64px 1fr;gap:2px 12px;font-family:var(--mono);font-size:11.5px;
+    padding:7px 0;border-top:1px solid var(--border)}
+  .ep .tag{color:var(--accent)} .ep .host{color:var(--ink);word-break:break-all}
+  .ep .desc{grid-column:2;color:var(--dim);font-size:10.5px}
+  .code{display:flex;align-items:center;gap:10px;background:#05080c;border:1px solid var(--border);
+    border-radius:7px;padding:8px 11px;margin:6px 0;overflow-x:auto}
+  .code code{white-space:pre;color:var(--ink);flex:1;font-family:var(--mono);font-size:11.5px}
+  .code .cpy{cursor:pointer;color:var(--accent);white-space:nowrap;border:1px solid var(--border);
+    border-radius:5px;padding:2px 9px;font-family:var(--mono);font-size:10.5px}
+  .code .cpy:hover{border-color:var(--accent)}
+  .pickrow{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--border);
+    border-radius:9px;margin-bottom:8px;cursor:pointer;font-family:var(--mono);font-size:12.5px}
+  .pickrow:hover{border-color:var(--crit);background:var(--panel2)}
+  .node.link{cursor:pointer}
+  .node.link:hover{border-color:var(--accent)}
+  /* builder presets */
+  .bpre{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+  .bpre button{font-family:var(--mono);font-size:12px;padding:7px 14px;border-radius:20px;
+    border:1px solid var(--border);background:var(--panel2);color:var(--muted);cursor:pointer}
+  .bpre button:hover{border-color:var(--accent);color:var(--ink)}
+
   /* custom tooltip — reliable and multi-line, unlike native title on thin ticks */
   #tip{position:fixed;z-index:50;display:none;max-width:320px;pointer-events:none;
     background:#05080c;border:1px solid var(--border);border-left:3px solid var(--accent);
@@ -247,6 +275,12 @@
       (e.g. an AWS EBS gp3 class). You can <b>never shrink</b> it, and EBS limits growth to once every ~6h
       per volume. Pick a comfortable starting size. Everything else here can be changed after deploy.
     </div>
+    <div class="bpre">
+      <button onclick="preset('reference')">Reference HA</button>
+      <button onclick="preset('readheavy')">Read-heavy</button>
+      <button onclick="preset('dev')">Dev / minimal</button>
+      <button onclick="preset('durable')">Durable / archival</button>
+    </div>
     <div class="bgrid">
       <label>Cluster name<input id="b-name" value="pg"></label>
       <label>PostgreSQL version<input id="b-version" value="16.6"></label>
@@ -290,6 +324,9 @@
 </div>
 
 <div id="tip"></div>
+
+<!-- generic detail sheet: connect / credentials / pick a replica -->
+<div class="scrim" id="mscrim"><div class="modal sheet" id="mbox" role="dialog" aria-modal="true"></div></div>
 
 <!-- PITR restore modal -->
 <div class="scrim" id="scrim">
@@ -368,6 +405,118 @@ async function loadClusters(context, preselect){
     }).join("");
   }catch(e){ sel.innerHTML = `<option value="">— error —</option>`; }
 }
+/* ---- detail sheet: connect / credentials / pick a replica ---- */
+function openSheet(html){ document.getElementById("mbox").innerHTML = html;
+  document.getElementById("mscrim").classList.add("on"); }
+function closeSheet(){ document.getElementById("mscrim").classList.remove("on"); }
+function codeRow(str){
+  return `<div class="code"><code>${esch(str)}</code>`+
+    `<span class="cpy" data-copy="${esch(str)}">copy</span></div>`;
+}
+// unified click delegation: copy buttons, backdrops, node links, replica pick rows
+document.addEventListener("click", e=>{
+  const cpy = e.target.closest(".cpy");
+  if(cpy && cpy.dataset.copy!=null){
+    navigator.clipboard.writeText(cpy.dataset.copy);
+    const t = cpy.textContent; cpy.textContent="copied ✓"; setTimeout(()=>cpy.textContent=t, 1000); return;
+  }
+  if(e.target.closest("[data-close]")){ closeSheet(); return; }
+  const pr = e.target.closest(".pickrow");
+  if(pr){ const pod=pr.dataset.pod; closeSheet(); post("kill-replica",{pod},"Kill replica "+pod); return; }
+  if(e.target.closest(".node.link")){ openConnect(); return; }
+  const sc = e.target.closest(".scrim");
+  if(sc && e.target===sc){ sc.id==="scrim" ? closeModal() : closeSheet(); }   // backdrop
+});
+
+function svcHost(sub){ return `${sub}.${SNAP.namespace}.svc.cluster.local`; }
+function openConnect(){
+  if(!SNAP.cluster) return;
+  const c=SNAP.cluster, ns=SNAP.namespace, db=(SNAP.database||{}).name||"app";
+  const cr=SNAP.credentials||{}, roles=SNAP.login_roles||[];
+  const active = cr.active_role || (roles[0] && roles[0].name) || "app";
+  const secretFor = r => { const m=roles.find(x=>x.name===r); return m ? m.secret : (c+"-app"); };
+  const appSecret = secretFor(active);
+  const rw=svcHost(c+"-rw"), ro=svcHost(c+"-ro"), any=svcHost(c+"-r");
+  const poolers=(SNAP.poolers||[]).map(p=>({...p, host:svcHost(p.name)}));
+  const rwPool=poolers.find(p=>p.type==="rw");
+  const appHost = rwPool ? rwPool.host : rw;
+  const uri=`postgresql://${active}@${appHost}:5432/${db}`;
+  const psql=`psql "host=${appHost} port=5432 dbname=${db} user=${active}"`;
+  const jdbc=`jdbc:postgresql://${appHost}:5432/${db}`;
+  const getpw=`kubectl -n ${ns} get secret ${appSecret} -o jsonpath='{.data.password}' | base64 -d`;
+  const eps=[["rw",rw,"writes → current primary"],["ro",ro,"reads → replicas (balanced)"],
+    ["r",any,"any instance"]].concat(poolers.map(p=>
+    [p.type==="rw"?"pool-rw":"pool-ro", p.host, `PgBouncer pooler (${p.type}) — recommended for apps`]));
+  const epHtml=eps.map(([t,h,d])=>`<div class="ep"><span class="tag">${t}</span>`+
+    `<span class="host">${esch(h)}:5432</span><span class="desc">${esch(d)}</span></div>`).join("");
+  const rolesHtml = roles.length
+    ? roles.map(r=>`<div class="kv">${r.name===active?"● ":"○ "}<b>${esch(r.name)}</b> — secret `+
+        `<b>${esch(r.secret||"—")}</b>${r.name===active?" · active":""}`+
+        `${(r.in_roles||[]).length?` · member of ${esch(r.in_roles.join(", "))}`:""}</div>`).join("")
+    : `<div class="kv">app user <b>${esch(active)}</b> — secret <b>${esch(appSecret)}</b></div>`;
+  const rot = SNAP.blue_green
+    ? `<div class="kv" style="margin-top:8px">Blue/green rotation: the <b>idle</b> role's password is `+
+      `refreshed, the app selector flips to it, then the app rolls — both roles stay valid throughout, `+
+      `so no failed auth. Active <b>${esch(active)}</b>${cr.rotated_at?`, last rotated ${fmtStamp(cr.rotated_at)}`:""}.</div>`
+    : "";
+  openSheet(`<h2>Connect to ${esch(c)}</h2>
+    <div class="lede">Endpoints, credentials and ready-to-use connection strings for this cluster.</div>
+    <div class="sec"><h3>Endpoints (all :5432)</h3>${epHtml}</div>
+    <div class="sec"><h3>Database &amp; credentials</h3>
+      <div class="kv">database <b>${esch(db)}</b> · owner <b>${esch((SNAP.database||{}).owner||"app")}</b></div>
+      ${rolesHtml}${rot}
+      <div style="margin-top:8px">${codeRow(getpw)}</div></div>
+    <div class="sec"><h3>Connect as ${esch(active)}${rwPool?" (via pooler)":""}</h3>
+      ${codeRow(uri)}${codeRow(psql)}${codeRow(jdbc)}
+      <div class="kv" style="margin-top:6px">For read-only queries use host <b>${esch(ro)}</b>`+
+      `${poolers.some(p=>p.type==="ro")?" or the ro pooler":""}.</div></div>
+    <div class="mbtns"><button data-close>Close</button></div>`);
+}
+
+function replicaPicker(){
+  const reps=SNAP.replicas||[];
+  if(reps.length===0) return;
+  if(reps.length===1){
+    if(SNAP.busy && !confirm(`An operation is in flight (${SNAP.busy_reason}). Kill ${reps[0]} anyway?`)) return;
+    if(confirm(`Kill replica ${reps[0]}? CNPG reschedules it; the primary is unaffected.`))
+      post("kill-replica",{pod:reps[0]},"Kill replica "+reps[0]);
+    return;
+  }
+  const rows=reps.map(r=>{
+    const i=(SNAP.instances||[]).find(x=>x.name===r)||{};
+    const b=syncBadge(i.sync_state);
+    return `<div class="pickrow" data-pod="${esch(r)}"><b>${esch(r)}</b>`+
+      `<span style="color:var(--muted)">${b.label||"replica"} · ${i.zone||i.node||"—"}`+
+      `${i.lag_bytes!=null?" · lag "+fmtBytes(i.lag_bytes):""}</span></div>`;
+  }).join("");
+  openSheet(`<h2>Kill which replica?</h2>
+    <div class="lede">Deletes the pod; CNPG reschedules it. The primary is unaffected.</div>
+    ${rows}<div class="mbtns"><button data-close>Cancel</button></div>`);
+}
+
+/* ---- builder presets ---- */
+const PRESETS = {
+  reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",sync:"quorum",pooler:true,
+    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *"},
+  readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",sync:"quorum",pooler:true,
+    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *"},
+  dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",sync:"async",pooler:false,
+    pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *"},
+  durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",sync:"quorum",pooler:true,
+    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *"},
+};
+function preset(k){
+  const p=PRESETS[k]; if(!p) return;
+  const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
+  const chk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=v; };
+  set("b-name",p.name); set("b-version",p.version); set("b-instances",p.instances);
+  set("b-storage",p.storage); set("b-sync",p.sync);
+  chk("b-pooler",p.pooler); set("b-pooler-instances",p.pooler_instances);
+  chk("b-backups",p.backups); set("b-retention",p.retention);
+  chk("b-schedule",p.schedule); set("b-schedule-cron",p.schedule_cron);
+  generateManifest();
+}
+
 async function onContext(){ await loadClusters(document.getElementById("ctx-sel").value, null); }
 async function onCluster(){
   const v = document.getElementById("cl-sel").value;
@@ -450,6 +599,7 @@ async function post(id, params, label){
 }
 
 function act(a){
+  if(a.id === "kill-replica"){ replicaPicker(); return; }  // picker confirms per-replica
   // chaos stays available during an operation, but asks for an ack (your call)
   if(a.tab === "chaos" && SNAP.busy && a.id!=="restore" &&
      !confirm(`An operation is in flight (${SNAP.busy_reason}). Fire ${a.label} anyway?`)) return;
@@ -534,8 +684,9 @@ function renderTopology(s){
   const scada = document.getElementById("scada");
   const primary = (s.instances||[]).find(i=>i.role==="primary");
   const replicas = (s.instances||[]).filter(i=>i!==primary);
-  const poolers = (s.poolers||[]).map(p=>node("pooler · "+p.type, p.name, "", "ok",
-    `PgBouncer pooler (${p.type}) — routes app traffic to the ${p.type==="ro"?"replicas":"primary"}`)).join("");
+  const poolers = (s.poolers||[]).map(p=>node("pooler · "+p.type, p.name, "", "ok link",
+    `PgBouncer pooler (${p.type}) — routes app traffic to the ${p.type==="ro"?"replicas":"primary"}\n`+
+    `${p.name}.${s.namespace}.svc:5432\nclick to connect`)).join("");
   // replica nodes carry the edge state: sync vs async + replication lag, plus
   // disk headroom and physical placement
   const reps = replicas.map(r=>{
@@ -545,16 +696,17 @@ function renderTopology(s){
     const qual = (r.sync_state||"").toLowerCase()==="quorum" ? " (quorum candidate)" : "";
     const tip = `replica ${r.name}\n${b.label||"streaming?"}${qual}\nlag ${lag||"n/a"}\n`+
       `node ${r.node||"—"} / zone ${r.zone||"—"}\n${diskLine(r.name)||"disk n/a"}\n`+
-      `${r.healthy?"healthy":"unhealthy"}`;
-    return `<div class="node ${r.healthy?'ok':'bad'}" data-tip="${esc(tip)}">
+      `reads via ${s.cluster}-ro.${s.namespace}.svc:5432\n${r.healthy?"healthy":"unhealthy"} · click to connect`;
+    return `<div class="node link ${r.healthy?'ok':'bad'}" data-tip="${esc(tip)}">
       <div class="r">replica ${b.label?`<span class="badge ${b.cls}">${b.label}</span>`:""}</div>
       <div class="n">${r.name}</div><div class="z">${sub}</div></div>`;
   }).join("");
   // the client node carries the credential state: which blue/green role it uses
   const cr = s.credentials||{};
   const ctip = `app authenticates as ${cr.active_role||"app"}\n` +
-    (cr.rotated_at ? `last rotated ${fmtStamp(cr.rotated_at)}` : "initial credentials");
-  const client = `<div class="node ok" data-tip="${esc(ctip)}"><div class="r">client · app</div>
+    (cr.rotated_at ? `last rotated ${fmtStamp(cr.rotated_at)}\n` : "initial credentials\n") +
+    `click for endpoints, credentials & connection strings`;
+  const client = `<div class="node link ok" data-tip="${esc(ctip)}"><div class="r">client · app</div>
     <div class="n">${cr.active_role||"app"}</div>
     <div class="cr">${cr.rotated_at ? "set "+fmtStamp(cr.rotated_at) : "initial creds"}</div></div>`;
   const sp = s.sync_policy||{};
@@ -563,8 +715,8 @@ function renderTopology(s){
     const psub = [placeLabel(primary), diskSpan(primary.name)].filter(Boolean).join(" · ");
     const ptip = `primary ${primary.name}\nPostgreSQL ${s.version}\n`+
       `node ${primary.node||"—"} / zone ${primary.zone||"—"}\n${diskLine(primary.name)||"disk n/a"}\n`+
-      `sync policy: ${sp.label||"?"}`;
-    pnode = `<div class="node primary" data-tip="${esc(ptip)}"><div class="r">primary</div>
+      `sync policy: ${sp.label||"?"}\nwrites via ${s.cluster}-rw.${s.namespace}.svc:5432\nclick to connect`;
+    pnode = `<div class="node link primary" data-tip="${esc(ptip)}"><div class="r">primary</div>
       <div class="n">${primary.name}</div><div class="z">${psub}</div></div>`;
   } else {
     pnode = node("primary","—","","bad","no primary elected");

@@ -76,6 +76,19 @@ def test_snapshot_drives_the_capability_map_end_to_end():
     assert caps["kill-primary"] is False   # a partition fault is in flight → interlock
 
 
+def test_database_and_login_roles_for_connection_info():
+    from k8ostester_pg.discover import _database, _login_roles
+    spec = {"bootstrap": {"initdb": {"database": "orders", "owner": "app"}},
+            "managed": {"roles": [
+                {"name": "app_a", "login": True, "passwordSecret": {"name": "cred-a"},
+                 "inRoles": ["app"]},
+                {"name": "reporting", "login": False}]}}   # non-login role excluded
+    assert _database(spec) == {"name": "orders", "owner": "app"}
+    assert _login_roles(spec) == [
+        {"name": "app_a", "secret": "cred-a", "in_roles": ["app"]}]
+    assert _database({}) == {"name": "app", "owner": "app"}   # CNPG defaults
+
+
 def test_sync_policy_reads_quorum_priority_and_async():
     from k8ostester_pg.discover import _sync_policy
     assert _sync_policy({"postgresql": {"synchronous": {"method": "any", "number": 1}}}) == {

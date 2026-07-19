@@ -90,6 +90,8 @@ def build_snapshot(
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
         "blue_green": "app_a" in managed and "app_b" in managed,
+        "database": _database(spec),                # app db + owner, for connection info
+        "login_roles": _login_roles(spec),          # role -> secret, for credential view
         "archiving": _condition(conditions, "ContinuousArchiving"),  # WAL archive health
         "sync_policy": _sync_policy(spec),     # quorum/priority synchronous config
         "object_store": _object_store(spec),   # where backups/WAL go (part of the system)
@@ -97,6 +99,26 @@ def build_snapshot(
         "busy": bool(reason),           # exclusivity: a mutating op is in progress
         "busy_reason": reason,
     }
+
+
+def _database(spec: dict) -> dict:
+    """The application database + owner a client connects to (CNPG bootstrap)."""
+    initdb = spec.get("bootstrap", {}).get("initdb", {})
+    return {"name": initdb.get("database", "app"), "owner": initdb.get("owner", "app")}
+
+
+def _login_roles(spec: dict) -> list[dict]:
+    """Managed login roles and the secret each password comes from — the material
+    a client needs, and what the credential view explores."""
+    out = []
+    for r in spec.get("managed", {}).get("roles", []):
+        if r.get("login"):
+            out.append({
+                "name": r.get("name", ""),
+                "secret": r.get("passwordSecret", {}).get("name", ""),
+                "in_roles": r.get("inRoles", []),
+            })
+    return out
 
 
 def _condition(conditions: dict, name: str) -> dict:

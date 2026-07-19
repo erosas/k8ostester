@@ -30,6 +30,7 @@
     display:flex;align-items:center;gap:7px;color:var(--muted);text-transform:uppercase}
   .dot{width:6px;height:6px;border-radius:1px;background:var(--dim)}
   .dot.live{background:var(--ok)}
+  .dot.stale{background:var(--warn)}
   .meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin:14px 0 22px;
     display:flex;gap:8px 10px;flex-wrap:wrap}
   .chip{border:1px solid var(--border);background:var(--panel2);padding:5px 10px;border-radius:6px}
@@ -1200,13 +1201,20 @@ function slotChip(slots){
   return `<span class="chip" title="all replication slots active">slots <b>${slots.length}/${slots.length}</b> active</span>`;
 }
 
+function setConn(state){   // live | stale | reconnecting — tracks DATA health, not just the socket
+  const dot = document.getElementById("dot"), txt = document.getElementById("conntxt");
+  dot.className = "dot" + (state==="live" ? " live" : state==="stale" ? " stale" : "");
+  txt.textContent = state==="reconnecting" ? "reconnecting…" : state;
+  txt.style.color = state==="stale" ? "var(--warn)" : "";
+}
 function render(data){
   const err = document.getElementById("err");
-  if(data.unselected){ UNSEL = true; err.style.display="none";
+  if(data.unselected){ UNSEL = true; err.style.display="none"; setConn("live");
     document.getElementById("title").textContent = "CNPG clusters"; applyLayout(); return; }
-  if(data.warming){ return; }   // a selection is warming up; the next tick has the snapshot
-  if(data.error){ err.style.display="block"; err.textContent = "discovery: "+data.error; return; }
-  err.style.display="none";
+  if(data.warming){ setConn("live"); return; }   // selection warming up; next tick has the snapshot
+  if(data.error){   // socket's up but discovery is failing — the snapshot is stale
+    err.style.display="block"; err.textContent = "discovery: "+data.error; setConn("stale"); return; }
+  err.style.display="none"; setConn("live");
   UNSEL = false;
   SNAP = data.snapshot; CAPS = data.capabilities;
   applyLayout();
@@ -1279,15 +1287,8 @@ document.addEventListener("change", e=>{ if(e.target.id && e.target.id.startsWit
 loadContexts();          // populate the context + cluster pickers
 
 const es = new EventSource("/api/stream");
-es.onmessage = e => {
-  document.getElementById("dot").classList.add("live");
-  document.getElementById("conntxt").textContent = "live";
-  render(JSON.parse(e.data));
-};
-es.onerror = () => {
-  document.getElementById("dot").classList.remove("live");
-  document.getElementById("conntxt").textContent = "reconnecting…";
-};
+es.onmessage = e => render(JSON.parse(e.data));   // render() sets live/stale from the payload
+es.onerror = () => setConn("reconnecting");       // socket itself dropped
 </script>
 </body>
 </html>

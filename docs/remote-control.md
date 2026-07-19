@@ -1,9 +1,15 @@
 # Remote-control console — design
 
-Status: **building.** The capability model (the core idea below) is implemented
-and unit-tested — `kernel/control.py` (generic) + `pg/control.py` (the 8 CNPG
-Ops/Chaos actions). Next: discovery (snapshot builder), the SSE server + action
-executor, and the web UI.
+Status: **walking skeleton working.** End to end: `kernel/control.py` (capability
+model) + `pg/control.py` (8 CNPG actions) + `pg/discover.py` (state snapshot +
+topology) + `pg/execute.py` (gated executor, chaos + backup wired) + `pg/server.py`
+(stdlib SSE server) + `pg/console.html` (the SPA: live SCADA topology, Ops/Chaos
+tabs, capability-gated buttons, destructive confirmation). Run it:
+
+    uv run python -m k8ostester_pg.server --context <ctx> --namespace <ns> --target 16.6
+
+Remaining: the multi-step ops handlers (rotate/upgrade/restore — extract from
+pg/testbed/flow.py) and richer topology (pooler routing, replication lag).
 
 A web control plane for a live cluster: connect over a kubeconfig, **discover**
 its state, and drive both **ops** (backups, PITR restore, credential rotation,

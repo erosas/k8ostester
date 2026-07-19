@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>k8ostester console</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#0a0e13; --panel:#111823; --panel2:#0d131c; --border:#1c2732;
+    --ink:#d5dfe8; --muted:#75838f; --dim:#4a5763;
+    --accent:#33d1d6; --ok:#46c98b; --warn:#e2b23f; --crit:#e5484d; --blue:#4a9eff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  header{display:flex;align-items:baseline;gap:14px 22px;flex-wrap:wrap;
+    padding-bottom:16px;border-bottom:1px solid var(--border)}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--accent)}
+  h1{margin:2px 0 0;font-size:22px;font-weight:600}
+  .conn{margin-left:auto;font-family:var(--mono);font-size:12px;display:flex;
+    align-items:center;gap:7px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .dot.live{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin:14px 0 22px;
+    display:flex;gap:8px 10px;flex-wrap:wrap}
+  .chip{border:1px solid var(--border);background:var(--panel2);padding:5px 10px;border-radius:6px}
+  .chip b{color:var(--ink)}
+  .err{background:#2a1416;border:1px solid #5a2327;color:#f2a1a4;padding:10px 14px;
+    border-radius:8px;font-family:var(--mono);font-size:12.5px;margin-bottom:18px;display:none}
+
+  /* SCADA topology */
+  .scada{border:1px solid var(--border);border-radius:12px;padding:18px 16px;
+    background:linear-gradient(180deg,var(--panel),var(--panel2));margin-bottom:20px;
+    display:flex;align-items:center;gap:8px;overflow-x:auto}
+  .flow{display:flex;align-items:center;gap:8px}
+  .col{display:flex;flex-direction:column;gap:8px}
+  .arrow{color:var(--dim);font-size:20px;padding:0 4px}
+  .node{border:1px solid var(--border);border-left:3px solid var(--dim);border-radius:8px;
+    padding:9px 12px;min-width:130px;background:var(--panel2)}
+  .node.ok{border-left-color:var(--ok)} .node.bad{border-left-color:var(--crit)}
+  .node.primary{border-left-color:var(--blue)}
+  .node .r{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--muted)}
+  .node .n{font-weight:600;font-size:14px}
+  .node .z{font-family:var(--mono);font-size:11px;color:var(--dim)}
+
+  .tabs{display:flex;gap:6px;margin-bottom:14px}
+  .tab{font-family:var(--mono);font-size:13px;padding:8px 16px;border:1px solid var(--border);
+    border-radius:8px 8px 0 0;background:var(--panel2);color:var(--muted);cursor:pointer}
+  .tab.on{color:var(--ink);border-bottom-color:transparent;background:var(--panel)}
+  .actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+  button.act{font-family:var(--sans);font-size:14px;text-align:left;padding:12px 14px;
+    border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);
+    cursor:pointer;display:flex;flex-direction:column;gap:3px;transition:border-color .12s}
+  button.act:hover:not(:disabled){border-color:var(--accent)}
+  button.act:disabled{opacity:.4;cursor:not-allowed}
+  button.act.destructive{border-left:3px solid var(--crit)}
+  button.act .sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  button.act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .log{margin-top:22px;border-top:1px solid var(--border);padding-top:14px;
+    font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+  .log .line{padding:3px 0}
+  .log .ok{color:var(--ok)} .log .fail{color:var(--crit)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">k8ostester · remote control</div>
+      <h1 id="title">CNPG cluster</h1>
+    </div>
+    <div class="conn"><span class="dot" id="dot"></span><span id="conntxt">connecting…</span></div>
+  </header>
+
+  <div class="meta" id="meta"></div>
+  <div class="err" id="err"></div>
+
+  <div class="scada" id="scada"></div>
+
+  <div class="tabs">
+    <div class="tab on" data-tab="ops" onclick="pick('ops')">Ops</div>
+    <div class="tab" data-tab="chaos" onclick="pick('chaos')">Chaos</div>
+  </div>
+  <div class="actions" id="actions"></div>
+
+  <div class="log" id="log"><div class="line">— no actions yet —</div></div>
+</div>
+
+<script>
+let TAB = "ops", CAPS = [], SNAP = {};
+
+function pick(t){
+  TAB = t;
+  document.querySelectorAll(".tab").forEach(e=>e.classList.toggle("on", e.dataset.tab===t));
+  renderActions();
+}
+
+function log(msg, ok){
+  const el = document.getElementById("log");
+  if(el.firstChild && el.firstChild.textContent.startsWith("—")) el.innerHTML="";
+  const d = document.createElement("div");
+  d.className = "line " + (ok ? "ok" : "fail");
+  d.textContent = `${new Date().toLocaleTimeString()}  ${ok?"✔":"✗"} ${msg}`;
+  el.prepend(d);
+}
+
+async function act(a){
+  if(a.destructive && !confirm(`${a.label} — this mutates a real cluster. Continue?`)) return;
+  try{
+    const r = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({id:a.id})});
+    const j = await r.json();
+    log(j.ok ? j.message : j.error, j.ok);
+  }catch(e){ log(String(e), false); }
+}
+
+function renderActions(){
+  const box = document.getElementById("actions");
+  box.innerHTML = "";
+  CAPS.filter(c=>c.tab===TAB).forEach(c=>{
+    const b = document.createElement("button");
+    b.className = "act" + (c.destructive ? " destructive":"");
+    b.disabled = !c.enabled;
+    b.onclick = ()=>act(c);
+    b.innerHTML = `<span>${c.label}</span><span class="sub">${c.enabled?"ready":"unavailable"}</span>`;
+    box.appendChild(b);
+  });
+}
+
+function node(role, name, zone, cls){
+  return `<div class="node ${cls}"><div class="r">${role}</div>
+    <div class="n">${name}</div><div class="z">${zone||""}</div></div>`;
+}
+
+function renderTopology(s){
+  const scada = document.getElementById("scada");
+  const primary = (s.instances||[]).find(i=>i.role==="primary");
+  const replicas = (s.instances||[]).filter(i=>i!==primary);
+  const poolers = (s.poolers||[]).map(p=>node("pooler "+p.type, p.name, "", "ok")).join("");
+  const reps = replicas.map(r=>node("replica", r.name, r.zone, r.healthy?"ok":"bad")).join("");
+  scada.innerHTML = `
+    <div class="flow">
+      <div class="col">${node("client","app","","ok")}</div>
+      <span class="arrow">→</span>
+      <div class="col">${poolers || node("pooler","—","","")}</div>
+      <span class="arrow">→</span>
+      <div class="col">${primary?node("primary",primary.name,primary.zone,"primary"):node("primary","—","","bad")}</div>
+      <span class="arrow">→</span>
+      <div class="col">${reps || node("replica","—","","")}</div>
+    </div>`;
+}
+
+function render(data){
+  const err = document.getElementById("err");
+  if(data.error){ err.style.display="block"; err.textContent = "discovery: "+data.error; return; }
+  err.style.display="none";
+  SNAP = data.snapshot; CAPS = data.capabilities;
+  document.getElementById("title").textContent = `CNPG · ${SNAP.namespace||""}`;
+  document.getElementById("meta").innerHTML = [
+    `<span class="chip">state <b>${SNAP.ready?"healthy":"degraded"}</b></span>`,
+    `<span class="chip">version <b>${SNAP.version||"?"}</b>${SNAP.target?` → ${SNAP.target}`:""}</span>`,
+    `<span class="chip">primary <b>${SNAP.primary||"—"}</b></span>`,
+    `<span class="chip">zones <b>${(SNAP.zones||[]).join(", ")||"—"}</b></span>`,
+    `<span class="chip">backups <b>${SNAP.backups_completed||0}</b></span>`,
+    SNAP.fault_in_flight?`<span class="chip" style="color:var(--warn)">fault in flight</span>`:"",
+  ].join("");
+  renderTopology(SNAP);
+  renderActions();
+}
+
+const es = new EventSource("/api/stream");
+es.onmessage = e => {
+  document.getElementById("dot").classList.add("live");
+  document.getElementById("conntxt").textContent = "live";
+  render(JSON.parse(e.data));
+};
+es.onerror = () => {
+  document.getElementById("dot").classList.remove("live");
+  document.getElementById("conntxt").textContent = "reconnecting…";
+};
+</script>
+</body>
+</html>

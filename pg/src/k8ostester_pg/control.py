@@ -26,29 +26,32 @@ from __future__ import annotations
 
 from k8ostester_kernel.control import Action
 
+# Preconditions read the snapshot with .get() so a missing/partial field just
+# disables the action (the safe default for a control plane) instead of crashing
+# the whole capability map.
 CNPG_ACTIONS: list[Action] = [
     # --- ops: mutations you want -------------------------------------------
     Action("backup", "Take base backup", "ops",
-           lambda s: s["ready"] and s["backup_configured"]),
+           lambda s: s.get("ready") and s.get("backup_configured")),
     Action("restore", "Restore (PITR)", "ops",
-           lambda s: s["backups_completed"] > 0 and s["pitr_window"],
+           lambda s: s.get("backups_completed", 0) > 0 and s.get("pitr_window"),
            destructive=True),
     Action("rotate", "Rotate credentials", "ops",
-           lambda s: s["ready"] and s["blue_green"]),
+           lambda s: s.get("ready") and s.get("blue_green")),
     Action("upgrade", "Minor upgrade", "ops",
-           lambda s: s["ready"] and bool(s["target"])
-           and s["version"] != s["target"] and not s["upgrading"]),
+           lambda s: s.get("ready") and bool(s.get("target"))
+           and s.get("version") != s.get("target") and not s.get("upgrading")),
     # --- chaos: mutations that test it -------------------------------------
     Action("kill-primary", "Kill primary", "chaos",
-           lambda s: bool(s["primary"]) and not s["fault_in_flight"],
+           lambda s: bool(s.get("primary")) and not s.get("fault_in_flight"),
            destructive=True),
     Action("partition-primary", "Partition primary", "chaos",
-           lambda s: bool(s["primary"]) and not s["fault_in_flight"],
+           lambda s: bool(s.get("primary")) and not s.get("fault_in_flight"),
            destructive=True),
     Action("kill-replica", "Kill a replica", "chaos",
-           lambda s: bool(s["replicas"]) and not s["fault_in_flight"],
+           lambda s: bool(s.get("replicas")) and not s.get("fault_in_flight"),
            destructive=True),
     Action("drain-zone", "Drain a zone", "chaos",
-           lambda s: len(s["zones"]) >= 2 and not s["fault_in_flight"],
+           lambda s: len(s.get("zones") or []) >= 2 and not s.get("fault_in_flight"),
            destructive=True),
 ]

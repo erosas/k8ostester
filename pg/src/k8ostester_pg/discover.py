@@ -55,23 +55,44 @@ def build_snapshot(
 
 def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
              target: str = "") -> dict:
-    """Read the live cluster and produce its snapshot."""
+    """Read the live cluster and produce its snapshot (capability fields + the
+    richer topology the UI renders)."""
     cluster = k8s.custom.get_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, namespace, "clusters", name)
     replica_pods = harness.replicas(k8s, namespace)
-    # zones of the instance pods' nodes
-    zones = sorted({
-        z for z in (
-            _node_zone(k8s, p.spec.node_name)
-            for p in k8s.core.list_namespaced_pod(
-                namespace, label_selector=f"cnpg.io/cluster={name}").items
-            if p.spec.node_name
-        ) if z
-    })
+    instances = _instances(k8s, namespace, name)
+    zones = sorted({i["zone"] for i in instances if i["zone"]})
     backups = k8s.custom.list_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, namespace, "backups").get("items", [])
     partitioned = _partition_active(k8s, namespace)
-    return build_snapshot(cluster, replica_pods, zones, backups, partitioned, target)
+    snap = build_snapshot(cluster, replica_pods, zones, backups, partitioned, target)
+    # topology for the SCADA view (not needed by the capability preconditions)
+    snap["namespace"] = namespace
+    snap["instances"] = instances
+    snap["poolers"] = [
+        {"name": p["metadata"]["name"], "type": p.get("spec", {}).get("type", "rw")}
+        for p in k8s.custom.list_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, namespace, "poolers").get("items", [])
+    ]
+    return snap
+
+
+def _instances(k8s: ClusterClient, namespace: str, name: str) -> list[dict]:
+    """Per-instance role / zone / health for the topology view."""
+    out = []
+    for p in k8s.core.list_namespaced_pod(
+            namespace, label_selector=f"cnpg.io/cluster={name}").items:
+        labels = p.metadata.labels or {}
+        ready = any(c.type == "Ready" and c.status == "True"
+                    for c in (p.status.conditions or []))
+        node = p.spec.node_name
+        out.append({
+            "name": p.metadata.name,
+            "role": labels.get("cnpg.io/instanceRole", "?"),
+            "zone": _node_zone(k8s, node) if node else "",
+            "healthy": ready,
+        })
+    return sorted(out, key=lambda i: i["name"])
 
 
 def _node_zone(k8s: ClusterClient, node: str) -> str:

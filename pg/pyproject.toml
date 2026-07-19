@@ -16,6 +16,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8ostester_pg"]
+artifacts = ["src/k8ostester_pg/console.html"]   # the SPA served by the console
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

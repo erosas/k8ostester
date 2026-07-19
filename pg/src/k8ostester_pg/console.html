@@ -157,9 +157,8 @@
     border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:13px;color-scheme:dark}
   .bgrid input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);padding:0}
   .bgrid input:focus,.bgrid select:focus{outline:none;border-color:var(--accent)}
-  .bnote{border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;
-    background:var(--panel2);padding:9px 13px;margin:0 0 14px;font-family:var(--mono);
-    font-size:11.5px;line-height:1.6;color:var(--muted)}
+  .bnote{border-radius:7px;background:var(--panel2);padding:8px 12px;margin:0 0 14px;
+    font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--muted)}
   .bnote b{color:var(--ink)}
   .fcap{text-transform:none;letter-spacing:0;color:var(--dim);font-size:10px}
   .bbar{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
@@ -293,7 +292,7 @@
 
   /* custom tooltip — reliable and multi-line, unlike native title on thin ticks */
   #tip{position:fixed;z-index:50;display:none;max-width:320px;pointer-events:none;
-    background:#05080c;border:1px solid var(--border);border-left:3px solid var(--accent);
+    background:#05080c;border:1px solid var(--border);
     color:var(--ink);border-radius:8px;padding:8px 11px;font-family:var(--mono);font-size:11.5px;
     line-height:1.5;white-space:pre-line;box-shadow:0 10px 30px rgba(0,0,0,.55)}
 </style>
@@ -351,16 +350,7 @@
   </div>
 
   <div class="builder" id="builder" style="display:none">
-    <div class="bnote">
-      <b>Storage is grow-only.</b> After deploy you can raise <b>storage size</b> and CNPG expands
-      each PVC online (no downtime) — but only if the StorageClass has <b>allowVolumeExpansion: true</b>
-      (e.g. an AWS EBS gp3 class). You can <b>never shrink</b> it, and EBS limits growth to once every ~6h
-      per volume. Pick a comfortable starting size. Everything else here can be changed after deploy.
-      <br><br><b>App roles for rotation</b> creates two login roles <b>app_a</b> / <b>app_b</b>, both members
-      of the <b>app</b> owner (so they share the data), each from its own secret with a <b>CHANGE-ME</b>
-      placeholder password. That's what the console's <b>Rotate credentials</b> switches between — set real
-      passwords (or rotate immediately) after applying.
-    </div>
+    <div class="bnote">Storage is grow-only after deploy (never shrinks). App roles adds app_a/app_b for credential rotation, with placeholder passwords to change.</div>
     <div class="bpre">
       <button onclick="preset('reference')">Reference HA</button>
       <button onclick="preset('readheavy')">Read-heavy</button>
@@ -370,7 +360,7 @@
     <div class="bgrid">
       <label>Cluster name<input id="b-name" value="pg"></label>
       <label>Namespace<input id="b-namespace" value="default">
-        <span class="fcap">deploy target (in the selected context)</span></label>
+        <span class="fcap">deploy target</span></label>
       <label>PostgreSQL version<input id="b-version" value="16.6"></label>
       <label>Instances (1 primary + replicas)
         <input id="b-instances" type="number" min="1" max="9" value="3"></label>
@@ -398,23 +388,18 @@
       <label id="b-schedule-cron-wrap">Schedule (6-field cron)
         <input id="b-schedule-cron" value="0 0 2 * * *"></label>
     </div>
-    <div class="bnote">
-      <b>Observability.</b> CNPG always exposes metrics; you just need something to scrape them.
-      <b>PodMonitor</b> wires them to a Prometheus Operator; an <b>OTEL endpoint</b> deploys a collector
-      that scrapes and forwards OTLP. The <b>Grafana dashboard</b>, <b>goal waterlines</b> and <b>alerts</b>
-      below only appear once one of those is on — otherwise there's nothing feeding them.
-    </div>
+    <div class="bnote">Pick a scrape (PodMonitor or OTEL) to unlock the dashboard, goals and alerts.</div>
     <div class="bgrid">
       <label class="check"><input id="b-monitoring" type="checkbox" checked> Prometheus PodMonitor
         <span class="fcap">scrape via the Prometheus Operator</span></label>
       <label>OTEL endpoint (optional)<input id="b-otel" placeholder="otel-collector.obs.svc:4317">
-        <span class="fcap">deploys an OpenTelemetry Collector that forwards OTLP</span></label>
+        <span class="fcap">deploys an OTEL collector</span></label>
       <label id="b-scrape-wrap">Metrics pod label<input id="b-scrape-label" value="pod">
-        <span class="fcap">dashboard filter — 'pod' (PodMonitor/OTel) or 'instance'</span></label>
+        <span class="fcap">'pod' or 'instance'</span></label>
     </div>
     <div class="bgrid" id="b-goals-section">
       <label>Goal · max replication lag (s)<input id="b-goal-lag" placeholder="e.g. 30">
-        <span class="fcap">red line on the panel + alert (with PodMonitor)</span></label>
+        <span class="fcap">waterline + alert</span></label>
       <label>Goal · max connections<input id="b-goal-conn" placeholder="e.g. 150">
         <span class="fcap">red line + alert</span></label>
       <label>Goal · max WAL archive delay (s)<input id="b-goal-archive" placeholder="e.g. 120">
@@ -679,7 +664,7 @@ function openRotate(){
   const active = (SNAP.credentials||{}).active_role || roles[0];
   const idle = roles.find(r=>r!==active) || roles[1];
   openSheet(`<h2>Rotate credentials</h2>
-    <div class="lede">Refreshes the idle role <b>${esch(idle)}</b> and switches to it. <b>${esch(active)}</b> stays valid throughout — no auth gap. Any characters are quoted safely.</div>
+    <div class="lede">Refreshes idle <b>${esch(idle)}</b> and switches to it — <b>${esch(active)}</b> stays valid, no auth gap.</div>
     <div class="sec"><h3>New password for ${esch(idle)}</h3>
       <div class="pwrow">
         <input id="rot-pw" class="pwin" spellcheck="false" value="${esch(genPassword(20,true))}">
@@ -709,7 +694,7 @@ async function openUpgrade(){
     : `<div class="snaprow">backups not configured — no snapshot available as a fallback</div>`;
   openSheet(`<h2>Upgrade version</h2>
     <div class="uwarn" id="up-warn"></div>
-    <div class="lede">Rolls the cluster to a new image — replicas first, then a switchover. Currently <b>${esch(current||"?")}</b>. The repo is auto-detected — edit it to try another (a mirror, a fork, a private registry).</div>
+    <div class="lede">Rolls to a new image (replicas, then switchover). Currently <b>${esch(current||"?")}</b> · edit the repo to try another.</div>
     <div class="sec"><h3>Image repository</h3>
       <input id="up-repo" class="pwin" spellcheck="false" value="${esch(repo)}" oninput="onRepo()"></div>
     <div class="sec"><h3>Version / tag</h3>
@@ -1305,8 +1290,8 @@ function render(data){
     (GRAFANA && SNAP.cluster) ? `<a class="chip link" href="${GRAFANA}/d/k8ost-${esch(SNAP.cluster)}" target="_blank" rel="noopener">metrics ↗</a>` : "",
   ].filter(Boolean).join("");
   const lock = document.getElementById("lock");
-  if(SNAP.busy){ lock.style.display="flex"; lock.textContent = "🔒 " + SNAP.busy_reason +
-      " — mutating operations are locked until it finishes"; }
+  if(SNAP.busy){ lock.style.display="flex";
+    lock.textContent = "LOCKED · " + SNAP.busy_reason + " — mutating ops paused"; }
   else lock.style.display="none";
   renderConditions(SNAP);
   renderTopology(SNAP);

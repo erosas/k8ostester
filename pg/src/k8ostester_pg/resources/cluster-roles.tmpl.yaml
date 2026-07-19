@@ -1,0 +1,8 @@
+  managed:
+    roles:
+      - {name: ${role_a}, ensure: present, login: true, inRoles: [${owner}], passwordSecret: {name: ${secret_a}}}
+      - {name: ${role_b}, ensure: present, login: true, inRoles: [${owner}], passwordSecret: {name: ${secret_b}}}
+  bootstrap:
+    initdb:
+      postInitApplicationSQL:
+        - GRANT USAGE, CREATE ON SCHEMA public TO ${owner}

@@ -274,6 +274,10 @@
       each PVC online (no downtime) — but only if the StorageClass has <b>allowVolumeExpansion: true</b>
       (e.g. an AWS EBS gp3 class). You can <b>never shrink</b> it, and EBS limits growth to once every ~6h
       per volume. Pick a comfortable starting size. Everything else here can be changed after deploy.
+      <br><br><b>App roles for rotation</b> creates two login roles <b>app_a</b> / <b>app_b</b>, both members
+      of the <b>app</b> owner (so they share the data), each from its own secret with a <b>CHANGE-ME</b>
+      placeholder password. That's what the console's <b>Rotate credentials</b> switches between — set real
+      passwords (or rotate immediately) after applying.
     </div>
     <div class="bpre">
       <button onclick="preset('reference')">Reference HA</button>
@@ -298,6 +302,7 @@
       <label id="b-pooler-n-wrap" style="display:none">Pooler instances
         <input id="b-pooler-instances" type="number" min="1" max="5" value="2"></label>
       <label class="check"><input id="b-backups" type="checkbox" checked> Backups + WAL archiving</label>
+      <label class="check"><input id="b-approles" type="checkbox"> App roles for rotation (app_a / app_b)</label>
     </div>
     <div class="bgrid" id="b-backup-fields">
       <label>Bucket<input id="b-bucket" value="backups"></label>
@@ -458,17 +463,12 @@ function openConnect(){
   if(extSvcs.length){
     extHtml = extSvcs.map(x=>`<div class="ep"><span class="tag">${esch(x.type)}</span>`+
       `<span class="host">${esch(x.external)}:${x.port}</span>`+
-      `<span class="desc">${esch(x.name)} — reachable from outside the cluster (use sslmode=verify-full)</span></div>`).join("");
+      `<span class="desc">${esch(x.name)} — external (use sslmode=verify-full)</span></div>`).join("");
   } else if(npSvcs.length){
     extHtml = npSvcs.map(x=>`<div class="ep"><span class="tag">NodePort</span>`+
-      `<span class="host">&lt;any-node-ip&gt;:${x.node_port}</span>`+
-      `<span class="desc">${esch(x.name)} — reachable on any node's IP</span></div>`).join("");
+      `<span class="host">&lt;node-ip&gt;:${x.node_port}</span><span class="desc">${esch(x.name)}</span></div>`).join("");
   } else {
-    extHtml = `<div class="kv">No external Service — this cluster is <b>in-cluster only</b>. To reach it `+
-      `from outside: a <b>LoadBalancer</b> Service (an AWS NLB — Postgres is L4/TCP, not an ALB) on the `+
-      `<b>${esch(c)}-rw</b> service or the pooler; a <b>TCP ingress / Gateway API TCPRoute</b>; or keep it `+
-      `private and reach it over <b>VPN / bastion / PrivateLink</b>. Always front the <b>service</b> (it `+
-      `follows failover), never a pod. For dev, port-forward:</div>`;
+    extHtml = `<div class="kv">In-cluster only — port-forward for dev, or expose a LoadBalancer / TCP ingress for external apps.</div>`;
   }
   extHtml += codeRow(pf) + `<div class="kv" style="margin-top:4px">…then connect to <b>localhost:5432</b>.</div>`;
   const rolesHtml = roles.length
@@ -519,13 +519,13 @@ function replicaPicker(){
 /* ---- builder presets ---- */
 const PRESETS = {
   reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *"},
+    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true},
   readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",sync:"quorum",pooler:true,
-    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *"},
+    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true},
   dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",sync:"async",pooler:false,
-    pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *"},
+    pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *",app_roles:false},
   durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *"},
+    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true},
 };
 function preset(k){
   const p=PRESETS[k]; if(!p) return;
@@ -536,6 +536,7 @@ function preset(k){
   chk("b-pooler",p.pooler); set("b-pooler-instances",p.pooler_instances);
   chk("b-backups",p.backups); set("b-retention",p.retention);
   chk("b-schedule",p.schedule); set("b-schedule-cron",p.schedule_cron);
+  chk("b-approles",!!p.app_roles);
   generateManifest();
 }
 
@@ -996,6 +997,7 @@ function builderOpts(){
     backups:ck("b-backups"), bucket:v("b-bucket"), path:v("b-path"),
     endpoint:v("b-endpoint"), secret:v("b-secret"), retention:v("b-retention"),
     schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
+    app_roles:ck("b-approles"),
   };
 }
 async function generateManifest(){

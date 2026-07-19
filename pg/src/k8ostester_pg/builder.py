@@ -51,7 +51,20 @@ def build_manifest(opts: dict) -> str:
             retention=(opts.get("retention") or "7d").strip(),
         )
 
-    docs = [_tmpl("cluster.tmpl.yaml").substitute(
+    # blue/green application roles for credential rotation: two login roles that
+    # both inherit the app owner (so they share the data), each from its own
+    # secret. The console's Rotate refreshes the idle one and switches to it.
+    secret_docs = []
+    if opts.get("app_roles"):
+        owner, ra, rb = "app", "app_a", "app_b"
+        sa, sb = "app-cred-a", "app-cred-b"
+        extra += _tmpl("cluster-roles.tmpl.yaml").substitute(
+            role_a=ra, role_b=rb, owner=owner, secret_a=sa, secret_b=sb)
+        for role, secret, pw in ((ra, sa, "CHANGE-ME-app-a"), (rb, sb, "CHANGE-ME-app-b")):
+            secret_docs.append(_tmpl("role-secret.tmpl.yaml").substitute(
+                secret=secret, role=role, password=pw))
+
+    docs = [*secret_docs, _tmpl("cluster.tmpl.yaml").substitute(
         name=name, instances=instances, version=version, storage=storage, extra=extra)]
 
     if opts.get("pooler"):

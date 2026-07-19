@@ -39,6 +39,21 @@ def test_pooler_and_backups_and_schedule_produce_extra_docs():
     assert docs["Pooler"]["metadata"]["name"] == "db-rw"
 
 
+def test_app_roles_emits_two_login_roles_and_their_secrets():
+    m = build_manifest({"app_roles": True})
+    docs = {(d["kind"], d["metadata"]["name"]): d for d in yaml.safe_load_all(m) if d}
+    # two basic-auth secrets, one per role
+    assert ("Secret", "app-cred-a") in docs and ("Secret", "app-cred-b") in docs
+    assert docs[("Secret", "app-cred-a")]["stringData"]["username"] == "app_a"
+    # both are login roles that inherit the app owner — the rotation prerequisite
+    roles = next(d for k, d in docs.items() if k[0] == "Cluster")["spec"]["managed"]["roles"]
+    assert {r["name"] for r in roles} == {"app_a", "app_b"}
+    for r in roles:
+        assert r["login"] is True and r["inRoles"] == ["app"]
+    assert "app_roles" not in build_manifest({})  # off by default -> no managed roles
+    assert "managed" not in next(d for d in yaml.safe_load_all(build_manifest({})) if d)["spec"]
+
+
 def test_schedule_requires_backups():
     # a ScheduledBackup with nowhere to store is meaningless — omit it
     assert "ScheduledBackup" not in kinds(build_manifest({"schedule": True}))

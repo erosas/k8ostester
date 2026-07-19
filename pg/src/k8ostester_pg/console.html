@@ -111,6 +111,17 @@
   .rfoot b{color:var(--ink)}
 
   .actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+  .alabel{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted);margin:20px 0 9px}
+  /* break-glass danger zone — cordoned, armed to enable */
+  .danger{margin-top:20px;border:1px solid #4a2327;border-radius:11px;background:#1c1315;padding:14px}
+  .danger-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;
+    font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;color:var(--crit)}
+  .danger .arm{display:flex;align-items:center;gap:7px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.1em;font-size:10.5px;cursor:pointer;border:1px solid #5a2327;border-radius:6px;padding:4px 10px}
+  .danger .arm input{accent-color:var(--crit);width:14px;height:14px}
+  .danger.armed{background:#241417;border-color:#6a2c31}
+  .danger.armed .danger-head{color:#f2a1a4}
   button.act{font-family:var(--sans);font-size:14px;text-align:left;padding:12px 14px;
     border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);
     cursor:pointer;display:flex;flex-direction:column;gap:3px;transition:border-color .12s}
@@ -286,8 +297,7 @@
         <select id="cl-sel" onchange="onCluster()"></select></div>
     </div>
     <div class="views" id="views">
-      <button class="vbtn on" data-tab="ops" onclick="pick('ops')">Ops</button>
-      <button class="vbtn" data-tab="chaos" onclick="pick('chaos')">Break-glass</button>
+      <button class="vbtn on" data-tab="operate" onclick="pick('operate')">Operate</button>
       <button class="vbtn" data-tab="builder" onclick="pick('builder')">Build</button>
     </div>
     <div class="conn"><span class="dot" id="dot"></span><span id="conntxt">connecting…</span></div>
@@ -311,7 +321,16 @@
       <div class="rfoot" id="rfoot"></div>
     </div>
 
+    <div class="alabel">Routine</div>
     <div class="actions" id="actions"></div>
+
+    <div class="danger" id="danger">
+      <div class="danger-head">
+        <span>⚠ Break-glass — destructive / irreversible</span>
+        <label class="arm"><input type="checkbox" id="arm" onchange="renderActions()"> arm</label>
+      </div>
+      <div class="actions" id="danger-actions"></div>
+    </div>
   </div>
 
   <div class="builder" id="builder" style="display:none">
@@ -438,7 +457,7 @@
 </div>
 
 <script>
-let TAB = "ops", CAPS = [], SNAP = {}, UNSEL = true;
+let TAB = "operate", CAPS = [], SNAP = {}, UNSEL = true;
 
 function applyLayout(){
   const isBuild = TAB==="builder";
@@ -891,32 +910,35 @@ function act(a){
   post(a.id, null, a.label);
 }
 
-function actTile(c){
+function actTile(c, locked){
   const b = document.createElement("button");
   b.className = "act" + (c.destructive ? " destructive":"");
-  b.disabled = !c.enabled;
+  b.disabled = locked || !c.enabled;
   b.onclick = ()=>act(c);
-  b.innerHTML = `<span>${c.label}</span><span class="sub">${c.enabled?"ready":"unavailable"}</span>`;
+  b.innerHTML = `<span>${c.label}</span>`+
+    `<span class="sub">${locked ? "arm to enable" : c.enabled ? "ready" : "unavailable"}</span>`;
   return b;
 }
 const RECOVER = new Set(["restore", "upgrade"]);   // break-glass recovery vs faults
 function renderActions(){
-  const box = document.getElementById("actions");
-  box.innerHTML = "";
-  if(TAB === "chaos"){
-    // recovery ops as tiles; all node faults behind one "Inject fault" entry
-    CAPS.filter(c=>c.tab==="chaos" && RECOVER.has(c.id)).forEach(c=>box.appendChild(actTile(c)));
-    const faults = CAPS.filter(c=>c.tab==="chaos" && !RECOVER.has(c.id) && c.id!=="drain-zone");
-    const any = faults.some(c=>c.enabled);
-    const f = document.createElement("button");
-    f.className = "act destructive";
-    f.disabled = !any;
-    f.onclick = ()=>{ if(any) openFaultPicker(); };
-    f.innerHTML = `<span>Inject fault</span><span class="sub">${any?"kill / partition a node":"a fault is in flight"}</span>`;
-    box.appendChild(f);
-  } else {
-    CAPS.filter(c=>c.tab===TAB).forEach(c=>box.appendChild(actTile(c)));
-  }
+  if(TAB !== "operate") return;
+  // routine, always live
+  const box = document.getElementById("actions"); box.innerHTML = "";
+  CAPS.filter(c=>c.tab==="ops").forEach(c=>box.appendChild(actTile(c)));
+  // break-glass, gated behind the arm switch
+  const armed = document.getElementById("arm").checked;
+  document.getElementById("danger").classList.toggle("armed", armed);
+  const dbox = document.getElementById("danger-actions"); dbox.innerHTML = "";
+  CAPS.filter(c=>c.tab==="chaos" && RECOVER.has(c.id)).forEach(c=>dbox.appendChild(actTile(c, !armed)));
+  const faults = CAPS.filter(c=>c.tab==="chaos" && !RECOVER.has(c.id) && c.id!=="drain-zone");
+  const any = faults.some(c=>c.enabled);
+  const f = document.createElement("button");
+  f.className = "act destructive";
+  f.disabled = !armed || !any;
+  f.onclick = ()=>{ if(armed && any) openFaultPicker(); };
+  f.innerHTML = `<span>Inject fault</span>`+
+    `<span class="sub">${!armed ? "arm to enable" : any ? "kill / partition a node" : "a fault is in flight"}</span>`;
+  dbox.appendChild(f);
 }
 
 function node(role, name, zone, cls, tip){

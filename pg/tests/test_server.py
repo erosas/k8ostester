@@ -8,7 +8,7 @@ def test_spa_is_a_self_contained_page_with_the_hooks():
     html = server.SPA
     assert html.strip().startswith("<!doctype")
     assert "/api/stream" in html and "/api/action" in html   # the two endpoints
-    assert 'data-tab="ops"' in html and 'data-tab="chaos"' in html
+    assert 'data-tab="operate"' in html and 'data-tab="builder"' in html
     assert "EventSource" in html
 
 

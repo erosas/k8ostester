@@ -2,117 +2,96 @@
 
 [![ci](https://github.com/erosas/k8ostester/actions/workflows/ci.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/ci.yml)
 [![codeql](https://github.com/erosas/k8ostester/actions/workflows/codeql.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/codeql.yml)
-[![release](https://github.com/erosas/k8ostester/actions/workflows/release.yml/badge.svg)](https://github.com/erosas/k8ostester/actions/workflows/release.yml)
 [![coverage](https://raw.githubusercontent.com/erosas/k8ostester/badges/coverage.svg)](https://github.com/erosas/k8ostester/actions/workflows/ci.yml)
-[![docker image](https://img.shields.io/docker/v/bytestream89/k8os-tester?sort=semver&label=docker&logo=docker)](https://hub.docker.com/r/bytestream89/k8os-tester)
-[![docker pulls](https://img.shields.io/docker/pulls/bytestream89/k8os-tester)](https://hub.docker.com/r/bytestream89/k8os-tester)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Validate Kubernetes configurations of stateful technologies (Postgres first; Kafka,
-Elasticsearch, MongoDB later) against explicit resilience and performance goals: run a config
-under load, inject faults (kill the primary, fail a node…), verify data integrity and
-backup/PITR, and get a pass/fail verdict per goal.
+Prove that a stateful Kubernetes configuration is **resilient** and **operable**.
+Deploy a config under load, inject faults (kill/partition the primary, drop a
+replica, drain a zone) or drive real operations (backup, credential rotation, PG
+upgrade, PITR restore), and get a machine-checkable verdict from real,
+app-perspective metrics. PostgreSQL / CloudNativePG first.
 
-## Docs
+## How it's built
 
-- **[docs/usage.md](docs/usage.md)** — the two ways to use this: deploy-and-test, or attach-and-break (start here)
-- **[docs/productionization.md](docs/productionization.md)** — design for `pg/testbed`: a k8s-native golden-path testbed proving the ideal config is operable (rotate creds, upgrade, restore) with a SCADA console
-- **[docs/remote-control.md](docs/remote-control.md)** — design for a web control plane: connect to a live cluster, discover it, drive ops + chaos; controls gated by preconditions over discovered state
-- **[docs/architecture-restructure.md](docs/architecture-restructure.md)** — proposal: thin kernel + per-tech verticals (uv workspace); dissolve the generic engine into linear scripts + Grafana/Prometheus verdict + cross-run comparison
-- **[docs/plan.md](docs/plan.md)** — the north star: full plan, phases, current status
-- **[docs/architecture.md](docs/architecture.md)** — components and how a run works
-- **[docs/decisions.md](docs/decisions.md)** — why it is this way (D1–D11)
+A small [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) —
+a thin kernel of primitives plus one vertical per technology. There is
+deliberately **no generic framework**: verticals are direct, tech-specific
+scripts on the kernel. See [docs/architecture-restructure.md](docs/architecture-restructure.md).
 
-The canonical best-practice config to copy is
-[`experiments/postgres-cnpg/20-cnpg-reference`](experiments/postgres-cnpg/20-cnpg-reference)
-— HA + quorum sync, backup/WAL/PITR with periodic base backups + retention, and
-rw + ro pooling, every block commented with why.
+```
+kernel/   primitives: k8s client, chaos (kill/partition/drain), SLO-query verdict,
+          the Run helper, and a cluster capability probe
+  console/  the shared, persistent Prometheus + Grafana (viewing + cross-run compare)
+pg/       the PostgreSQL/CloudNativePG vertical
+  src/k8ostester_pg/   harness (deploy the ideal config) + SLO checks
+  experiments/         linear experiment scripts (deploy → chaos → verify → verdict)
+  testbed/             the production-readiness golden path (backup, rotate, upgrade, PITR)
+  loadgen/             the k8os-loadgen image (the app-perspective load generator)
+```
+
+## The model
+
+An **experiment** is a linear script that reads top to bottom:
+
+```python
+harness.deploy_ideal_config(k8s, NS, EXPERIMENT)   # config + app + healthy
+chaos.kill_pod(k8s, NS, primary)                    # a kernel primitive
+run.verify("primary_moved", ...)                    # correctness (data compare)
+verdict = run.verdict(fetch, default_checks(EXPERIMENT))   # + SLO range-queries
+```
+
+The **verdict** = correctness verify-steps (RPO, integrity, PITR) **and** SLO
+checks evaluated as Prometheus range queries over the run window (error rate,
+latency, availability — averaged, so a sub-second blip is not an outage). Live
+viewing and **cross-run comparison** happen in Grafana over the shared, persistent
+Prometheus (each run's metrics are labelled by `experiment`/`run` and outlive it).
 
 ## Quick start
 
-Requires Python >= 3.14.
+Requires Python ≥ 3.14, `kubectl`, `helm`, and a cluster with the CloudNativePG
+operator + the shared console ([kernel/console](kernel/console)).
 
 ```bash
-uv tool install --editable ./k8ostester-core   # installs the `k8ost` CLI
+uv sync                                              # the workspace
 
-k8ost env check                              # what can this cluster do?
-k8ost run                                    # pick an experiment, watch it in the TUI
-k8ost run experiments/postgres-cnpg/02-cnpg-single   # TUI on a terminal; --view live|plain
-k8ost session experiments/postgres-cnpg/03-cnpg-ha-3node   # interactive lab: scale load, fire faults
-k8ost session --attach my-namespace          # attach to an EXISTING cluster as a chaos control plane
-k8ost runs                                   # list recorded runs
-k8ost report --group pooling --open          # comparison graphs for a run group
+# what can this cluster run? (zones, NetworkPolicy enforcement, snapshots, operators)
+uv run python -m k8ostester_kernel.capabilities --context my-ctx
+
+# a resilience experiment (deploy → kill the primary → verify → verdict)
+uv run python pg/experiments/kill-primary/run.py --context my-ctx --prometheus http://localhost:9090
+
+# the production-readiness golden path (deploy → backup → rotate → upgrade → PITR)
+uv run python pg/testbed/flow.py --context my-ctx --keep
 ```
 
-Runs write artifacts to `results/<experiment>/<run-id>/` (events timeline, journal, metrics,
-summary). Add `--keep` to leave the run namespace up for inspection, `--group` to group runs
-for reporting.
-
-To develop the framework itself: `cd k8ostester-core && uv run pytest`.
+See [pg/README.md](pg/README.md) and [pg/testbed/README.md](pg/testbed/README.md).
 
 ## Images
 
-Two images are published on each version tag (see `.github/workflows/release.yml`):
+One published image (multi-arch, on a version tag — see
+[.github/workflows/release.yml](.github/workflows/release.yml)):
 
 | Image | What it is | Override |
 | --- | --- | --- |
-| [`bytestream89/k8os-tester`](https://hub.docker.com/r/bytestream89/k8os-tester) | the tool — CLI/TUI with `kubectl` + `helm` baked in | `K8OST_TOOL_IMAGE` (the `k8ost-docker` shim) |
-| [`bytestream89/k8os-loadgen`](https://hub.docker.com/r/bytestream89/k8os-loadgen) | the app-perspective load generator (python + psycopg) | `load.image` per experiment, or `K8OST_LOADGEN_IMAGE` globally |
+| [`bytestream89/k8os-loadgen`](https://hub.docker.com/r/bytestream89/k8os-loadgen) | the app-perspective load generator (python + psycopg) | the app manifest / `K8OST_LOADGEN_IMAGE` |
 
-Both are built multi-arch (amd64 + arm64) on a minimal [Chainguard
-Wolfi](https://github.com/wolfi-dev) base (glibc, continuously rebuilt →
-~0 CVEs), with an SBOM + build provenance attached. `kubectl` and `helm` come
-from Wolfi's apk repo (rebuilt against patched Go), so even the tool binaries
-scan clean. To publish, set the repo secrets `DOCKERHUB_NAMESPACE`,
-`DOCKERHUB_USERNAME`, and `DOCKERHUB_TOKEN`, then push a `v<version>` tag.
+Built on a minimal [Chainguard Wolfi](https://github.com/wolfi-dev) base
+(continuously rebuilt → ~0 CVEs), with an SBOM + provenance. Behind a proxy,
+mirror it and point the app manifest at your registry.
 
-### Run from the published image
+## Docs
 
-No local build needed — pull the tool image and point the `k8ost-docker` shim
-at it (it mounts your kubeconfig + CWD and allocates a TTY):
+- **[docs/architecture-restructure.md](docs/architecture-restructure.md)** — the kernel + verticals design
+- **[docs/productionization.md](docs/productionization.md)** — the testbed golden path
+- **[docs/remote-control.md](docs/remote-control.md)** — the planned web control plane (ops + chaos)
+
+## Develop
 
 ```bash
-docker pull bytestream89/k8os-tester:0.1.2
-export K8OST_TOOL_IMAGE=bytestream89/k8os-tester:0.1.2
-export K8OST_LOADGEN_IMAGE=bytestream89/k8os-loadgen:0.1.2   # used by Postgres experiments
-curl -fsSLO https://raw.githubusercontent.com/erosas/k8ostester/main/k8ost-docker && chmod +x k8ost-docker
-
-./k8ost-docker env check                 # only needs a kubeconfig
-./k8ost-docker session --attach my-ns    # chaos control plane on an existing cluster — no files needed
+uv sync
+uv run ruff check .
+uv run --directory kernel pytest
+uv run --directory pg pytest
 ```
 
-Experiments are read from the mounted CWD, so to run the bundled ones launch
-from a checkout of this repo (`./k8ost-docker run experiments/...`); for your
-own configs, run from your experiment repo.
-
-The images are public on Docker Hub; behind a proxy, mirror them into your own
-registry (below) and override the two env vars.
-
-### Running through a mirror (Artifactory / Nexus)
-
-Nothing is hardcoded to Docker Hub — every image the framework pulls is
-overridable, so it runs fully behind a proxy:
-
-- **tool** — `export K8OST_TOOL_IMAGE=registry.example.com/k8os-tester:<version>`
-- **loadgen** — `export K8OST_LOADGEN_IMAGE=registry.example.com/k8os-loadgen:<version>` (or per-experiment `load.image`)
-- **base image** the Dockerfiles pull (`cgr.dev/chainguard/wolfi-base`, shared by both) — proxy `cgr.dev` through your mirror or set build ARGs
-- **infra manifests** (SeaweedFS, OTEL collector) — drop overriding copies in the experiment's `infra/` dir (D20); the pinned refs are the only ones we ship
-- **helm-chart images** (CNPG operator, optional Chaos Mesh) — point the chart's `image.repository` values at your mirror
-
-Mirror the two images above plus whichever base/infra/chart images your
-experiments actually use, and set the two env vars.
-
-## Layout
-
-Platform code and experiments are strictly separated: `k8ostester-core/` is the framework
-(what gets installed), `experiments/` is what an end user's config repo looks like.
-
-- `k8ostester-core/` — the platform, a self-contained Python project:
-  - `src/k8ostester/` — the source: CLI (`k8ost`), runner, workers, goals, reports, common
-    infra, built-in technology drivers (D20)
-  - `tests/` — the framework test suite, mirroring the source layout
-- `experiments/<tech>/<experiment>/` — the example/regression experiment suite; each experiment
-  is a directory with `experiment.yaml` + `manifests/`. A user config repo needs nothing else —
-  built-in drivers resolve by the `technology:` name, and a custom `driver.py` placed above an
-  experiment overrides them (D15)
-- `results/` — per-run artifacts (gitignored)
+MIT licensed.

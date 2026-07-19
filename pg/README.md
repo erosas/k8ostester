@@ -47,10 +47,6 @@ verdict = run.verdict(fetch, default_checks(EXPERIMENT))   # + SLO queries
   Prometheus range queries. Correctness goals (RPO, integrity, PITR) stay as
   inline verify-steps.
 
-## Coming next (per the restructure)
-
-- The `experiments/postgres-cnpg/` suite converts to **linear scripts** here
-  (deploy → load → fault, with `slo.py` checks + verify-steps forming the
-  verdict), replacing the generic runner/goals.
-- The framework-coupled `postgres_cnpg` driver stays in `k8ostester-core` until
-  the old engine is retired.
+The old generic engine (runner/goals/report + the CNPG driver) has been retired;
+experiments live here as linear scripts. More fault scenarios are added the same
+way — a thin `deploy → chaos → verify → verdict` script on the harness.

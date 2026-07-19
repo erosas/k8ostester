@@ -1,8 +1,5 @@
-# Test gate: ruff + the full suite, and a Trivy scan that fails on fixable
-# HIGH/CRITICAL vulns, on every push/PR. The e2e job spins a real kind cluster
-# and runs the framework end to end — heavier, so nightly + manual only (CNPG
-# experiments need more than a GitHub-hosted runner; nginx-smoke proves the
-# deploy/verify/teardown lifecycle).
+# Test gate: ruff + the workspace test suite (kernel + pg), and a Trivy scan of
+# the loadgen image that fails on fixable HIGH/CRITICAL vulns, on every push/PR.
 name: ci
 
 on:
@@ -23,7 +20,6 @@ jobs:
       - run: uv run ruff check .
       - run: uv run --directory kernel pytest -q        # each member with its own config
       - run: uv run --directory pg pytest -q
-      - run: uv run --directory k8ostester-core pytest -q
 
   # Build both images (single-arch, for the runner) and fail on any fixable
   # HIGH/CRITICAL vuln. ignore-unfixed avoids blocking on CVEs with no upstream
@@ -35,9 +31,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: k8os-tester
-            context: .
-            dockerfile: k8ostester-core/Dockerfile
           - name: k8os-loadgen
             context: pg/loadgen
             dockerfile: pg/loadgen/loadgen.Dockerfile
@@ -74,8 +67,8 @@ jobs:
       - name: Generate badge
         run: |
           uv sync
-          uv run --directory k8ostester-core pytest --cov=k8ostester --cov-report=xml -q
-          uv run --with 'genbadge[coverage]' genbadge coverage -i k8ostester-core/coverage.xml -o coverage.svg
+          uv run --directory kernel pytest --cov=k8ostester_kernel --cov-report=xml -q
+          uv run --with 'genbadge[coverage]' genbadge coverage -i kernel/coverage.xml -o coverage.svg
       - name: Publish to badges branch
         run: |
           cp coverage.svg "$RUNNER_TEMP/coverage.svg"
@@ -87,18 +80,3 @@ jobs:
           git add -f coverage.svg
           git commit -m "coverage badge"
           git push -f origin badges
-
-  e2e:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-      - uses: helm/kind-action@v1          # a real cluster on the runner
-        with:
-          install_only: true
-      - run: kind create cluster --name k8ost-e2e
-      - name: smoke — deploy, verify, teardown a real workload
-        run: |
-          uv --project k8ostester-core run k8ost run \
-            experiments/generic/01-nginx-smoke --view plain --context kind-k8ost-e2e

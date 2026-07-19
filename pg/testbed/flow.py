@@ -9,8 +9,7 @@ walks it through the operations you must prove before production:
 
 Every step appends a line to events.jsonl (the console's annotation source, phase
 2) and prints a human line. Orchestration is plain kubectl/helm — transparent and
-standalone (it does not import k8ostester-core). Run against a kube context that
-can install an operator:
+standalone. Run against a kube context that can install an operator:
 
     python flow.py                 # run the golden path
     python flow.py --context my-remote --keep

@@ -1,11 +1,9 @@
 # k8os-testbed
 
 A **k8s-native, single-purpose production-readiness testbed** for the one ideal
-CNPG config. Where `k8ostester-core` explores fast to *find* good configs, this
-module proves a chosen config is **operable**: it walks the real operations you
-must trust before production and gives a single PASS/FAIL.
-
-It is deliberately its own thing — a linear script, not the core engine. See
+CNPG config: it walks the real operations you must trust before production —
+backup, credential rotation, PG upgrade, PITR restore — and gives a single
+PASS/FAIL. A linear script, no engine. See
 [../docs/productionization.md](../docs/productionization.md) for the design.
 
 ## The golden path (`flow.py`)

@@ -1,7 +1,0 @@
-# Baseline: reads hit the primary too (no read offload). The primary is the
-# bottleneck and reads blip during failover.
-extends: ../_scenario.yaml
-name: 18-cnpg-read-primary
-config: {manifests: ../_cluster}
-load:
-  endpoint_ro: pg-rw

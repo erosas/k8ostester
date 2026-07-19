@@ -41,12 +41,19 @@ def test_upgrading_phase_detected():
     assert s["upgrading"] is True
 
 
-def test_backup_view_carries_phase_and_times():
+def test_backup_view_carries_phase_times_and_wal():
     b = {"metadata": {"name": "bk1", "creationTimestamp": "2026-01-01T00:00:00Z"},
-         "status": {"phase": "completed", "startedAt": "t1", "stoppedAt": "t2"}}
+         "status": {"phase": "completed", "startedAt": "t1", "stoppedAt": "t2",
+                    "endWal": "000000010000000000000012"}}
     s = build_snapshot(cluster(), [], [], [b], False)
-    assert s["backups"][0] == {"name": "bk1", "phase": "completed",
-                               "startedAt": "t1", "stoppedAt": "t2"}
+    assert s["backups"][0] == {"name": "bk1", "phase": "completed", "startedAt": "t1",
+                               "stoppedAt": "t2", "endWal": "000000010000000000000012"}
+
+
+def test_retention_policy_surfaced():
+    c = cluster()
+    c["spec"]["backup"]["retentionPolicy"] = "7d"
+    assert build_snapshot(c, [], [], [], False)["retention"] == "7d"
 
 
 def test_busy_locks_ops_but_not_chaos():

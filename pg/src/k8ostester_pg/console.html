@@ -131,6 +131,10 @@
     font-family:var(--mono);font-size:12px}
   .pit .read .big{font-size:15px;color:var(--ink)}
   .pit .read .ago{color:var(--accent)}
+  .pit .pinfo{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:10px;
+    line-height:1.7;border-top:1px solid var(--border);padding-top:9px}
+  .pit .pinfo b{color:var(--ink)}
+  #latest-when{color:var(--accent)!important}
   .mbtns{display:flex;justify-content:flex-end;gap:9px;margin-top:20px}
   .mbtns button{font-family:var(--sans);font-size:13.5px;padding:9px 18px;border-radius:8px;
     border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer}
@@ -187,18 +191,20 @@
     <label class="opt on" id="opt-latest">
       <input type="radio" name="rmode" value="latest" checked>
       <div><div class="ol">Latest recoverable point</div>
-        <div class="os">Replay all archived WAL — restore as close to now as possible.</div></div>
+        <div class="os">Replay all archived WAL — restore as close to now as possible.</div>
+        <div class="os" id="latest-when"></div></div>
     </label>
     <label class="opt" id="opt-pit">
       <input type="radio" name="rmode" value="pit">
       <div style="flex:1"><div class="ol">Point in time</div>
-        <div class="os">Pick a moment inside the recoverable window.</div>
+        <div class="os">Pick a moment inside the recoverable window — slide near a ▽ to snap to a backup.</div>
         <div class="pit" id="pit">
           <div class="timeline" id="mtimeline"><div class="wal" id="mwal"></div>
             <div class="marker" id="mmarker"></div></div>
           <div class="tends"><span id="mstart"></span><span>now</span></div>
           <input type="range" id="slider" min="0" max="1000" value="1000">
           <div class="read"><span class="big" id="seltime"></span><span class="ago" id="selago"></span></div>
+          <div class="pinfo" id="pitinfo"></div>
         </div>
       </div>
     </label>
@@ -242,6 +248,32 @@ function fmtBytes(n){
 }
 function fmtStamp(s){
   return (s && s.length>=14) ? `${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}` : (s||"");
+}
+// CNPG ScheduledBackup cron is 6-field (leading seconds); humanize the common cases
+function humanCron(c){
+  if(!c) return "manual";
+  const p = c.trim().split(/\s+/);
+  const f = p.length===6 ? p : ["0", ...p];
+  const [, min, hr, dom, mon, dow] = f;
+  const hhmm = `${String(hr).padStart(2,"0")}:${String(min).padStart(2,"0")}`;
+  const nums = x => /^\d+$/.test(x);
+  if(dom==="*"&&mon==="*"&&dow==="*"&&nums(hr)&&nums(min)) return `daily ${hhmm}`;
+  if(dom==="*"&&mon==="*"&&nums(dow)&&nums(hr))
+    return `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][+dow]||dow} ${hhmm}`;
+  return c;   // fall back to the raw expression
+}
+// WAL segment index from a 24-hex WAL filename (16MB segs, 256 per logical file)
+function walSeg(name){
+  if(!name || name.length<24) return null;
+  return parseInt(name.slice(8,16),16)*256 + parseInt(name.slice(16,24),16);
+}
+// the base backup a PITR to time t would bootstrap from: newest completed at/before t
+function baseBackupFor(t){
+  let base = null;
+  (SNAP.backups||[]).filter(b=>b.phase==="completed"&&b.stoppedAt)
+    .map(b=>({...b, ms:Date.parse(b.stoppedAt)})).sort((a,b)=>a.ms-b.ms)
+    .forEach(x=>{ if(x.ms <= t+1000) base = x; });
+  return base;
 }
 
 async function post(id, params){
@@ -340,11 +372,27 @@ function renderTopology(s){
     const segs = (aw.archived!=null) ? aw.archived+" WAL segs" : "WAL archive";
     const stip = `object store\ns3://${os.bucket}/${os.path||""}\n@ ${os.endpoint||"?"}\n`+
       `${aw.archived!=null?aw.archived+" WAL segments archived":"archiving"}`+
+      `${s.data_size!=null?`\n~${fmtBytes(s.data_size)} data (≈ base backup size)`:""}`+
       `${aw.failed?`\n${aw.failed} archive failures (cumulative since stats reset)`:""}`;
-    store = `<span class="arrow">→<small>WAL / backups</small></span>
-      <div class="col"><div class="node store" data-tip="${esc(stip)}">
+    const storeNode = `<div class="node store" data-tip="${esc(stip)}">
         <div class="r">object store${aw.failed?` <span class="badge potential">${aw.failed} FAIL</span>`:""}</div>
-        <div class="n">${os.bucket||"bucket"}</div><div class="z">${segs}</div></div></div>`;
+        <div class="n">${os.bucket||"bucket"}</div><div class="z">${segs}</div></div>`;
+    // the auto-backup policy (ScheduledBackup + retention) is part of the system too
+    const sc = (s.schedules||[])[0], ret = s.retention||"";
+    let policy = "";
+    if(sc || ret){
+      const when = sc ? humanCron(sc.schedule) : "manual only";
+      const susp = sc && sc.suspend;
+      const ptip = `backup policy\n`+
+        (sc ? `schedule: ${sc.schedule}\n${when}${susp?" · SUSPENDED":""}` : "no schedule — manual backups only")+
+        (ret ? `\nretention: ${ret}` : "\nretention: none (backups kept forever)");
+      policy = `<div class="node ${sc&&!susp?'ok':''}" data-tip="${esc(ptip)}">
+        <div class="r">backup policy${susp?` <span class="badge potential">SUSPENDED</span>`:""}</div>
+        <div class="n" style="font-size:12.5px">${sc?when:"manual"}</div>
+        <div class="z">${ret?"retain "+ret:"no retention"}</div></div>`;
+    }
+    store = `<span class="arrow">→<small>WAL / backups</small></span>
+      <div class="col">${storeNode}${policy}</div>`;
   }
   scada.innerHTML = `
     <div class="flow">
@@ -389,23 +437,32 @@ function renderRecovery(s){
   document.getElementById("rfoot").innerHTML = [
     `recoverable from <b>${ago(t0)}</b>`,
     `<b>${n}</b> base backup${n===1?"":"s"}`,
+    s.data_size!=null?`~<b>${fmtBytes(s.data_size)}</b> data`:"",
     aw.archived!=null?`<b>${aw.archived}</b> WAL segments archived`:"",
+    s.retention?`retention <b>${s.retention}</b>`:"",
     aw.failed?`<b style="color:var(--crit)">${aw.failed}</b> archive failures`:"",
     `▽ = base backup · shaded band = restorable to any point`,
   ].filter(Boolean).join("&nbsp;·&nbsp;");
 }
 
 /* ---- PITR restore modal ---- */
-let MODE = "latest";
+let MODE = "latest", TICKS = [], T0 = 0, T1 = 0;
 function openModal(){
   if(!SNAP.recoverability_point){ log("no recovery window yet", false); return; }
   MODE = "latest";
   document.querySelector('input[name=rmode][value=latest]').checked = true;
   syncModeUI();
-  const t0 = Date.parse(SNAP.recoverability_point), t1 = Date.now();
-  document.getElementById("mstart").textContent = new Date(t0).toLocaleTimeString();
-  drawTimeline(document.getElementById("mtimeline"), document.getElementById("mwal"), t0, t1);
-  const sl = document.getElementById("slider"); sl.value = 1000; updateSlider();
+  T0 = Date.parse(SNAP.recoverability_point); T1 = Date.now();
+  document.getElementById("latest-when").textContent =
+    `≈ ${new Date(T1).toLocaleString()} · just now`;
+  document.getElementById("mstart").textContent = new Date(T0).toLocaleTimeString();
+  drawTimeline(document.getElementById("mtimeline"), document.getElementById("mwal"), T0, T1);
+  // backup ticks expressed as slider positions, for soft-snapping
+  TICKS = (SNAP.backups||[]).filter(b=>b.phase==="completed"&&b.stoppedAt).map(b=>({
+    name:b.name, ms:Date.parse(b.stoppedAt), endWal:b.endWal,
+    value: Math.round((Date.parse(b.stoppedAt)-T0)/((T1-T0)||1)*1000),
+  }));
+  const sl = document.getElementById("slider"); sl.value = 1000; updateSlider("");
   document.getElementById("scrim").classList.add("on");
 }
 function closeModal(){ document.getElementById("scrim").classList.remove("on"); }
@@ -417,28 +474,45 @@ function syncModeUI(){
   document.getElementById("pit").classList.toggle("on", MODE==="pit");
 }
 function sliderTime(){
-  const t0 = Date.parse(SNAP.recoverability_point), t1 = Date.now();
   const f = +document.getElementById("slider").value / 1000;
-  return t0 + (t1-t0)*f;
+  return T0 + (T1-T0)*f;
 }
-function updateSlider(){
-  const t = sliderTime(), t0 = Date.parse(SNAP.recoverability_point), t1 = Date.now();
-  const pct = (t-t0)/((t1-t0)||1)*100;
-  document.getElementById("mmarker").style.left = pct+"%";
+function onSlide(){
+  document.querySelector('input[name=rmode][value=pit]').checked = true; syncModeUI();
+  const sl = document.getElementById("slider");
+  let v = +sl.value, snapName = "";
+  for(const tk of TICKS){ if(Math.abs(tk.value - v) <= 16){ v = tk.value; sl.value = v; snapName = tk.name; break; } }
+  updateSlider(snapName);
+}
+function updateSlider(snapName){
+  const t = sliderTime();
+  document.getElementById("mmarker").style.left = (t-T0)/((T1-T0)||1)*100 + "%";
   document.getElementById("seltime").textContent = new Date(t).toLocaleString();
-  const near = (t1-t)<1500;
+  const near = (T1-t) < 1500;
   document.getElementById("selago").textContent = near ? "now (latest)" : ago(t);
+  // which base backup PITR uses, how much WAL it replays, how much data it carries
+  const info = document.getElementById("pitinfo"), base = baseBackupFor(t);
+  if(!base){ info.textContent = "no base backup at or before this point — pick a later time"; return; }
+  const segNow = walSeg((SNAP.archived_wal||{}).last), segBase = walSeg(base.endWal);
+  let parts = "?";
+  if(segNow!=null && segBase!=null){
+    const f = Math.max(0, Math.min(1, (t-base.ms) / ((T1-base.ms)||1)));  // fraction: est. is fine
+    parts = "~" + Math.max(0, Math.round(f*(segNow-segBase)));
+  }
+  const sz = SNAP.data_size!=null ? fmtBytes(SNAP.data_size) : "?";
+  info.innerHTML =
+    `restores from base backup <b>${base.name}</b> (${ago(base.ms)}, ~${sz})` +
+    `<br>then replays <b>${parts}</b> WAL segments forward to the target` +
+    (snapName ? ` · <span style="color:var(--accent)">snapped to this backup</span>` : "");
 }
 document.addEventListener("change", e=>{ if(e.target.name==="rmode") syncModeUI(); });
-document.addEventListener("input", e=>{ if(e.target.id==="slider"){
-  document.querySelector('input[name=rmode][value=pit]').checked = true; syncModeUI(); updateSlider();
-}});
+document.addEventListener("input", e=>{ if(e.target.id==="slider") onSlide(); });
 
 function confirmRestore(){
   let target = "", label = "the latest recoverable point";
   if(MODE==="pit"){
     const t = sliderTime();
-    if((Date.now()-t) < 1500){ target=""; }         // slid to the far right → latest
+    if((T1-t) < 1500){ target=""; }                 // slid to the far right → latest
     else { target = new Date(t).toISOString(); label = new Date(t).toLocaleString()+" ("+ago(t)+")"; }
   }
   closeModal();

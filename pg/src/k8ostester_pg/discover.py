@@ -50,7 +50,8 @@ def build_snapshot(
         "upgrading": "upgrad" in phase.lower(),
         "backup_configured": "backup" in spec,
         "backups_completed": completed,
-        "backups": _backup_view(backups),   # name/phase/times, newest first
+        "backups": _backup_view(backups),   # name/phase/times/WAL, newest first
+        "retention": spec.get("backup", {}).get("retentionPolicy", ""),
         # the PITR window: WAL is archived from the earliest recoverable point to now
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
@@ -112,6 +113,8 @@ def _backup_view(backups: list[dict]) -> list[dict]:
             "phase": st.get("phase", ""),
             "startedAt": st.get("startedAt", ""),
             "stoppedAt": st.get("stoppedAt", ""),
+            # WAL boundary of the backup — lets the UI count segments to replay
+            "endWal": st.get("endWal", ""),
         })
     return out
 
@@ -153,6 +156,8 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         if i["name"] in repl:
             i.update(repl[i["name"]])
     snap["archived_wal"] = _archiver(k8s, namespace, snap["primary"])
+    snap["schedules"] = _schedules(k8s, namespace)          # auto-backup policy
+    snap["data_size"] = _data_size(k8s, namespace, snap["primary"])
     snap["credentials"] = _credentials(k8s, namespace, snap["blue_green"])
     # a restore cluster still bootstrapping also locks the tool
     others = k8s.custom.list_namespaced_custom_object(
@@ -163,6 +168,36 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         snap["busy"] = True
         snap["busy_reason"] = snap["busy_reason"] or "restore in progress"
     return snap
+
+
+def _schedules(k8s: ClusterClient, namespace: str) -> list[dict]:
+    """Auto-backup policy: the ScheduledBackup cron(s) governing this cluster."""
+    try:
+        items = k8s.custom.list_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, namespace, "scheduledbackups").get("items", [])
+    except Exception:
+        return []
+    return [{
+        "name": s.get("metadata", {}).get("name", ""),
+        "schedule": s.get("spec", {}).get("schedule", ""),
+        "suspend": bool(s.get("spec", {}).get("suspend", False)),
+    } for s in items]
+
+
+def _data_size(k8s: ClusterClient, namespace: str, primary: str) -> int | None:
+    """Total on-disk data size (sum of all databases) — a proxy for how much a
+    base backup carries. The Backup CR doesn't report its own byte size."""
+    if not primary:
+        return None
+    try:
+        out = k8s.exec_pod(namespace, primary,
+                           ["psql", "-U", "postgres", "-tA", "-c",
+                            "select coalesce(sum(pg_database_size(oid)),0)::bigint "
+                            "from pg_database"],
+                           container="postgres")
+        return int(out.strip())
+    except Exception:
+        return None
 
 
 def _parse_archiver(out: str) -> dict:

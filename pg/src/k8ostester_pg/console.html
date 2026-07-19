@@ -142,7 +142,7 @@
 </div>
 
 <script>
-let TAB = "ops", CAPS = [], SNAP = {};
+let TAB = "ops", CAPS = [], SNAP = {}, pitrTouched = false;
 
 function pick(t){
   TAB = t;
@@ -194,9 +194,15 @@ function renderActions(){
   });
 }
 
-function node(role, name, zone, cls){
-  return `<div class="node ${cls}"><div class="r">${role}</div>
+function node(role, name, zone, cls, title){
+  return `<div class="node ${cls}"${title?` title="${title}"`:""}><div class="r">${role}</div>
     <div class="n">${name}</div><div class="z">${zone||""}</div></div>`;
+}
+function fmtBytes(n){
+  if(n==null) return "n/a";
+  if(n<1024) return n+" B";
+  if(n<1048576) return (n/1024).toFixed(1)+" KB";
+  return (n/1048576).toFixed(1)+" MB";
 }
 
 function renderStatus(s){
@@ -216,21 +222,38 @@ function renderTopology(s){
   const scada = document.getElementById("scada");
   const primary = (s.instances||[]).find(i=>i.role==="primary");
   const replicas = (s.instances||[]).filter(i=>i!==primary);
-  const poolers = (s.poolers||[]).map(p=>node("pooler "+p.type, p.name, "", "ok")).join("");
-  const reps = replicas.map(r=>node("replica", r.name, r.zone, r.healthy?"ok":"bad")).join("");
+  const poolers = (s.poolers||[]).map(p=>node("pooler · "+p.type, p.name, "", "ok",
+    `PgBouncer pooler (${p.type}) — routes app traffic to the ${p.type==="ro"?"replicas":"primary"}`)).join("");
+  // replica nodes carry the edge state: sync mode + replication lag
+  const reps = replicas.map(r=>{
+    const sync = r.sync_state||"";
+    const lag = (r.lag_bytes!=null) ? fmtBytes(r.lag_bytes) : "";
+    const sub = [r.zone, lag && ("lag "+lag)].filter(Boolean).join(" · ");
+    const title = `replica ${r.name} · ${sync||"streaming?"} · lag ${lag||"n/a"} · `+
+      `zone ${r.zone||"—"} · ${r.healthy?"healthy":"unhealthy"}`;
+    return `<div class="node ${r.healthy?'ok':'bad'}" title="${title}">
+      <div class="r">replica${sync?" · "+sync:""}</div><div class="n">${r.name}</div>
+      <div class="z">${sub}</div></div>`;
+  }).join("");
   // the client node carries the credential state: which blue/green role it uses
   const cr = s.credentials||{};
-  const client = `<div class="node ok"><div class="r">client · app</div>
+  const ctitle = `app authenticates as ${cr.active_role||"app"}` +
+    (cr.rotated_at ? ` · last rotated ${fmtStamp(cr.rotated_at)}` : " · initial credentials");
+  const client = `<div class="node ok" title="${ctitle}"><div class="r">client · app</div>
     <div class="n">${cr.active_role||"app"}</div>
     <div class="cr">${cr.rotated_at ? "set "+fmtStamp(cr.rotated_at) : "initial creds"}</div></div>`;
+  const pnode = primary
+    ? node("primary", primary.name, primary.zone, "primary",
+        `primary ${primary.name} · PostgreSQL ${s.version} · zone ${primary.zone||"—"}`)
+    : node("primary","—","","bad","no primary elected");
   scada.innerHTML = `
     <div class="flow">
       <div class="col">${client}</div>
       <span class="arrow">→</span>
       <div class="col">${poolers || node("pooler","—","","")}</div>
       <span class="arrow">→</span>
-      <div class="col">${primary?node("primary",primary.name,primary.zone,"primary"):node("primary","—","","bad")}</div>
-      <span class="arrow">→</span>
+      <div class="col">${pnode}</div>
+      <span class="arrow">⇉</span>
       <div class="col">${reps || node("replica","—","","")}</div>
     </div>`;
 }
@@ -244,18 +267,26 @@ function renderRecovery(s){
   document.getElementById("rstart").textContent = new Date(t0).toLocaleString();
   document.getElementById("rwin").textContent =
     "WAL " + new Date(t0).toLocaleTimeString() + " → now";
+  // the WAL-covered (recoverable) area: the whole span from the earliest
+  // recoverable point to now. PITR can land anywhere in here.
+  const wal = document.getElementById("wal");
+  wal.style.left = "0"; wal.style.width = "100%";
+  wal.title = `Recoverable via WAL: ${new Date(t0).toLocaleString()} → now — `+
+    `PITR can restore to any point in this window.`;
   const track = document.getElementById("track");
   track.querySelectorAll(".tick").forEach(e=>e.remove());
   (s.backups||[]).filter(b=>b.phase==="completed"&&b.stoppedAt).forEach(b=>{
     const pct = Math.max(0, Math.min(100, (Date.parse(b.stoppedAt)-t0)/span*100));
     const d = document.createElement("div"); d.className="tick"; d.style.left=pct+"%";
+    d.title = `base backup ${b.name} — completed ${new Date(b.stoppedAt).toLocaleString()}. `+
+      `WAL covers forward from here to now.`;
     track.appendChild(d);
   });
   const local = ms => { const d=new Date(ms - new Date().getTimezoneOffset()*60000);
     return d.toISOString().slice(0,19); };
   const pk = document.getElementById("pitr");
   pk.min = local(t0); pk.max = local(t1);
-  if(!pk.value) pk.value = local(t1);
+  if(!pitrTouched) pk.value = local(t1);   // track "now" until the user picks a time
   updateTmark();
 }
 
@@ -264,10 +295,11 @@ function updateTmark(){
   const t0 = Date.parse(rp), t1 = Date.now(), span=(t1-t0)||1;
   const pk = document.getElementById("pitr");
   const t = pk.value ? Date.parse(pk.value) : t1;
-  document.getElementById("tmark").style.left =
-    Math.max(0, Math.min(100, (t-t0)/span*100)) + "%";
+  const tm = document.getElementById("tmark");
+  tm.style.left = Math.max(0, Math.min(100, (t-t0)/span*100)) + "%";
+  tm.title = `PITR target: ${new Date(t).toLocaleString()}`;
 }
-document.addEventListener("input", e=>{ if(e.target.id==="pitr") updateTmark(); });
+document.addEventListener("input", e=>{ if(e.target.id==="pitr"){ pitrTouched=true; updateTmark(); } });
 
 function render(data){
   const err = document.getElementById("err");

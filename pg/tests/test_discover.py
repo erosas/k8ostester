@@ -67,3 +67,11 @@ def test_snapshot_drives_the_capability_map_end_to_end():
     caps = {c["id"]: c["enabled"] for c in capabilities(CNPG_ACTIONS, s)}
     assert caps["upgrade"] is True and caps["rotate"] is True
     assert caps["kill-primary"] is False   # a partition fault is in flight → interlock
+
+
+def test_parse_replication_maps_standby_to_sync_and_lag():
+    from k8ostester_pg.discover import _parse_replication
+    r = _parse_replication("pg-2|quorum|0\npg-3|async|8192\n")
+    assert r["pg-2"] == {"sync_state": "quorum", "lag_bytes": 0}
+    assert r["pg-3"] == {"sync_state": "async", "lag_bytes": 8192}
+    assert _parse_replication("") == {}

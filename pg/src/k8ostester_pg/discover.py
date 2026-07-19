@@ -111,6 +111,11 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         for p in k8s.custom.list_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, namespace, "poolers").get("items", [])
     ]
+    # replication lag + sync state per replica, for the topology edges
+    repl = _replication(k8s, namespace, snap["primary"])
+    for i in snap["instances"]:
+        if i["name"] in repl:
+            i.update(repl[i["name"]])
     snap["credentials"] = _credentials(k8s, namespace, snap["blue_green"])
     # a restore cluster still bootstrapping also locks the tool
     others = k8s.custom.list_namespaced_custom_object(
@@ -121,6 +126,36 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         snap["busy"] = True
         snap["busy_reason"] = snap["busy_reason"] or "restore in progress"
     return snap
+
+
+def _parse_replication(out: str) -> dict:
+    """Parse 'app_name|sync_state|lag_bytes' lines from pg_stat_replication."""
+    res: dict = {}
+    for line in out.strip().splitlines():
+        parts = line.split("|")
+        if len(parts) >= 3 and parts[0]:
+            try:
+                lag = int(parts[2] or 0)
+            except ValueError:
+                lag = 0
+            res[parts[0]] = {"sync_state": parts[1], "lag_bytes": lag}
+    return res
+
+
+def _replication(k8s: ClusterClient, namespace: str, primary: str) -> dict:
+    """Replica → {sync_state, lag_bytes} from the primary's pg_stat_replication."""
+    if not primary:
+        return {}
+    query = ("select application_name, sync_state, "
+             "coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn),0)::bigint "
+             "from pg_stat_replication")
+    try:
+        out = k8s.exec_pod(namespace, primary,
+                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
+                           container="postgres")
+    except Exception:
+        return {}
+    return _parse_replication(out)
 
 
 def _credentials(k8s: ClusterClient, namespace: str, blue_green: bool) -> dict:

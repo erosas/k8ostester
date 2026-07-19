@@ -15,6 +15,7 @@ from k8ostester_kernel import chaos
 from k8ostester_kernel.control import is_enabled
 from k8ostester_kernel.k8s import ClusterClient
 
+from k8ostester_pg import ops
 from k8ostester_pg.control import CNPG_ACTIONS
 from k8ostester_pg.discover import CNPG_GROUP, CNPG_VERSION
 
@@ -66,4 +67,7 @@ _HANDLERS = {
     "partition-primary": _partition_primary,
     "kill-replica": _kill_replica,
     "backup": _backup,
+    "rotate": lambda k8s, ns, s: ops.rotate_credentials(k8s, ns),
+    "upgrade": lambda k8s, ns, s: ops.minor_upgrade(k8s, ns, s["target"]),
+    "restore": lambda k8s, ns, s: ops.restore_latest(k8s, ns),
 }

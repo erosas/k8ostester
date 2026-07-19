@@ -30,18 +30,21 @@ from k8ostester_kernel.control import Action
 # disables the action (the safe default for a control plane) instead of crashing
 # the whole capability map.
 CNPG_ACTIONS: list[Action] = [
-    # --- ops: mutations you want -------------------------------------------
+    # --- ops: routine on-call, low-risk ------------------------------------
     Action("backup", "Take base backup", "ops",
            lambda s: s.get("ready") and s.get("backup_configured")),
-    Action("restore", "Restore (PITR)", "ops",
-           lambda s: s.get("backups_completed", 0) > 0 and s.get("pitr_window"),
-           destructive=True),
     Action("rotate", "Rotate credentials", "ops",
            lambda s: s.get("ready") and s.get("blue_green")),
-    Action("upgrade", "Minor upgrade", "ops",
+    # --- chaos: destructive / high-risk / infrequent -----------------------
+    # restore (creates a cluster) and minor upgrade (high-risk, rare) live here
+    # with the faults — anything past a credential rotation is break-glass.
+    Action("restore", "Restore (PITR)", "chaos",
+           lambda s: s.get("backups_completed", 0) > 0 and s.get("pitr_window"),
+           destructive=True),
+    Action("upgrade", "Minor upgrade", "chaos",
            lambda s: s.get("ready") and bool(s.get("target"))
-           and s.get("version") != s.get("target") and not s.get("upgrading")),
-    # --- chaos: mutations that test it -------------------------------------
+           and s.get("version") != s.get("target") and not s.get("upgrading"),
+           destructive=True),
     Action("kill-primary", "Kill primary", "chaos",
            lambda s: bool(s.get("primary")) and not s.get("fault_in_flight"),
            destructive=True),

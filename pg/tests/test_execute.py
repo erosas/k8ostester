@@ -1,5 +1,5 @@
 """Unit tests for the action executor — mock the k8s client, no cluster."""
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from k8ostester_pg.execute import ActionDenied, execute
@@ -43,6 +43,12 @@ def test_execute_gates_on_the_capability():
     k8s.core.delete_namespaced_pod.assert_not_called()
 
 
-def test_unwired_ops_action_raises_not_implemented():
-    with pytest.raises(NotImplementedError):
-        execute(MagicMock(), "ns", "upgrade", snap())
+@patch("k8ostester_pg.execute.ops")
+def test_ops_actions_dispatch_to_the_ops_module(mock_ops):
+    k8s = MagicMock()
+    execute(k8s, "ns", "upgrade", snap())
+    mock_ops.minor_upgrade.assert_called_once_with(k8s, "ns", "16.6")   # the target
+    execute(k8s, "ns", "rotate", snap())
+    mock_ops.rotate_credentials.assert_called_once_with(k8s, "ns")
+    execute(k8s, "ns", "restore", snap())
+    mock_ops.restore_latest.assert_called_once_with(k8s, "ns")

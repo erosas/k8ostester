@@ -40,7 +40,7 @@ def build_dashboard(opts: dict) -> str:
     label = (opts.get("scrape_label") or "pod").strip()
 
     # panels, in order — some only make sense for certain configs
-    order = ["up", "connections", "connections-by-role", "db-size", "wal"]
+    order = ["up", "flags", "connections", "connections-by-role", "activity", "db-size", "wal"]
     if instances > 1:
         order += ["replication-lag", "replication-slots"]
     if opts.get("backups"):

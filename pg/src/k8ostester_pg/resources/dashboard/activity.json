@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Query activity",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "max(cnpg_backends_max_tx_duration_seconds{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "longest transaction (s)", "refId": "A"},
+    {"expr": "sum(cnpg_backends_waiting_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "waiting backends", "refId": "B"}
+  ],
+  "fieldConfig": {
+    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

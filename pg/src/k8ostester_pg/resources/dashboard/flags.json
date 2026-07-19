@@ -1,0 +1,17 @@
+{
+  "type": "stat",
+  "title": "Operator warnings",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "max(cnpg_collector_fencing_on{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "fencing", "refId": "A"},
+    {"expr": "max(cnpg_collector_manual_switchover_required{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "manual switchover", "refId": "B"}
+  ],
+  "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "value_and_name"},
+  "fieldConfig": {
+    "defaults": {
+      "mappings": [{"type": "value", "options": {"0": {"text": "OK"}, "1": {"text": "ACTIVE"}}}],
+      "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+    },
+    "overrides": []
+  }
+}

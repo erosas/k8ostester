@@ -1,7 +1,9 @@
 # Architecture restructure — kernel + verticals
 
-Status: **design, for review** (no code yet). Supersedes the general-framework
-shape of `k8ostester-core` with a thinner, simpler architecture.
+Status: **implemented.** The generic `k8ostester-core` engine has been retired;
+the product is now the kernel + the `pg` vertical + the shared console, as
+described below. The migration steps at the bottom are all done. Kept as the
+design record.
 
 ## Why
 

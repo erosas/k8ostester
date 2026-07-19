@@ -365,6 +365,12 @@
       <label>OTEL endpoint (optional)<input id="b-otel" placeholder="otel-collector.obs.svc:4317">
         <span class="fcap">emits an OpenTelemetry Collector</span></label>
     </div>
+    <div class="bgrid">
+      <label>Goal · max replication lag (s)<input id="b-goal-lag" placeholder="e.g. 30">
+        <span class="fcap">dashboard waterline + Prometheus alert</span></label>
+      <label>Goal · max connections<input id="b-goal-conn" placeholder="e.g. 150"></label>
+      <label>Goal · max WAL archive delay (s)<input id="b-goal-archive" placeholder="e.g. 120"></label>
+    </div>
     <div class="bpre" id="b-output">
       <button class="on" data-o="manifest" onclick="switchOutput('manifest')">Manifest (YAML)</button>
       <button data-o="dashboard" onclick="switchOutput('dashboard')">Grafana dashboard (JSON)</button>
@@ -1264,6 +1270,7 @@ function builderOpts(){
     schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
     app_roles:ck("b-approles"),
     monitoring:ck("b-monitoring"), otel_endpoint:v("b-otel"),
+    goals:{ repl_lag:v("b-goal-lag"), connections:v("b-goal-conn"), archive_delay:v("b-goal-archive") },
   };
 }
 function switchOutput(o){

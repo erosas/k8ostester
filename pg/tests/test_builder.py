@@ -87,6 +87,35 @@ def test_dashboard_panels_adapt_to_the_config():
     assert 'pod=~"pg-[0-9]+"' in full["panels"][0]["targets"][0]["expr"]
 
 
+def test_goals_become_waterlines_and_alert_rules():
+    import json
+
+    from k8ostester_pg.dashboard import build_dashboard
+    opts = {"name": "pg", "instances": 3, "backups": True,
+            "goals": {"repl_lag": 30, "connections": "", "archive_delay": 120}}
+
+    # waterline: a red threshold line lands on the matching panel, not others
+    d = json.loads(build_dashboard(opts))
+    panel = {p["title"]: p for p in d["panels"]}
+    lag = panel["Replication lag"]["fieldConfig"]["defaults"]
+    assert lag["thresholds"]["steps"][-1]["value"] == 30
+    assert lag["custom"]["thresholdsStyle"]["mode"] == "line"
+    # no goal set for connections -> no threshold on that panel
+    assert "thresholds" not in panel["Active connections"]["fieldConfig"]["defaults"]
+
+    # alerts: one PrometheusRule with a rule per set goal (connections skipped)
+    docs = [x for x in yaml.safe_load_all(build_manifest(opts)) if x]
+    rule = next(x for x in docs if x["kind"] == "PrometheusRule")
+    alerts = {r["alert"]: r for r in rule["spec"]["groups"][0]["rules"]}
+    assert set(alerts) == {"ReplicationLagHigh", "ArchiveDelayHigh"}
+    assert alerts["ReplicationLagHigh"]["expr"] == 'cnpg_pg_replication_lag{pod=~"pg-[0-9]+"} > 30'
+
+
+def test_no_goals_no_prometheus_rule():
+    kinds = {d["kind"] for d in yaml.safe_load_all(build_manifest({})) if d}
+    assert "PrometheusRule" not in kinds
+
+
 def test_schedule_requires_backups():
     # a ScheduledBackup with nowhere to store is meaningless — omit it
     assert "ScheduledBackup" not in kinds(build_manifest({"schedule": True}))

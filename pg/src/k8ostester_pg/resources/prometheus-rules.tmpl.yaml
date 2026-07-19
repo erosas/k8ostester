@@ -1,0 +1,10 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ${name}-slo
+  labels: {release: prometheus}
+spec:
+  groups:
+    - name: ${name}-slo
+      rules:
+${rules}

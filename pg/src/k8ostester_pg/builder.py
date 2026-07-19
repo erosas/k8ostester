@@ -12,6 +12,8 @@ from __future__ import annotations
 from importlib import resources
 from string import Template
 
+from k8ostester_pg.goals import GOALS, num
+
 # sync policy choice -> (CNPG method, number). "async" omits the block entirely.
 _SYNC = {"quorum": ("any", 1), "priority": ("first", 1)}
 
@@ -83,4 +85,23 @@ def build_manifest(opts: dict) -> str:
     if endpoint:
         docs.append(_tmpl("otel-collector.tmpl.yaml").substitute(name=name, endpoint=endpoint))
 
+    # goals -> Prometheus alert rules (the same goals become dashboard waterlines)
+    rules = _alert_rules(name, opts.get("goals") or {})
+    if rules:
+        docs.append(_tmpl("prometheus-rules.tmpl.yaml").substitute(name=name, rules=rules))
+
     return "\n---\n".join(d.strip() for d in docs) + "\n"
+
+
+def _alert_rules(name: str, goals: dict) -> str:
+    """The PrometheusRule entries for whichever goals are set (indented for YAML)."""
+    pods = f"{name}-[0-9]+"
+    frags = []
+    for key, (_panel, alert, expr_t, summary_t) in GOALS.items():
+        v = num(goals.get(key))
+        if v is None:
+            continue
+        frags.append(_tmpl("prometheus-rule.tmpl.yaml").substitute(
+            alert=alert, expr=expr_t.format(pods=pods, v=v),
+            summary=summary_t.format(v=v), name=name))
+    return "".join(frags)

@@ -14,15 +14,27 @@ import json
 from importlib import resources
 
 from k8ostester_pg.builder import _clamp
+from k8ostester_pg.goals import GOALS, num
+
+_PANEL_GOAL = {panel: key for key, (panel, *_rest) in GOALS.items()}   # panel key -> goal key
 
 
 def _text(name: str) -> str:
     return resources.files("k8ostester_pg").joinpath("resources", name).read_text()
 
 
+def _waterline(panel: dict, value: float) -> None:
+    """Draw the goal as a red threshold line on a timeseries panel."""
+    d = panel.setdefault("fieldConfig", {}).setdefault("defaults", {})
+    d["thresholds"] = {"mode": "absolute",
+                       "steps": [{"color": "green", "value": None}, {"color": "red", "value": value}]}
+    d.setdefault("custom", {})["thresholdsStyle"] = {"mode": "line"}
+
+
 def build_dashboard(opts: dict) -> str:
     name = (opts.get("name") or "pg").strip()
     instances = _clamp(opts.get("instances"), 1, 9, 3)
+    goals = opts.get("goals") or {}
 
     # panels, in order — some only make sense for certain configs
     order = ["up", "connections", "db-size"]
@@ -36,6 +48,9 @@ def build_dashboard(opts: dict) -> str:
         panel = json.loads(_text(f"dashboard/{key}.json").replace("__CLUSTER__", name))
         panel["id"] = i + 1
         panel["gridPos"] = {"h": 8, "w": 12, "x": (i % 2) * 12, "y": (i // 2) * 8}
+        goal_val = num(goals.get(_PANEL_GOAL.get(key)))   # a goal for this panel?
+        if goal_val is not None:
+            _waterline(panel, goal_val)
         panels.append(panel)
 
     dash = json.loads(_text("dashboard.tmpl.json").replace("__TITLE__", f"{name} — CloudNativePG"))

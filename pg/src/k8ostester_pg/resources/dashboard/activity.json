@@ -1,13 +1,16 @@
 {
   "type": "timeseries",
   "title": "Query activity",
+  "description": "Longest-running transaction (in seconds) and how many backends are currently waiting (e.g. on locks). A climbing 'longest transaction' can be a stuck query or idle-in-transaction; 'waiting backends' above zero means lock contention.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "max(cnpg_backends_max_tx_duration_seconds{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "longest transaction (s)", "refId": "A"},
+    {"expr": "max(cnpg_backends_max_tx_duration_seconds{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "longest transaction", "refId": "A"},
     {"expr": "sum(cnpg_backends_waiting_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "waiting backends", "refId": "B"}
   ],
   "fieldConfig": {
-    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
-    "overrides": []
+    "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
+    "overrides": [
+      {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "unit", "value": "short"}]}
+    ]
   }
 }

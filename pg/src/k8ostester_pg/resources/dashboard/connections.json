@@ -1,12 +1,13 @@
 {
   "type": "timeseries",
-  "title": "Active connections",
+  "title": "Active connections (total)",
+  "description": "Total active backends across all instances (sum of pg_stat_activity). Counts your app, the pooler, replica streaming connections and the metrics exporter. The waterline, if set, is your max-connections goal.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "sum(cnpg_backends_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "backends", "refId": "A"}
+    {"expr": "sum(cnpg_backends_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "total backends", "refId": "A"}
   ],
   "fieldConfig": {
-    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 12}, "color": {"mode": "palette-classic"}},
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 12}, "color": {"mode": "palette-classic"}},
     "overrides": []
   }
 }

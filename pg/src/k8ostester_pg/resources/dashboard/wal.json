@@ -1,9 +1,10 @@
 {
   "type": "timeseries",
   "title": "WAL throughput",
+  "description": "Write-Ahead Log generated per second (rate of cnpg_collector_wal_bytes, summed across instances). A proxy for write load — higher means more changes flowing to replicas and to the WAL archive.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "sum(rate(cnpg_collector_wal_bytes{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[5m]))", "legendFormat": "WAL bytes/s", "refId": "A"}
+    {"expr": "sum(rate(cnpg_collector_wal_bytes{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[5m]))", "legendFormat": "WAL / second", "refId": "A"}
   ],
   "fieldConfig": {
     "defaults": {"unit": "Bps", "custom": {"drawStyle": "line", "fillOpacity": 14}, "color": {"mode": "palette-classic"}},

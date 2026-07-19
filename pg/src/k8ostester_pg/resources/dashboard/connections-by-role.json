@@ -1,12 +1,13 @@
 {
   "type": "timeseries",
   "title": "Connections by role (credential)",
+  "description": "Active connections grouped by the database role they logged in as — i.e. which credential is in use. Typically: app_a / app_b = your app's active credential (this shifts when you rotate), streaming_replica = the standbys, cnpg_pooler_pgbouncer = the connection pooler, cnpg_metrics_exporter = monitoring.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
     {"expr": "sum by (usename) (cnpg_backends_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "{{usename}}", "refId": "A"}
   ],
   "fieldConfig": {
-    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 22, "stacking": {"mode": "normal"}}, "color": {"mode": "palette-classic"}},
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 22, "stacking": {"mode": "normal"}}, "color": {"mode": "palette-classic"}},
     "overrides": []
   }
 }

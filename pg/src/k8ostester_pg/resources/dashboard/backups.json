@@ -1,6 +1,7 @@
 {
   "type": "timeseries",
   "title": "Backups & recovery window",
+  "description": "Time since the last successful base backup, and how far back the point-in-time-recovery window reaches (age of the earliest recoverable point) — both in seconds. 'Since last backup' growing past your backup schedule means backups are falling behind.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
     {"expr": "time() - max(cnpg_collector_last_available_backup_timestamp{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "since last backup", "refId": "A"},

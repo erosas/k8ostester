@@ -1,13 +1,16 @@
 {
   "type": "timeseries",
   "title": "WAL archiving",
+  "description": "Seconds since the last WAL file was archived to object storage, and the cumulative count of failed archive attempts. A rising 'since last archive' means archiving has stalled — the PITR window stops advancing and WAL piles up on the primary. The waterline, if set, is your max-archive-delay goal.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "time() - cnpg_pg_stat_archiver_last_archived_time{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "since last archive (s)", "refId": "A"},
-    {"expr": "cnpg_pg_stat_archiver_failed_count{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "failed count", "refId": "B"}
+    {"expr": "time() - cnpg_pg_stat_archiver_last_archived_time{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "since last archive", "refId": "A"},
+    {"expr": "cnpg_pg_stat_archiver_failed_count{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "failed attempts (total)", "refId": "B"}
   ],
   "fieldConfig": {
-    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
-    "overrides": []
+    "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
+    "overrides": [
+      {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [{"id": "unit", "value": "short"}]}
+    ]
   }
 }

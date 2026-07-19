@@ -1,13 +1,15 @@
 {
   "type": "stat",
   "title": "Instances up",
+  "description": "Health of each PostgreSQL instance (cnpg_collector_up): UP (green) or DOWN (red). One tile per pod.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "cnpg_collector_up{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
+    {"expr": "cnpg_collector_up{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{__LABEL__}}", "refId": "A"}
   ],
-  "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}},
+  "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "value_and_name", "text": {"valueSize": 26, "titleSize": 14}},
   "fieldConfig": {
     "defaults": {
+      "unit": "none",
       "mappings": [{"type": "value", "options": {"0": {"text": "DOWN"}, "1": {"text": "UP"}}}],
       "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
     },

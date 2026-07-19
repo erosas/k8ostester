@@ -1,15 +1,17 @@
 {
   "type": "stat",
   "title": "Operator warnings",
+  "description": "CloudNativePG conditions that need a human. 'fencing' = an instance is fenced off (isolated from traffic). 'manual switchover' = the operator can't fail over on its own and needs you to act. CLEAR (green) is normal; ACTION NEEDED (red) means look at the cluster.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
     {"expr": "max(cnpg_collector_fencing_on{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "fencing", "refId": "A"},
     {"expr": "max(cnpg_collector_manual_switchover_required{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "manual switchover", "refId": "B"}
   ],
-  "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "value_and_name"},
+  "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}, "textMode": "value_and_name", "text": {"valueSize": 20, "titleSize": 13}},
   "fieldConfig": {
     "defaults": {
-      "mappings": [{"type": "value", "options": {"0": {"text": "OK"}, "1": {"text": "ACTIVE"}}}],
+      "unit": "none",
+      "mappings": [{"type": "value", "options": {"0": {"text": "CLEAR"}, "1": {"text": "ACTION NEEDED"}}}],
       "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
     },
     "overrides": []

@@ -144,6 +144,16 @@ def test_parse_archiver_reads_segment_counts_and_lag():
     assert _parse_archiver("") == {}
 
 
+def test_conditions_listed_for_the_status_strip():
+    c = cluster()
+    c["status"]["conditions"] = [
+        {"type": "Ready", "status": "True", "message": "ok"},
+        {"type": "ContinuousArchiving", "status": "False", "message": "stalled"}]
+    conds = build_snapshot(c, [], [], [], False)["conditions"]
+    assert {"type": "Ready", "ok": True, "message": "ok"} in conds
+    assert {"type": "ContinuousArchiving", "ok": False, "message": "stalled"} in conds
+
+
 def test_continuous_archiving_condition_surfaced():
     from k8ostester_pg.discover import build_snapshot
     c = cluster()

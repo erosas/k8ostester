@@ -119,6 +119,13 @@
   .actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
   .alabel{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
     color:var(--muted);margin:20px 0 9px}
+  /* cluster status conditions strip */
+  .conds{display:none;flex-wrap:wrap;gap:7px;align-items:center;margin:14px 0 2px;
+    font-family:var(--mono);font-size:11px}
+  .conds .ph{color:var(--muted)} .conds .ph b{color:var(--ink)}
+  .cond{border:1px solid var(--border);border-radius:16px;padding:2px 9px;color:var(--muted);cursor:help}
+  .cond.ok{color:var(--ok);border-color:#33482f}
+  .cond.bad{color:var(--crit);border-color:#5a2327}
   /* break-glass danger zone — cordoned, armed to enable */
   .danger{margin-top:20px;border:1px solid #4a2327;border-radius:11px;background:#1c1315;padding:14px}
   .danger-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;
@@ -318,6 +325,7 @@
   </div>
 
   <div id="cluster">
+    <div class="conds" id="conditions"></div>
     <div class="alabel" style="margin-top:16px">Topology</div>
     <div class="scada" id="scada"></div>
 
@@ -1292,9 +1300,21 @@ function render(data){
   if(SNAP.busy){ lock.style.display="flex"; lock.textContent = "🔒 " + SNAP.busy_reason +
       " — mutating operations are locked until it finishes"; }
   else lock.style.display="none";
+  renderConditions(SNAP);
   renderTopology(SNAP);
   renderRecovery(SNAP);
   renderActions();
+}
+
+function renderConditions(s){
+  const el = document.getElementById("conditions");
+  const conds = s.conditions || [];
+  const phase = s.phase ? `<span class="ph">phase <b>${esch(s.phase)}</b></span>` : "";
+  const pills = conds.map(c=>`<span class="cond ${c.ok?'ok':'bad'}" `+
+    `data-tip="${esch(c.type + ': ' + (c.message || (c.ok?'ok':'not ok')))}">`+
+    `${c.ok?'✓':'✗'} ${esch(c.type)}</span>`).join("");
+  el.innerHTML = phase + pills;
+  el.style.display = (phase || pills) ? "flex" : "none";
 }
 
 /* ---- cluster builder ---- */

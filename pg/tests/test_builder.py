@@ -131,7 +131,7 @@ def test_goals_become_waterlines_and_alert_rules():
     assert lag["thresholds"]["steps"][-1]["value"] == 30
     assert lag["custom"]["thresholdsStyle"]["mode"] == "line"
     # no goal set for connections -> no threshold on that panel
-    assert "thresholds" not in panel["Active connections"]["fieldConfig"]["defaults"]
+    assert "thresholds" not in panel["Active connections (total)"]["fieldConfig"]["defaults"]
 
     # alerts: one PrometheusRule with a rule per set goal (connections skipped)
     docs = [x for x in yaml.safe_load_all(build_manifest(opts)) if x]

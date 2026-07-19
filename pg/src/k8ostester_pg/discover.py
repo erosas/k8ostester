@@ -75,6 +75,11 @@ def build_snapshot(
     return {
         "ready": instances > 0 and ready_n == instances,
         "phase": phase,                 # the cluster's own status line (live)
+        "conditions": [                 # CNPG status conditions, for the strip
+            {"type": c.get("type", ""), "ok": c.get("status") == "True",
+             "message": c.get("message", "")}
+            for c in status.get("conditions", [])
+        ],
         "primary": status.get("currentPrimary", ""),
         "replicas": replica_pods,
         "zones": zones,

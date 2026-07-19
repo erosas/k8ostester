@@ -1,9 +1,10 @@
 {
   "type": "timeseries",
   "title": "Replication lag",
+  "description": "How far each standby is behind the primary, in seconds. 0 = fully caught up. Sustained lag risks data loss on failover and stale reads. The waterline, if set, is your max-lag goal.",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "cnpg_pg_replication_lag{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
+    {"expr": "cnpg_pg_replication_lag{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{__LABEL__}}", "refId": "A"}
   ],
   "fieldConfig": {
     "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},

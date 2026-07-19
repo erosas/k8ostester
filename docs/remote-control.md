@@ -8,8 +8,13 @@ tabs, capability-gated buttons, destructive confirmation). Run it:
 
     uv run python -m k8ostester_pg.server --context <ctx> --namespace <ns> --target 16.6
 
-Remaining: the multi-step ops handlers (rotate/upgrade/restore — extract from
-pg/testbed/flow.py) and richer topology (pooler routing, replication lag).
+All 8 actions are wired (`pg/ops.py`: rotate/upgrade/restore + the chaos
+primitives), with live operation status and self-enabling controls. Tabs follow
+the on-call model: **Ops** = routine (backup, rotate) · **Break-glass** =
+destructive/high-risk (restore, upgrade, kill, partition, drain). Verified live:
+rotate ran end to end from the button (blue/green, new cred authenticates).
+Remaining polish: richer topology (pooler routing, replication lag), a PITR time
+picker, and packaging the console entry point.
 
 A web control plane for a live cluster: connect over a kubeconfig, **discover**
 its state, and drive both **ops** (backups, PITR restore, credential rotation,

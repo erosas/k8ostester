@@ -12,7 +12,7 @@ technologies actively pulling on it. There is one deeply-built technology
 (PostgreSQL/CNPG), so the abstraction is mostly *speculative generality* — an
 indirection tax for Kafka/OpenSearch support that doesn't exist yet.
 
-The evidence is `k8os-testbed`: it deliberately does **not** use the framework —
+The evidence is `pg/testbed`: it deliberately does **not** use the framework —
 it's a linear, PG-specific script — and it's been the clearest, most productive
 part of the project. That's the signal.
 

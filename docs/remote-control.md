@@ -112,7 +112,7 @@ Most of this already exists:
 - **Reuse from core:** attach-mode discovery, `topology_graph`, session actions
   (`backup`, `restore`), fault workers (`network_partition`, `pod_kill`).
 - **Reuse from the testbed:** rotate (blue/green), minor/major upgrade, AZ logic
-  — but these currently live in `k8os-testbed/flow.py` as script steps. To share
+  — but these currently live in `pg/testbed/flow.py` as script steps. To share
   them, they graduate into first-class **driver actions** (the same registry the
   session's `session_actions()` uses).
 - **New:** the **capability/precondition layer** (the heart), the **backend

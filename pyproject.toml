@@ -3,7 +3,7 @@
 # so IntelliJ/PyCharm sees them as modules with real dependency edges.
 # See docs/architecture-restructure.md.
 [tool.uv.workspace]
-members = ["kernel", "k8ostester-core"]
+members = ["kernel", "pg", "k8ostester-core"]
 
 [tool.uv.sources]
 k8ostester-kernel = { workspace = true }

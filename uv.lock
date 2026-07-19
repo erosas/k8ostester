@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 members = [
     "k8ostester",
     "k8ostester-kernel",
+    "k8ostester-pg",
 ]
 
 [manifest.dependency-groups]
@@ -336,6 +337,17 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "kubernetes", specifier = ">=31.0" }]
+
+[[package]]
+name = "k8ostester-pg"
+version = "0.1.0"
+source = { editable = "pg" }
+dependencies = [
+    { name = "k8ostester-kernel" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "k8ostester-kernel", editable = "kernel" }]
 
 [[package]]
 name = "kubernetes"

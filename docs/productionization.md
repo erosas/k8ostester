@@ -1,20 +1,20 @@
 # Productionization testbed — design
 
 Status: **design, for review** (no code yet). This describes a second module,
-`k8os-testbed`, separate from `k8ostester-core`.
+`pg/testbed`, separate from `k8ostester-core`.
 
 ## Why a second module
 
 The two have different jobs and should not be forced to share a model:
 
-| | `k8ostester-core` | `k8os-testbed` (new) |
+| | `k8ostester-core` | `pg/testbed` (new) |
 | --- | --- | --- |
 | Purpose | explore fast, find better configs | prove **the one ideal config** is operable |
 | Shape | generic chaos engine (drivers/workers/goals) | a **linear, pre-determined golden path** |
 | Question it answers | "which config survives chaos?" | "can I run this in production, and automate it?" |
 | Runs on | k8s | k8s (same substrate — no docker-compose) |
 
-Code reuse is **explicitly not a goal**. `k8os-testbed` copies the ideal config
+Code reuse is **explicitly not a goal**. `pg/testbed` copies the ideal config
 and re-implements what it needs as a simple script, rather than bending core's
 abstractions. Simplicity over DRY.
 
@@ -31,7 +31,7 @@ abstractions. Simplicity over DRY.
 ## Module layout
 
 ```
-k8os-testbed/
+pg/testbed/
   manifests/
     cluster.yaml        # the ideal config (from 20-cnpg-reference)
     app.yaml            # the dummy application (reads + writes, exports OTEL)

@@ -37,7 +37,7 @@ Needs `kubectl` + `helm` on PATH and a kube context that can install an operator
 testbed **self-provisions everything** — operator, object store, cluster, app.
 
 ```bash
-cd k8os-testbed
+cd pg/testbed
 python flow.py                      # run against the current context
 python flow.py --context my-remote  # a specific context
 python flow.py --keep               # leave it running to inspect (else auto-cleanup)

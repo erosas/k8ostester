@@ -22,6 +22,7 @@ jobs:
       - run: uv sync                                    # syncs the whole workspace
       - run: uv run ruff check .
       - run: uv run --directory kernel pytest -q        # each member with its own config
+      - run: uv run --directory pg pytest -q
       - run: uv run --directory k8ostester-core pytest -q
 
   # Build both images (single-arch, for the runner) and fail on any fixable

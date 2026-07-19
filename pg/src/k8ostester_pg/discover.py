@@ -43,7 +43,8 @@ def build_snapshot(
         "replicas": replica_pods,
         "zones": zones,
         "version": pg_version(spec.get("imageName", "")),
-        "target": pg_version(target) if target else "",
+        # target may be a full image (…:tag) or a bare version
+        "target": (pg_version(target) if ":" in target else target) if target else "",
         "upgrading": "upgrad" in phase,
         "backup_configured": "backup" in spec,
         "backups_completed": completed,
@@ -83,6 +84,8 @@ def _instances(k8s: ClusterClient, namespace: str, name: str) -> list[dict]:
     for p in k8s.core.list_namespaced_pod(
             namespace, label_selector=f"cnpg.io/cluster={name}").items:
         labels = p.metadata.labels or {}
+        if "cnpg.io/instanceRole" not in labels:
+            continue   # skip pooler pods — they share cnpg.io/cluster but aren't instances
         ready = any(c.type == "Ready" and c.status == "True"
                     for c in (p.status.conditions or []))
         node = p.spec.node_name

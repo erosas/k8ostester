@@ -1,15 +1,14 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from k8ostester_kernel.exceptions import K8osInfraError
+from k8ostester_kernel.k8s import ClusterClient, available_contexts, wait_until
 from kubernetes import client
-
-from k8ostester.core.exceptions import K8osInfraError
-from k8ostester.core.k8s import ClusterClient, available_contexts, wait_until
 
 
 @pytest.fixture
 def mock_config():
-    with patch("k8ostester.core.k8s.config.new_client_from_config") as mock:
+    with patch("k8ostester_kernel.k8s.config.new_client_from_config") as mock:
         yield mock
 
 def test_wait_until_returns_first_truthy_result(fake_clock):
@@ -160,7 +159,7 @@ def test_k8s_apply_manifests_fail(mock_config, tmp_path):
             k8s.apply_manifests(tmp_path, "ns")
 
 def test_available_contexts():
-    with patch("k8ostester.core.k8s.config.list_kube_config_contexts") as mock_list:
+    with patch("k8ostester_kernel.k8s.config.list_kube_config_contexts") as mock_list:
         mock_list.return_value = (
             [{"name": "ctx1"}, {"name": "ctx2"}],
             {"name": "ctx1"}

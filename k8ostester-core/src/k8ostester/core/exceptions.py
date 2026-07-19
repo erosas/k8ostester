@@ -1,17 +1,19 @@
-"""Custom exceptions for K8osTester."""
+"""Custom exceptions for K8osTester.
 
-class K8osError(Exception):
-    """Base class for all k8ostester exceptions."""
-    pass
+The base classes (``K8osError``, ``K8osInfraError``) live in the kernel so that
+``except K8osError`` here also catches kernel-raised infra errors. The
+config/driver errors are core-specific. See docs/architecture-restructure.md.
+"""
+
+from k8ostester_kernel.exceptions import K8osError, K8osInfraError
+
 
 class K8osConfigError(K8osError):
     """Raised when an experiment or CLI configuration is invalid."""
-    pass
 
-class K8osInfraError(K8osError):
-    """Raised when there is an issue with the Kubernetes cluster or infra components."""
-    pass
 
 class K8osDriverError(K8osError):
     """Raised when a technology driver encounters an error."""
-    pass
+
+
+__all__ = ["K8osError", "K8osInfraError", "K8osConfigError", "K8osDriverError"]

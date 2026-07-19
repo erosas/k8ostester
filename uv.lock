@@ -288,6 +288,7 @@ name = "k8ostester"
 version = "0.1.2"
 source = { editable = "k8ostester-core" }
 dependencies = [
+    { name = "k8ostester-kernel" },
     { name = "kubernetes" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -307,6 +308,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "k8ostester-kernel", editable = "kernel" },
     { name = "kubernetes", specifier = ">=31.0" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -328,6 +330,12 @@ dev = [
 name = "k8ostester-kernel"
 version = "0.1.0"
 source = { editable = "kernel" }
+dependencies = [
+    { name = "kubernetes" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kubernetes", specifier = ">=31.0" }]
 
 [[package]]
 name = "kubernetes"

@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 license = "MIT"
 keywords = ["kubernetes", "resilience", "chaos", "postgres", "cloudnative-pg"]
 dependencies = [
+    "k8ostester-kernel",   # shared primitives: k8s client, chaos, SLO verdict
     "typer>=0.15",
     "rich>=13.0",
     "kubernetes>=31.0",
@@ -14,6 +15,9 @@ dependencies = [
     "PyYAML>=6.0",
     "textual>=8.2.8",
 ]
+
+[tool.uv.sources]
+k8ostester-kernel = { workspace = true }
 
 [dependency-groups]
 dev = [

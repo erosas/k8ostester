@@ -3,7 +3,9 @@ name = "k8ostester-kernel"
 version = "0.1.0"
 description = "Shared primitives for k8ostester verticals: k8s access, chaos primitives, the metrics console, and the SLO-query verdict"
 requires-python = ">=3.14"
-dependencies = []   # the SLO-verdict helper is stdlib-only (urllib)
+dependencies = [
+    "kubernetes>=31.0",   # the k8s client + chaos primitives; verdict stays stdlib
+]
 
 [build-system]
 requires = ["hatchling"]

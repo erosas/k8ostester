@@ -195,6 +195,20 @@ class Console:
         primary = cluster.get("status", {}).get("currentPrimary", "")
         return discover.wal_segments_since(k8s, sel["namespace"], from_wal, primary)
 
+    def secret(self, name: str) -> dict:
+        """Decode a basic-auth secret's username/password — ON DEMAND only (never
+        streamed in the snapshot), for the Connect sheet's copy-password button."""
+        import base64
+        sel = self._sel
+        if not sel:
+            return {}
+        s = self.client(sel["context"]).core.read_namespaced_secret(name, sel["namespace"])
+        data = s.data or {}
+
+        def dec(k: str) -> str:
+            return base64.b64decode(data[k]).decode() if data.get(k) else ""
+        return {"username": dec("username"), "password": dec("password")}
+
 
 def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
     class H(BaseHTTPRequestHandler):
@@ -216,6 +230,13 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self._send(200, "text/html; charset=utf-8", SPA.encode())
             elif self.path == "/api/contexts":
                 self._json(console.contexts_info())
+            elif self.path.startswith("/api/secret"):
+                from urllib.parse import parse_qs, urlparse
+                name = parse_qs(urlparse(self.path).query).get("name", [""])[0]
+                try:
+                    self._json({"ok": True, **console.secret(name)})
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
             elif self.path.startswith("/api/clusters"):
                 from urllib.parse import parse_qs, urlparse
                 ctx = parse_qs(urlparse(self.path).query).get("context", [None])[0]

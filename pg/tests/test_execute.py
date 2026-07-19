@@ -57,8 +57,8 @@ def test_ops_actions_dispatch_to_the_ops_module(mock_ops):
     k8s = MagicMock()
     execute(k8s, "ns", "upgrade", snap(), name="orders")
     mock_ops.minor_upgrade.assert_called_once_with(k8s, "ns", "16.6", "orders")
-    execute(k8s, "ns", "rotate", snap(), name="orders")
-    mock_ops.rotate_credentials.assert_called_once_with(k8s, "ns", "orders")
+    execute(k8s, "ns", "rotate", snap(), name="orders", params={"password": "s3cr3t"})
+    mock_ops.rotate_credentials.assert_called_once_with(k8s, "ns", "orders", "s3cr3t")
     execute(k8s, "ns", "restore", snap(), name="orders")
     mock_ops.restore.assert_called_once_with(k8s, "ns", "", "orders")
 

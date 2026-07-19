@@ -30,9 +30,9 @@ def test_rotate_alters_idle_role_and_records_active_on_the_cluster():
     # no active-role annotation yet -> defaults to the first role (app_a) as active
     k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
     msg = ops.rotate_credentials(k8s, "ns")
-    # ALTER ROLE on the IDLE role (app_b), through the primary
-    exec_cmd = k8s.exec_pod.call_args.args
-    assert exec_cmd[1] == "pg-1" and "alter role app_b password" in exec_cmd[2][-1]
+    # ALTER ROLE on the IDLE role (app_b), through the primary, quoting via :'pw'
+    cmd = k8s.exec_pod.call_args.args[2]
+    assert "alter role app_b password $pw$" in cmd[-1] and cmd[-1].endswith("$pw$")
     # the idle role's OWN secret is refreshed
     assert k8s.core.patch_namespaced_secret.call_args.args[0] == "app-cred-b"
     # active role recorded on the Cluster annotation (no configmap/deployment)
@@ -40,6 +40,17 @@ def test_rotate_alters_idle_role_and_records_active_on_the_cluster():
     assert patch["metadata"]["annotations"]["k8ostester.io/active-role"] == "app_b"
     k8s.apps.patch_namespaced_deployment.assert_not_called()
     assert "app_a → app_b" in msg
+
+
+def test_rotate_uses_a_supplied_password_verbatim_even_with_special_chars():
+    k8s = MagicMock()
+    k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
+    tricky = "a'b\\c$d!"
+    ops.rotate_credentials(k8s, "ns", "pg", password=tricky)
+    # the raw value sits inside a dollar-quoted literal — no escaping applied to it
+    assert f"$pw${tricky}$pw$" in k8s.exec_pod.call_args.args[2][-1]
+    # and the secret stores it raw
+    assert k8s.core.patch_namespaced_secret.call_args.args[2]["stringData"]["password"] == tricky
 
 
 def test_rotate_switches_back_when_app_b_is_active():

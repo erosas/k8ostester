@@ -36,12 +36,17 @@ def minor_upgrade(k8s: ClusterClient, ns: str, target: str, name: str = "pg") ->
     return f"upgrade to {target} started (rolling)"
 
 
-def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg") -> str:
+def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg",
+                       password: str = "") -> str:
     """Blue/green: refresh the IDLE login role's password and switch the active
     marker to it. Both roles stay valid, so there's no auth gap. Generic — it uses
     the cluster's own managed roles and an annotation on the Cluster to track which
     role is active; it does not assume any app-side ConfigMap/Deployment. The app
-    reads the active role's secret however it's wired."""
+    reads the active role's secret however it's wired.
+
+    ``password`` (caller-supplied, arbitrary) is applied verbatim; if empty a
+    timestamped default is generated.
+    """
     cluster = _cluster(k8s, ns, name)
     roles = [r for r in cluster["spec"].get("managed", {}).get("roles", [])
              if r.get("login")]
@@ -51,12 +56,18 @@ def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg") -> str:
     active = anns.get(ACTIVE_ROLE_ANN) or roles[0]["name"]
     idle = next((r for r in roles if r["name"] != active), roles[1])
     idle_secret = idle.get("passwordSecret", {}).get("name", "")
-    new_pw = f"{idle['name']}-{_stamp()}"
+    new_pw = password or f"{idle['name']}-{_stamp()}"
     primary = cluster["status"]["currentPrimary"]
-    # immediate ALTER ROLE (the operator's secret reconcile is not prompt)
+    # Dollar-quote the password literal: it needs no escaping for ANY characters
+    # (quotes, backslashes, symbols) and is immune to standard_conforming_strings.
+    # Bump the tag on the off-chance the password contains the delimiter. exec_pod
+    # passes an argv list (no shell), so the raw bytes reach psql — no injection.
+    tag = "pw"
+    while f"${tag}$" in new_pw:
+        tag += "x"
     k8s.exec_pod(ns, primary,
                  ["psql", "-U", "postgres", "-c",
-                  f"alter role {idle['name']} password '{new_pw}'"],
+                  f"alter role {idle['name']} password ${tag}${new_pw}${tag}$"],
                  container="postgres")
     if idle_secret:
         k8s.core.patch_namespaced_secret(idle_secret, ns,

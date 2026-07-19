@@ -72,7 +72,8 @@ _HANDLERS = {
     "partition-primary": _partition_primary,
     "kill-replica": _kill_replica,
     "backup": _backup,
-    "rotate": lambda k8s, ns, s, p, name: ops.rotate_credentials(k8s, ns, name),
+    "rotate": lambda k8s, ns, s, p, name: ops.rotate_credentials(
+        k8s, ns, name, p.get("password", "")),
     "upgrade": lambda k8s, ns, s, p, name: ops.minor_upgrade(k8s, ns, s["target"], name),
     "restore": lambda k8s, ns, s, p, name: ops.restore(k8s, ns, p.get("target_time", ""), name),
 }

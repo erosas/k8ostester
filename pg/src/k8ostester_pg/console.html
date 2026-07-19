@@ -219,6 +219,29 @@
   .pickrow:hover{border-color:var(--crit);background:var(--panel2)}
   .node.link{cursor:pointer}
   .node.link:hover{border-color:var(--accent)}
+  /* rotate-credentials modal */
+  .pwrow{display:flex;gap:8px;margin-bottom:10px}
+  .pwin{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--ink);
+    border-radius:6px;padding:9px 11px;font-family:var(--mono);font-size:13px;letter-spacing:.02em}
+  .pwin:focus{outline:none;border-color:var(--accent)}
+  .pwbtn{font-family:var(--mono);font-size:11.5px;padding:0 12px;border:1px solid var(--border);
+    border-radius:6px;background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap}
+  .pwbtn:hover{border-color:var(--accent);color:var(--ink)}
+  .pwopts{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .pwopts input[type=number]{width:56px;background:var(--panel2);border:1px solid var(--border);
+    color:var(--ink);border-radius:5px;padding:4px 7px;font-family:var(--mono);color-scheme:dark}
+  .pwopts .ck{display:flex;align-items:center;gap:6px}
+  .pwopts input[type=checkbox]{accent-color:var(--accent)}
+  /* fault picker */
+  .frow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;
+    border-top:1px solid var(--border)}
+  .ftgt{font-family:var(--mono);font-size:12.5px;display:flex;flex-direction:column;gap:2px}
+  .ftgt b{color:var(--ink)} .ftgt span{color:var(--muted);font-size:10.5px;letter-spacing:.04em}
+  .fbtns{display:flex;gap:8px}
+  .fbtn{font-family:var(--sans);font-size:12.5px;padding:6px 13px;border-radius:6px;cursor:pointer;
+    border:1px solid var(--border);border-left:2px solid var(--crit);background:var(--panel2);color:var(--ink)}
+  .fbtn:hover:not(:disabled){border-color:var(--crit)}
+  .fbtn:disabled{opacity:.35;cursor:not-allowed}
   /* builder presets */
   .bpre{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
   .bpre button{font-family:var(--mono);font-size:12px;padding:7px 14px;border-radius:5px;
@@ -448,8 +471,16 @@ document.addEventListener("click", e=>{
     return;
   }
   if(e.target.closest("[data-close]")){ closeSheet(); return; }
-  const pr = e.target.closest(".pickrow");
-  if(pr){ const pod=pr.dataset.pod; closeSheet(); post("kill-replica",{pod},"Kill replica "+pod); return; }
+  const ft = e.target.closest("[data-fault]");
+  if(ft && !ft.disabled){
+    const id = ft.dataset.fault, params = JSON.parse(ft.dataset.params||"{}");
+    const tgt = params.pod || "the primary";
+    closeSheet();
+    if(SNAP.busy && !confirm(`An operation is in flight (${SNAP.busy_reason}). Fire ${ft.dataset.label} on ${tgt} anyway?`)) return;
+    if(!confirm(`${ft.dataset.label} · ${tgt} — ${ft.dataset.desc}. Continue?`)) return;
+    post(id, params, `${ft.dataset.label} ${tgt}`.trim());
+    return;
+  }
   if(e.target.closest(".node.link")){ openConnect(); return; }
   const sc = e.target.closest(".scrim");
   if(sc && e.target===sc){ sc.id==="scrim" ? closeModal() : closeSheet(); }   // backdrop
@@ -531,24 +562,75 @@ function openConnect(){
     <div class="mbtns"><button data-close>Close</button></div>`);
 }
 
-function replicaPicker(){
-  const reps=SNAP.replicas||[];
-  if(reps.length===0) return;
-  if(reps.length===1){
-    if(SNAP.busy && !confirm(`An operation is in flight (${SNAP.busy_reason}). Kill ${reps[0]} anyway?`)) return;
-    if(confirm(`Kill replica ${reps[0]}? CNPG reschedules it; the primary is unaffected.`))
-      post("kill-replica",{pod:reps[0]},"Kill replica "+reps[0]);
-    return;
-  }
-  const rows=reps.map(r=>{
-    const i=(SNAP.instances||[]).find(x=>x.name===r)||{};
-    const b=syncBadge(i.sync_state);
-    return `<div class="pickrow" data-pod="${esch(r)}"><b>${esch(r)}</b>`+
-      `<span style="color:var(--muted)">${b.label||"replica"} · ${i.zone||i.node||"—"}`+
-      `${i.lag_bytes!=null?" · lag "+fmtBytes(i.lag_bytes):""}</span></div>`;
+/* ---- rotate credentials modal ---- */
+function genPassword(len, symbols){
+  // exclude look-alikes (0/O, 1/l/I); symbols kept free of quote/backslash/space
+  const sets = ["abcdefghijkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789"];
+  if(symbols) sets.push("!@#$%^&*()-_=+.?");
+  const pool = sets.join("");
+  const buf = new Uint32Array(len); crypto.getRandomValues(buf);
+  let pw = ""; for(let i=0;i<len;i++) pw += pool[buf[i] % pool.length];
+  return pw;
+}
+function regenPw(){
+  const len = Math.max(8, Math.min(64, +document.getElementById("rot-len").value||20));
+  document.getElementById("rot-pw").value = genPassword(len, document.getElementById("rot-sym").checked);
+}
+function togglePw(e){
+  const i = document.getElementById("rot-pw");
+  i.type = i.type==="password" ? "text" : "password";
+  e.target.textContent = i.type==="password" ? "show" : "hide";
+}
+function confirmRotate(){
+  const pw = document.getElementById("rot-pw").value;
+  if(!pw){ document.getElementById("rot-note").textContent = "password can't be empty"; return; }
+  closeSheet();
+  post("rotate", {password: pw}, "Rotate credentials");
+}
+function openRotate(){
+  const roles = (SNAP.login_roles||[]).map(r=>r.name);
+  if(roles.length < 2){ logActivity("Rotate credentials", false, "needs two login roles", 0); return; }
+  const active = (SNAP.credentials||{}).active_role || roles[0];
+  const idle = roles.find(r=>r!==active) || roles[1];
+  openSheet(`<h2>Rotate credentials</h2>
+    <div class="lede">Refreshes the idle role <b>${esch(idle)}</b> and switches to it. <b>${esch(active)}</b> stays valid throughout — no auth gap. Any characters are quoted safely.</div>
+    <div class="sec"><h3>New password for ${esch(idle)}</h3>
+      <div class="pwrow">
+        <input id="rot-pw" class="pwin" spellcheck="false" value="${esch(genPassword(20,true))}">
+        <button class="pwbtn" onclick="regenPw()">↻ generate</button>
+        <button class="pwbtn" onclick="togglePw(event)">hide</button>
+      </div>
+      <div class="pwopts">
+        <label>length <input id="rot-len" type="number" min="8" max="64" value="20" oninput="regenPw()"></label>
+        <label class="ck"><input id="rot-sym" type="checkbox" checked onchange="regenPw()"> symbols</label>
+        <span id="rot-note">type your own, or reroll until you like it</span>
+      </div></div>
+    <div class="mbtns"><button data-close>Cancel</button>
+      <button class="go" style="background:var(--accent);border-color:var(--accent)" onclick="confirmRotate()">Rotate → ${esch(idle)}</button></div>`);
+}
+
+/* ---- unified fault picker (kill / partition, per node) ---- */
+function faultBtn(id, label, desc, enabled, params){
+  return `<button class="fbtn"${enabled?"":" disabled"} data-fault="${id}" `+
+    `data-params='${esch(JSON.stringify(params))}' data-label="${esch(label)}" data-desc="${esch(desc)}">${label}</button>`;
+}
+function openFaultPicker(){
+  const cap = Object.fromEntries(CAPS.map(c=>[c.id, c.enabled]));
+  const rows = (SNAP.instances||[]).map(i=>{
+    const primary = i.role==="primary", b = syncBadge(i.sync_state);
+    const meta = [primary?"PRIMARY":"REPLICA", i.zone||i.node||"", primary?"":(b.label||"")].filter(Boolean).join(" · ");
+    let btns;
+    if(primary){
+      btns = faultBtn("kill-primary","Kill pod","deletes the primary pod; CNPG fails over to a standby",cap["kill-primary"],{})
+           + faultBtn("partition-primary","Partition","network-isolates the primary; tests fencing + failover",cap["partition-primary"],{});
+    } else {
+      btns = faultBtn("kill-replica","Kill pod","deletes this replica pod; CNPG reschedules it",cap["kill-replica"],{pod:i.name});
+    }
+    return `<div class="frow"><div class="ftgt"><b>${esch(i.name)}</b><span>${esch(meta)}</span></div>`+
+      `<div class="fbtns">${btns}</div></div>`;
   }).join("");
-  openSheet(`<h2>Kill which replica?</h2>
-    <div class="lede">Deletes the pod; CNPG reschedules it. The primary is unaffected.</div>
+  openSheet(`<h2>Inject a fault</h2>
+    <div class="lede">Pick a target and a fault.${SNAP.busy?` <b style="color:var(--warn)">An operation is in flight (${esch(SNAP.busy_reason)}) — faults still fire.</b>`:""}</div>
     ${rows}<div class="mbtns"><button data-close>Cancel</button></div>`);
 }
 
@@ -658,26 +740,38 @@ async function post(id, params, label){
 }
 
 function act(a){
-  if(a.id === "kill-replica"){ replicaPicker(); return; }  // picker confirms per-replica
-  // chaos stays available during an operation, but asks for an ack (your call)
-  if(a.tab === "chaos" && SNAP.busy && a.id!=="restore" &&
-     !confirm(`An operation is in flight (${SNAP.busy_reason}). Fire ${a.label} anyway?`)) return;
-  if(a.id === "restore"){ openModal(); return; }         // PITR gets its own interface
+  if(a.id === "rotate"){ openRotate(); return; }   // type-or-generate a password
+  if(a.id === "restore"){ openModal(); return; }   // PITR gets its own interface
   if(a.destructive && !confirm(`${a.label} — this mutates a real cluster. Continue?`)) return;
   post(a.id, null, a.label);
 }
 
+function actTile(c){
+  const b = document.createElement("button");
+  b.className = "act" + (c.destructive ? " destructive":"");
+  b.disabled = !c.enabled;
+  b.onclick = ()=>act(c);
+  b.innerHTML = `<span>${c.label}</span><span class="sub">${c.enabled?"ready":"unavailable"}</span>`;
+  return b;
+}
+const RECOVER = new Set(["restore", "upgrade"]);   // break-glass recovery vs faults
 function renderActions(){
   const box = document.getElementById("actions");
   box.innerHTML = "";
-  CAPS.filter(c=>c.tab===TAB).forEach(c=>{
-    const b = document.createElement("button");
-    b.className = "act" + (c.destructive ? " destructive":"");
-    b.disabled = !c.enabled;
-    b.onclick = ()=>act(c);
-    b.innerHTML = `<span>${c.label}</span><span class="sub">${c.enabled?"ready":"unavailable"}</span>`;
-    box.appendChild(b);
-  });
+  if(TAB === "chaos"){
+    // recovery ops as tiles; all node faults behind one "Inject fault" entry
+    CAPS.filter(c=>c.tab==="chaos" && RECOVER.has(c.id)).forEach(c=>box.appendChild(actTile(c)));
+    const faults = CAPS.filter(c=>c.tab==="chaos" && !RECOVER.has(c.id) && c.id!=="drain-zone");
+    const any = faults.some(c=>c.enabled);
+    const f = document.createElement("button");
+    f.className = "act destructive";
+    f.disabled = !any;
+    f.onclick = ()=>{ if(any) openFaultPicker(); };
+    f.innerHTML = `<span>Inject fault</span><span class="sub">${any?"kill / partition a node":"a fault is in flight"}</span>`;
+    box.appendChild(f);
+  } else {
+    CAPS.filter(c=>c.tab===TAB).forEach(c=>box.appendChild(actTile(c)));
+  }
 }
 
 function node(role, name, zone, cls, tip){

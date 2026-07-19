@@ -88,7 +88,7 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: s3://backups/testbed
-      endpointURL: http://seaweedfs.k8os-testbed.svc:8333
+      endpointURL: http://seaweedfs:8333   # same-namespace service (works in any ns)
       s3Credentials:
         accessKeyId: {name: seaweed-s3, key: ACCESS_KEY}
         secretAccessKey: {name: seaweed-s3, key: SECRET_KEY}

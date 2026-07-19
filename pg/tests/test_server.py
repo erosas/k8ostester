@@ -1,5 +1,5 @@
 """Server smoke tests — the SPA and the Console wiring. No real cluster."""
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from k8ostester_pg import server
 
@@ -39,6 +39,22 @@ def test_console_state_serves_the_cached_snapshot(snap, _cc, _ctx):
     c.state()
     c.state()
     snap.assert_called_once()                       # extra reads don't re-discover
+
+
+@patch("k8ostester_pg.server.config.list_kube_config_contexts", return_value=([], None))
+@patch("k8ostester_pg.server.ClusterClient")
+def test_console_deploy_applies_each_manifest_doc(_cc, _ctx):
+    c = server.Console(namespace="ns", cluster="pg", start=False)
+    c._sel = {"context": None, "namespace": "lab", "name": "pg"}
+    res = MagicMock()
+    res.namespaced = True
+    with patch("kubernetes.dynamic.DynamicClient") as DC:
+        DC.return_value.resources.get.return_value = res
+        out = c.deploy({"name": "demo", "backups": False, "pooler": False, "schedule": False})
+    assert out["namespace"] == "lab" and not out["failed"]
+    assert any("Cluster/demo" in x for x in out["created"])
+    # applied into the target namespace via the dynamic client
+    assert res.create.call_args.kwargs["namespace"] == "lab"
 
 
 @patch("k8ostester_pg.server.config.list_kube_config_contexts", return_value=([], None))

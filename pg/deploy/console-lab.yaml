@@ -1,0 +1,39 @@
+# Additive "lab" RBAC — lets the in-cluster console DEPLOY a Builder-generated
+# manifest (create the Cluster, its Secrets/Pooler/ScheduledBackup, and the OTEL
+# collector's objects) into its own namespace. Apply this ON TOP of console.yaml
+# only when you want the Build → Deploy loop; leave it off for a pure operator
+# deployment (deploy then 403s, which the UI reports).
+#
+#   kubectl -n <ns> apply -f console.yaml console-lab.yaml
+#
+# This is a broad grant (create Deployments, Secrets, RBAC, CRs). Scope it to a
+# throwaway/lab namespace — you would not give an operator console this.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8ost-console-lab
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters", "poolers", "scheduledbackups"]
+    verbs: ["create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "serviceaccounts"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "update", "patch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["create", "update", "patch"]      # needs 'bind'/'escalate' too for OTEL RBAC
+  - apiGroups: ["monitoring.coreos.com"]
+    resources: ["prometheusrules", "podmonitors"]
+    verbs: ["create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8ost-console-lab
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: k8ost-console-lab}
+subjects:
+  - {kind: ServiceAccount, name: k8ost-console}

@@ -228,6 +228,41 @@ class Console:
         from k8ostester_pg import registry
         return {"exists": registry.image_exists(image)}
 
+    def deploy(self, opts: dict) -> dict:
+        """Apply a Builder-generated manifest into the selected context/namespace
+        via the dynamic client (no kubectl). Needs the broader 'lab' RBAC to create
+        the objects; each doc is applied independently and its outcome reported."""
+        import yaml
+        from kubernetes.client import ApiException
+        from kubernetes.dynamic import DynamicClient
+        sel = self._sel or {}
+        namespace = (opts.get("namespace") or sel.get("namespace") or "default").strip()
+        k8s = self.client(sel.get("context"))
+        dyn = DynamicClient(k8s._api_client)
+        manifest = builder.build_manifest({**opts, "namespace": namespace})
+        created, skipped, failed = [], [], []
+        for doc in yaml.safe_load_all(manifest):
+            if not doc:
+                continue
+            ident = f"{doc['kind']}/{doc.get('metadata', {}).get('name', '?')}"
+            try:
+                res = dyn.resources.get(api_version=doc["apiVersion"], kind=doc["kind"])
+            except Exception:
+                failed.append(f"{ident} — kind not installed")
+                continue
+            ns = doc.get("metadata", {}).get("namespace") or (namespace if res.namespaced else None)
+            try:
+                res.create(body=doc, namespace=ns)
+                created.append(ident)
+            except ApiException as e:
+                if e.status == 409:
+                    skipped.append(f"{ident} — exists")
+                elif e.status == 403:
+                    failed.append(f"{ident} — forbidden (needs deploy RBAC)")
+                else:
+                    failed.append(f"{ident} — {e.reason}")
+        return {"namespace": namespace, "created": created, "skipped": skipped, "failed": failed}
+
     def secret(self, name: str) -> dict:
         """Decode a basic-auth secret's username/password — ON DEMAND only (never
         streamed in the snapshot), for the Connect sheet's copy-password button."""
@@ -311,7 +346,7 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self):
             if self.path not in ("/api/action", "/api/manifest", "/api/dashboard",
-                                 "/api/wal-count", "/api/select"):
+                                 "/api/deploy", "/api/wal-count", "/api/select"):
                 self._send(404, "text/plain", b"not found")
                 return
             n = int(self.headers.get("Content-Length", 0) or 0)
@@ -325,6 +360,11 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
             elif self.path == "/api/dashboard":
                 try:
                     self._json({"ok": True, "dashboard": dashboard.build_dashboard(body)})
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
+            elif self.path == "/api/deploy":
+                try:
+                    self._json({"ok": True, **console.deploy(body)})
                 except Exception as e:
                     self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
             elif self.path == "/api/select":

@@ -167,6 +167,8 @@
   .bbar button{font-family:var(--sans);font-size:13px;padding:8px 16px;border-radius:8px;
     border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer}
   .bbar button:hover{border-color:var(--accent)}
+  .bbar button.deploy{border-color:var(--accent);color:var(--accent)}
+  .bbar button.deploy:hover{background:var(--accent);color:#0b0b0b}
   .manifest{background:#05080c;border:1px solid var(--border);border-radius:9px;padding:14px 16px;
     font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink);overflow-x:auto;
     white-space:pre;margin:0;max-height:460px;overflow-y:auto}
@@ -367,6 +369,8 @@
     </div>
     <div class="bgrid">
       <label>Cluster name<input id="b-name" value="pg"></label>
+      <label>Namespace<input id="b-namespace" value="default">
+        <span class="fcap">deploy target (in the selected context)</span></label>
       <label>PostgreSQL version<input id="b-version" value="16.6"></label>
       <label>Instances (1 primary + replicas)
         <input id="b-instances" type="number" min="1" max="9" value="3"></label>
@@ -424,6 +428,7 @@
       <span class="bhint" id="b-hint">edit any field — the output updates live</span>
       <button onclick="copyManifest()">Copy</button>
       <button onclick="downloadManifest()">Download</button>
+      <button id="b-deploy" class="deploy" onclick="deployManifest()">Deploy ↑</button>
     </div>
     <pre class="manifest" id="manifest">…</pre>
   </div>
@@ -485,8 +490,11 @@ function pick(t){
   TAB = t;
   document.querySelectorAll(".vbtn").forEach(e=>e.classList.toggle("on", e.dataset.tab===t));
   applyLayout();
-  if(t==="builder") generateManifest();
-  else if(!UNSEL) renderActions();
+  if(t==="builder"){
+    const nsEl = document.getElementById("b-namespace");   // default to the selected namespace
+    if(SNAP.namespace && (!nsEl.value || nsEl.value==="default")) nsEl.value = SNAP.namespace;
+    generateManifest();
+  } else if(!UNSEL) renderActions();
 }
 
 /* ---- context + cluster pickers ---- */
@@ -1323,7 +1331,7 @@ function builderOpts(){
   const v = id => document.getElementById(id).value;
   const ck = id => document.getElementById(id).checked;
   return {
-    name:v("b-name"), version:v("b-version"), instances:+v("b-instances"),
+    name:v("b-name"), namespace:v("b-namespace"), version:v("b-version"), instances:+v("b-instances"),
     storage:v("b-storage"), sync:v("b-sync"),
     pooler:ck("b-pooler"), pooler_instances:+v("b-pooler-instances"),
     backups:ck("b-backups"), bucket:v("b-bucket"), path:v("b-path"),
@@ -1370,6 +1378,23 @@ async function genOutput(){
   }catch(e){ out = (dash?"// ":"# ")+"error: "+e; }
   if(dash) DASHBOARD = out; else MANIFEST = out;
   document.getElementById("manifest").textContent = out;
+  document.getElementById("b-deploy").style.display = dash ? "none" : "";   // deploy applies YAML
+}
+async function deployManifest(){
+  const opts = builderOpts();
+  const ns = opts.namespace || "default", ctx = document.getElementById("ctx-sel").value || "current context";
+  if(!confirm(`Deploy cluster "${opts.name}" into namespace "${ns}" (${ctx})?\n\nThis creates real resources in the cluster.`)) return;
+  const hint = document.getElementById("b-hint"); hint.textContent = "deploying…";
+  try{
+    const j = await (await fetch("/api/deploy", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify(opts)})).json();
+    if(!j.ok){ hint.textContent = "deploy failed: "+j.error; logActivity("Deploy "+opts.name, false, j.error, 0); return; }
+    const ok = j.failed.length===0;
+    hint.textContent = `deployed to ${j.namespace}: ${j.created.length} created`+
+      (j.skipped.length?`, ${j.skipped.length} existed`:"")+(j.failed.length?`, ${j.failed.length} failed`:"");
+    logActivity("Deploy "+opts.name, ok,
+      [...j.created.map(x=>"+"+x), ...j.skipped, ...j.failed].join("  ·  "), 0);
+  }catch(e){ hint.textContent = "deploy error: "+e; }
 }
 function copyManifest(){
   navigator.clipboard.writeText(OUTPUT==="dashboard"?DASHBOARD:MANIFEST).then(

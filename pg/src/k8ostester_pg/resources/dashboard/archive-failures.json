@@ -1,0 +1,18 @@
+{
+  "type": "timeseries",
+  "title": "WAL archive failures (recent)",
+  "description": "Failed archive attempts in the last 15 minutes (the increase of cnpg_pg_stat_archiver_failed_count, not its raw total). This is what tells you archiving is failing RIGHT NOW. The raw total only ever grows — it counts every failure since the last stats reset, including harmless ones at startup — so a big total by itself does NOT mean there's a problem. Green/0 = fine; any red bars = active failures, so check the archive lag and the object store.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "sum(increase(cnpg_pg_stat_archiver_failed_count{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[15m]))", "legendFormat": "failures (last 15m)", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {
+      "unit": "short",
+      "custom": {"drawStyle": "bars", "fillOpacity": 60},
+      "color": {"mode": "thresholds"},
+      "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}
+    },
+    "overrides": []
+  }
+}

@@ -44,7 +44,7 @@ def build_dashboard(opts: dict) -> str:
     if instances > 1:
         order += ["replication-lag", "replication-slots"]
     if opts.get("backups"):
-        order += ["backups", "archiving"]
+        order += ["backups", "archiving", "archive-failures"]
 
     panels = []
     for i, key in enumerate(order):

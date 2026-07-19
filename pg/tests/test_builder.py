@@ -83,7 +83,8 @@ def test_dashboard_panels_adapt_to_the_config():
 
     full = json.loads(build_dashboard({"name": "pg", "instances": 3, "backups": True}))
     ftitles = [p["title"] for p in full["panels"]]
-    for t in ("Replication lag", "Replication & slots", "Backups & recovery window", "WAL archiving"):
+    for t in ("Replication lag", "Replication & slots", "Backups & recovery window",
+              "WAL archive lag", "WAL archive failures (recent)"):
         assert t in ftitles
     # queries scope to this cluster's instance pods, default 'pod' label
     assert 'pod=~"pg-[0-9]+"' in full["panels"][0]["targets"][0]["expr"]

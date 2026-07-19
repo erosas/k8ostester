@@ -27,7 +27,7 @@ from k8ostester_kernel.k8s import (
 )
 from kubernetes import config
 
-from k8ostester_pg import builder, discover, execute
+from k8ostester_pg import builder, dashboard, discover, execute
 from k8ostester_pg.control import CNPG_ACTIONS
 
 SPA = (Path(__file__).parent / "console.html").read_text()
@@ -308,8 +308,8 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self._send(404, "text/plain", b"not found")
 
         def do_POST(self):
-            if self.path not in ("/api/action", "/api/manifest", "/api/wal-count",
-                                 "/api/select"):
+            if self.path not in ("/api/action", "/api/manifest", "/api/dashboard",
+                                 "/api/wal-count", "/api/select"):
                 self._send(404, "text/plain", b"not found")
                 return
             n = int(self.headers.get("Content-Length", 0) or 0)
@@ -318,6 +318,11 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 try:
                     body.setdefault("namespace", (console._sel or {}).get("namespace", "default"))
                     self._json({"ok": True, "manifest": builder.build_manifest(body)})
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
+            elif self.path == "/api/dashboard":
+                try:
+                    self._json({"ok": True, "dashboard": dashboard.build_dashboard(body)})
                 except Exception as e:
                     self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
             elif self.path == "/api/select":

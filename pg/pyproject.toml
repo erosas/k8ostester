@@ -20,8 +20,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/k8ostester_pg"]
 artifacts = [
-  "src/k8ostester_pg/console.html",        # the SPA served by the console
+  "src/k8ostester_pg/console.html",           # the SPA served by the console
   "src/k8ostester_pg/resources/*.tmpl.yaml",  # manifest-builder templates
+  "src/k8ostester_pg/resources/*.tmpl.json",  # dashboard envelope
+  "src/k8ostester_pg/resources/dashboard/*.json",  # dashboard panels
 ]
 
 [tool.pytest.ini_options]

@@ -54,6 +54,39 @@ def test_app_roles_emits_two_login_roles_and_their_secrets():
     assert "managed" not in next(d for d in yaml.safe_load_all(build_manifest({})) if d)["spec"]
 
 
+def test_monitoring_and_otel_are_optional_and_render():
+    plain = next(d for d in yaml.safe_load_all(build_manifest({})) if d)
+    assert "monitoring" not in plain["spec"]
+
+    m = build_manifest({"name": "db", "monitoring": True,
+                        "otel_endpoint": "otel-collector.obs.svc:4317"})
+    docs = list(yaml.safe_load_all(m))
+    cluster = next(d for d in docs if d and d["kind"] == "Cluster")
+    assert cluster["spec"]["monitoring"]["enablePodMonitor"] is True
+    # an OTEL endpoint emits a collector (SA + RBAC + ConfigMap + Deployment)
+    kinds = {d["kind"] for d in docs if d}
+    assert {"ServiceAccount", "Role", "ConfigMap", "Deployment"} <= kinds
+    cm = next(d for d in docs if d and d["kind"] == "ConfigMap")
+    assert "otel-collector.obs.svc:4317" in cm["data"]["config.yaml"]
+    assert "regex: db" in cm["data"]["config.yaml"]   # scrapes this cluster's pods
+
+
+def test_dashboard_panels_adapt_to_the_config():
+    import json
+
+    from k8ostester_pg.dashboard import build_dashboard
+    single = json.loads(build_dashboard({"name": "solo", "instances": 1, "backups": False}))
+    titles = [p["title"] for p in single["panels"]]
+    assert "Replication lag" not in titles and "WAL archiving" not in titles
+    assert single["uid"] == "k8ost-solo"
+
+    full = json.loads(build_dashboard({"name": "pg", "instances": 3, "backups": True}))
+    ftitles = [p["title"] for p in full["panels"]]
+    assert "Replication lag" in ftitles and "WAL archiving" in ftitles
+    # queries scope to this cluster's instance pods
+    assert 'pod=~"pg-[0-9]+"' in full["panels"][0]["targets"][0]["expr"]
+
+
 def test_schedule_requires_backups():
     # a ScheduledBackup with nowhere to store is meaningless — omit it
     assert "ScheduledBackup" not in kinds(build_manifest({"schedule": True}))

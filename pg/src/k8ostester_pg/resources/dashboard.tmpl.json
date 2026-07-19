@@ -1,0 +1,15 @@
+{
+  "title": "__TITLE__",
+  "uid": "",
+  "tags": ["cnpg", "postgresql", "k8ostester"],
+  "schemaVersion": 39,
+  "editable": true,
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {"name": "datasource", "type": "datasource", "query": "prometheus", "label": "Datasource", "current": {}}
+    ]
+  },
+  "panels": []
+}

@@ -263,6 +263,7 @@
   .bpre button{font-family:var(--mono);font-size:12px;padding:7px 14px;border-radius:5px;
     border:1px solid var(--border);background:var(--panel2);color:var(--muted);cursor:pointer}
   .bpre button:hover{border-color:var(--accent);color:var(--ink)}
+  .bpre button.on{color:var(--ink);border-color:var(--accent);background:var(--panel)}
 
   /* custom tooltip — reliable and multi-line, unlike native title on thin ticks */
   #tip{position:fixed;z-index:50;display:none;max-width:320px;pointer-events:none;
@@ -359,10 +360,19 @@
       <label id="b-schedule-cron-wrap">Schedule (6-field cron)
         <input id="b-schedule-cron" value="0 0 2 * * *"></label>
     </div>
+    <div class="bgrid">
+      <label class="check"><input id="b-monitoring" type="checkbox" checked> Prometheus PodMonitor</label>
+      <label>OTEL endpoint (optional)<input id="b-otel" placeholder="otel-collector.obs.svc:4317">
+        <span class="fcap">emits an OpenTelemetry Collector</span></label>
+    </div>
+    <div class="bpre" id="b-output">
+      <button class="on" data-o="manifest" onclick="switchOutput('manifest')">Manifest (YAML)</button>
+      <button data-o="dashboard" onclick="switchOutput('dashboard')">Grafana dashboard (JSON)</button>
+    </div>
     <div class="bbar">
-      <span class="bhint" id="b-hint">edit any field — the manifest updates live</span>
+      <span class="bhint" id="b-hint">edit any field — the output updates live</span>
       <button onclick="copyManifest()">Copy</button>
-      <button onclick="downloadManifest()">Download .yaml</button>
+      <button onclick="downloadManifest()">Download</button>
     </div>
     <pre class="manifest" id="manifest">…</pre>
   </div>
@@ -767,6 +777,7 @@ function preset(k){
   chk("b-backups",p.backups); set("b-retention",p.retention);
   chk("b-schedule",p.schedule); set("b-schedule-cron",p.schedule_cron);
   chk("b-approles",!!p.app_roles);
+  chk("b-monitoring",true);   // every preset ships Prometheus monitoring
   generateManifest();
 }
 
@@ -1240,7 +1251,7 @@ function render(data){
 }
 
 /* ---- cluster builder ---- */
-let MANIFEST = "";
+let MANIFEST = "", DASHBOARD = "", OUTPUT = "manifest";
 function builderOpts(){
   const v = id => document.getElementById(id).value;
   const ck = id => document.getElementById(id).checked;
@@ -1252,34 +1263,49 @@ function builderOpts(){
     endpoint:v("b-endpoint"), secret:v("b-secret"), retention:v("b-retention"),
     schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
     app_roles:ck("b-approles"),
+    monitoring:ck("b-monitoring"), otel_endpoint:v("b-otel"),
   };
 }
-async function generateManifest(){
-  // reveal conditional fields
+function switchOutput(o){
+  OUTPUT = o;
+  document.querySelectorAll("#b-output button").forEach(b=>b.classList.toggle("on", b.dataset.o===o));
+  genOutput();
+}
+async function generateManifest(){    // called on any form change + on entering Build
   document.getElementById("b-pooler-n-wrap").style.display =
     document.getElementById("b-pooler").checked ? "flex" : "none";
   document.getElementById("b-backup-fields").style.display =
     document.getElementById("b-backups").checked ? "grid" : "none";
   document.getElementById("b-schedule-cron-wrap").style.display =
     document.getElementById("b-schedule").checked ? "flex" : "none";
+  await genOutput();
+}
+async function genOutput(){
+  const opts = builderOpts();
+  const dash = OUTPUT==="dashboard";
+  const url = dash ? "/api/dashboard" : "/api/manifest";
+  let out;
   try{
-    const r = await fetch("/api/manifest", {method:"POST",
-      headers:{"Content-Type":"application/json"}, body:JSON.stringify(builderOpts())});
-    const j = await r.json();
-    MANIFEST = j.ok ? j.manifest : ("# error: "+j.error);
-  }catch(e){ MANIFEST = "# error: "+e; }
-  document.getElementById("manifest").textContent = MANIFEST;
+    const j = await (await fetch(url, {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify(opts)})).json();
+    out = j.ok ? (dash ? j.dashboard : j.manifest) : ((dash?"// ":"# ")+"error: "+j.error);
+  }catch(e){ out = (dash?"// ":"# ")+"error: "+e; }
+  if(dash) DASHBOARD = out; else MANIFEST = out;
+  document.getElementById("manifest").textContent = out;
 }
 function copyManifest(){
-  navigator.clipboard.writeText(MANIFEST).then(
+  navigator.clipboard.writeText(OUTPUT==="dashboard"?DASHBOARD:MANIFEST).then(
     ()=>{ document.getElementById("b-hint").textContent = "copied to clipboard ✓"; },
     ()=>{ document.getElementById("b-hint").textContent = "copy failed — select the text"; });
 }
 function downloadManifest(){
   const name = document.getElementById("b-name").value || "cluster";
+  const dash = OUTPUT==="dashboard";
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([MANIFEST], {type:"text/yaml"}));
-  a.download = `${name}.yaml`; a.click(); URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(new Blob([dash?DASHBOARD:MANIFEST],
+    {type: dash?"application/json":"text/yaml"}));
+  a.download = dash ? `${name}-dashboard.json` : `${name}.yaml`;
+  a.click(); URL.revokeObjectURL(a.href);
 }
 document.addEventListener("input", e=>{ if(e.target.id && e.target.id.startsWith("b-")) generateManifest(); });
 document.addEventListener("change", e=>{ if(e.target.id && e.target.id.startsWith("b-")) generateManifest(); });

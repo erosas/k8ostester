@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${name}-otel
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${name}-otel
+rules:
+  - apiGroups: [""]
+    resources: [pods, endpoints, services]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${name}-otel
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: ${name}-otel}
+subjects: [{kind: ServiceAccount, name: ${name}-otel}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${name}-otel
+data:
+  config.yaml: |
+    receivers:
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: cnpg
+              kubernetes_sd_configs: [{role: pod}]
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+                  regex: ${name}
+                  action: keep
+                - source_labels: [__meta_kubernetes_pod_container_port_number]
+                  regex: "9187"
+                  action: keep
+    exporters:
+      otlp:
+        endpoint: ${endpoint}
+    service:
+      pipelines:
+        metrics: {receivers: [prometheus], exporters: [otlp]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${name}-otel
+  labels: {app: ${name}-otel}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: ${name}-otel}}
+  template:
+    metadata: {labels: {app: ${name}-otel}}
+    spec:
+      serviceAccountName: ${name}-otel
+      containers:
+        - name: otel
+          image: otel/opentelemetry-collector-contrib:0.116.0
+          args: ["--config=/etc/otel/config.yaml"]
+          volumeMounts: [{name: config, mountPath: /etc/otel}]
+      volumes:
+        - name: config
+          configMap: {name: ${name}-otel}

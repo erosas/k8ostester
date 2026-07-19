@@ -1,0 +1,16 @@
+{
+  "type": "stat",
+  "title": "Instances up",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "cnpg_collector_up{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
+  ],
+  "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}},
+  "fieldConfig": {
+    "defaults": {
+      "mappings": [{"type": "value", "options": {"0": {"text": "DOWN"}, "1": {"text": "UP"}}}],
+      "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+    },
+    "overrides": []
+  }
+}

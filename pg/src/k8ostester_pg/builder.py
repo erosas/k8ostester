@@ -51,6 +51,10 @@ def build_manifest(opts: dict) -> str:
             retention=(opts.get("retention") or "7d").strip(),
         )
 
+    # native Prometheus scrape (CNPG exposes metrics; the operator makes a PodMonitor)
+    if opts.get("monitoring"):
+        extra += _tmpl("cluster-monitoring.tmpl.yaml").substitute()
+
     # blue/green application roles for credential rotation: two login roles that
     # both inherit the app owner (so they share the data), each from its own
     # secret. The console's Rotate refreshes the idle one and switches to it.
@@ -73,5 +77,10 @@ def build_manifest(opts: dict) -> str:
     if opts.get("backups") and opts.get("schedule"):
         docs.append(_tmpl("scheduledbackup.tmpl.yaml").substitute(
             name=name, schedule=(opts.get("schedule_cron") or "0 0 2 * * *").strip()))
+    # an OTEL endpoint => an OpenTelemetry Collector that scrapes the cluster's
+    # metrics and exports OTLP to it (Prometheus stays available via PodMonitor)
+    endpoint = (opts.get("otel_endpoint") or "").strip()
+    if endpoint:
+        docs.append(_tmpl("otel-collector.tmpl.yaml").substitute(name=name, endpoint=endpoint))
 
     return "\n---\n".join(d.strip() for d in docs) + "\n"

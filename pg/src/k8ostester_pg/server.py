@@ -34,35 +34,53 @@ class Console:
     """
 
     def __init__(self, context: str | None, namespace: str, target: str,
-                 interval: float = 2.0, start: bool = True):
+                 interval: float = 2.0, heavy_interval: float = 20.0,
+                 start: bool = True):
         self.k8s = ClusterClient(context)
         self.ns = namespace
         self.target = target
         self._interval = interval
+        self._heavy_interval = heavy_interval
         self._lock = threading.Lock()
         self._cache: dict = {"error": "warming up…"}
+        self._heavy: dict = {}                     # last slow-tier metrics (merged in)
         if start:                                  # off in tests
-            self.refresh()                         # warm synchronously
+            self.refresh_heavy()                   # warm both tiers synchronously
+            self.refresh()
             threading.Thread(target=self._refresh_loop, daemon=True).start()
+            threading.Thread(target=self._heavy_loop, daemon=True).start()
 
     def _safe_state(self) -> dict:
         try:
             snap = discover.snapshot(self.k8s, self.ns, target=self.target)
+            snap.update(self._heavy)               # attach last-known heavy metrics
             return {"snapshot": snap, "capabilities": capabilities(CNPG_ACTIONS, snap)}
         except Exception as e:                     # surface discovery errors to the UI
             return {"error": str(e).splitlines()[0][:200]}
 
     def refresh(self) -> dict:
-        """Recompute the cached state once (called on the timer and at startup)."""
+        """Recompute the fast (topology) tier once — called on the 2s timer."""
         st = self._safe_state()
         with self._lock:
             self._cache = st
         return st
 
+    def refresh_heavy(self) -> None:
+        """Recompute the slow tier (disk / connections / slots / data size)."""
+        try:
+            self._heavy = discover.heavy(self.k8s, self.ns)
+        except Exception:
+            pass                                   # keep last-known on a transient error
+
     def _refresh_loop(self) -> None:
         while True:
             self.refresh()
             time.sleep(self._interval)
+
+    def _heavy_loop(self) -> None:
+        while True:
+            time.sleep(self._heavy_interval)
+            self.refresh_heavy()
 
     def state(self) -> dict:
         """The latest cached snapshot + capability map (refreshed on the timer)."""

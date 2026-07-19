@@ -104,11 +104,39 @@ def test_wal_seg_index_is_lsn_ordered_and_timeline_independent():
     assert wal_seg_index("") is None and wal_seg_index("short") is None
 
 
-def test_parse_archiver_reads_segment_counts():
+def test_parse_archiver_reads_segment_counts_and_lag():
     from k8ostester_pg.discover import _parse_archiver
+    # short form (no current WAL) — no lag computed
     assert _parse_archiver("42|000000010000000000000009|0") == {
         "archived": 42, "last": "000000010000000000000009", "failed": 0}
+    # full form: last=0x09, current=0x0C -> 3 segments behind
+    full = _parse_archiver(
+        "42|000000010000000000000009|1|1700000000|00000001000000000000000C")
+    assert full["lag_segments"] == 3 and full["last_time"] == "1700000000"
+    assert full["current"] == "00000001000000000000000C" and full["failed"] == 1
     assert _parse_archiver("") == {}
+
+
+def test_continuous_archiving_condition_surfaced():
+    from k8ostester_pg.discover import build_snapshot
+    c = cluster()
+    c["status"]["conditions"] = [
+        {"type": "ContinuousArchiving", "status": "True", "message": "OK"}]
+    assert build_snapshot(c, [], [], [], False)["archiving"] == {"ok": True, "message": "OK"}
+    # absent condition -> {}
+    assert build_snapshot(cluster(), [], [], [], False)["archiving"] == {}
+
+
+def test_parse_df_connections_and_slots():
+    from k8ostester_pg.discover import _parse_conn, _parse_df, _parse_slots
+    df = _parse_df("Filesystem 1024-blocks Used Available Capacity Mounted\n"
+                   "/dev/sda1 1048576 262144 786432 25% /var/lib/postgresql/data")
+    assert df == {"size": 1048576 * 1024, "used": 262144 * 1024, "pct": 25.0}
+    assert _parse_conn("12|200") == {"active": 12, "max": 200}
+    assert _parse_conn("bad") == {}
+    slots = _parse_slots("pg-2|t|0\norphan|f|33554432\n")
+    assert slots == [{"name": "pg-2", "active": True, "retained_bytes": 0},
+                     {"name": "orphan", "active": False, "retained_bytes": 33554432}]
 
 
 def test_parse_replication_maps_standby_to_sync_and_lag():

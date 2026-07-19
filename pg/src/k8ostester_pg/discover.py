@@ -37,6 +37,7 @@ def build_snapshot(
         1 for b in backups if b.get("status", {}).get("phase") == "completed"
     )
     phase = str(status.get("phase", ""))
+    conditions = {c.get("type"): c for c in status.get("conditions", [])}
     reason = _busy_reason(phase, backups)   # a mutating op is in flight → lock
     return {
         "ready": instances > 0 and ready_n == instances,
@@ -56,12 +57,21 @@ def build_snapshot(
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
         "blue_green": "app_a" in managed and "app_b" in managed,
+        "archiving": _condition(conditions, "ContinuousArchiving"),  # WAL archive health
         "sync_policy": _sync_policy(spec),     # quorum/priority synchronous config
         "object_store": _object_store(spec),   # where backups/WAL go (part of the system)
         "fault_in_flight": partitioned,
         "busy": bool(reason),           # exclusivity: a mutating op is in progress
         "busy_reason": reason,
     }
+
+
+def _condition(conditions: dict, name: str) -> dict:
+    """A CNPG status condition as {ok, message} — {} if the cluster hasn't set it."""
+    c = conditions.get(name)
+    if not c:
+        return {}
+    return {"ok": c.get("status") == "True", "message": c.get("message", "")}
 
 
 def _sync_policy(spec: dict) -> dict:
@@ -157,7 +167,6 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
             i.update(repl[i["name"]])
     snap["archived_wal"] = _archiver(k8s, namespace, snap["primary"])
     snap["schedules"] = _schedules(k8s, namespace)          # auto-backup policy
-    snap["data_size"] = _data_size(k8s, namespace, snap["primary"])
     snap["credentials"] = _credentials(k8s, namespace, snap["blue_green"])
     # a restore cluster still bootstrapping also locks the tool
     others = k8s.custom.list_namespaced_custom_object(
@@ -239,24 +248,132 @@ def _data_size(k8s: ClusterClient, namespace: str, primary: str) -> int | None:
         return None
 
 
+def heavy(k8s: ClusterClient, namespace: str, name: str = "pg") -> dict:
+    """The slow-changing, expensive metrics — disk headroom, connection
+    saturation, replication slots, data size. Run on a slower cadence than the
+    2s topology refresh (see server.Console) so it doesn't hammer the primary."""
+    cluster = k8s.custom.get_namespaced_custom_object(
+        CNPG_GROUP, CNPG_VERSION, namespace, "clusters", name)
+    primary = cluster.get("status", {}).get("currentPrimary", "")
+    instances = _instances(k8s, namespace, name)
+    return {
+        "data_size": _data_size(k8s, namespace, primary),
+        "disk": _disk(k8s, namespace, instances),
+        "connections": _connections(k8s, namespace, primary),
+        "slots": _slots(k8s, namespace, primary),
+    }
+
+
+def _parse_df(out: str) -> dict:
+    """Parse `df -kP <path>` output (1K blocks) into bytes + percent used."""
+    lines = [ln for ln in out.strip().splitlines() if ln]
+    if len(lines) < 2:
+        return {}
+    f = lines[-1].split()
+    if len(f) < 4:
+        return {}
+    try:
+        size, used = int(f[1]) * 1024, int(f[2]) * 1024
+    except ValueError:
+        return {}
+    return {"size": size, "used": used, "pct": round(used / size * 100, 1) if size else 0}
+
+
+def _disk(k8s: ClusterClient, namespace: str, instances: list[dict]) -> dict:
+    """Data-volume usage per instance — the disk-full early warning."""
+    out = {}
+    for i in instances:
+        try:
+            raw = k8s.exec_pod(namespace, i["name"],
+                               ["df", "-kP", "/var/lib/postgresql/data"],
+                               container="postgres")
+        except Exception:
+            continue
+        d = _parse_df(raw)
+        if d:
+            out[i["name"]] = d
+    return out
+
+
+def _parse_conn(out: str) -> dict:
+    p = out.strip().split("|")
+    try:
+        return {"active": int(p[0]), "max": int(p[1])}
+    except (ValueError, IndexError):
+        return {}
+
+
+def _connections(k8s: ClusterClient, namespace: str, primary: str) -> dict:
+    """Active backends vs max_connections — connection-saturation headroom."""
+    if not primary:
+        return {}
+    query = ("select (select count(*) from pg_stat_activity), "
+             "(select setting::int from pg_settings where name='max_connections')")
+    try:
+        raw = k8s.exec_pod(namespace, primary,
+                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
+                           container="postgres")
+    except Exception:
+        return {}
+    return _parse_conn(raw)
+
+
+def _parse_slots(out: str) -> list[dict]:
+    slots = []
+    for line in out.strip().splitlines():
+        p = line.split("|")
+        if len(p) >= 3 and p[0]:
+            try:
+                retained = int(p[2] or 0)
+            except ValueError:
+                retained = 0
+            slots.append({"name": p[0], "active": p[1] == "t", "retained_bytes": retained})
+    return slots
+
+
+def _slots(k8s: ClusterClient, namespace: str, primary: str) -> list[dict]:
+    """Replication slots — an inactive slot silently pins WAL and fills disk."""
+    if not primary:
+        return []
+    query = ("select slot_name, active, "
+             "coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn),0)::bigint "
+             "from pg_replication_slots order by 1")
+    try:
+        raw = k8s.exec_pod(namespace, primary,
+                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
+                           container="postgres")
+    except Exception:
+        return []
+    return _parse_slots(raw)
+
+
 def _parse_archiver(out: str) -> dict:
-    """Parse 'archived|last_wal|failed' from pg_stat_archiver — the WAL segments
-    (the 'parts') pushed to the object store, the newest one, and failures."""
+    """Parse 'archived|last_wal|failed|last_time_epoch|current_wal' from
+    pg_stat_archiver + current WAL. Adds ``lag_segments`` — how many WAL segments
+    the archiver is behind the primary's current position (0 = caught up)."""
     p = out.strip().split("|")
     if len(p) < 3:
         return {}
     try:
-        return {"archived": int(p[0] or 0), "last": p[1], "failed": int(p[2] or 0)}
+        res = {"archived": int(p[0] or 0), "last": p[1], "failed": int(p[2] or 0)}
     except ValueError:
         return {}
+    if len(p) >= 5:
+        res["last_time"] = p[3]          # epoch seconds (str), or "" if never archived
+        res["current"] = p[4]
+        a, b = wal_seg_index(p[1]), wal_seg_index(p[4])
+        if a is not None and b is not None:
+            res["lag_segments"] = max(0, b - a)
+    return res
 
 
 def _archiver(k8s: ClusterClient, namespace: str, primary: str) -> dict:
-    """WAL-archiving stats from the primary's pg_stat_archiver."""
+    """WAL-archiving stats + freshness/lag from the primary's pg_stat_archiver."""
     if not primary:
         return {}
-    query = ("select archived_count, coalesce(last_archived_wal,''), failed_count "
-             "from pg_stat_archiver")
+    query = ("select archived_count, coalesce(last_archived_wal,''), failed_count, "
+             "coalesce(extract(epoch from last_archived_time)::bigint::text,''), "
+             "(select pg_walfile_name(pg_current_wal_lsn())) from pg_stat_archiver")
     try:
         out = k8s.exec_pod(namespace, primary,
                            ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
@@ -330,6 +447,7 @@ def _instances(k8s: ClusterClient, namespace: str, name: str) -> list[dict]:
         out.append({
             "name": p.metadata.name,
             "role": labels.get("cnpg.io/instanceRole", "?"),
+            "node": node or "",                 # physical k8s node placement
             "zone": _node_zone(k8s, node) if node else "",
             "healthy": ready,
         })

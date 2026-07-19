@@ -383,6 +383,38 @@ document.addEventListener("mousemove", e=>{
   TIP.style.left = Math.max(8,x)+"px"; TIP.style.top = Math.max(8,y)+"px";
 });
 
+// disk headroom for an instance, as a colored subtitle span (warn ≥75, crit ≥90)
+function diskSpan(name){
+  const d = (SNAP.disk||{})[name];
+  if(!d) return "";
+  const col = d.pct>=90 ? "crit" : d.pct>=75 ? "warn" : "";
+  return `<span${col?` style="color:var(--${col})"`:""}>disk ${d.pct}%</span>`;
+}
+function diskLine(name){
+  const d = (SNAP.disk||{})[name];
+  return d ? `disk ${d.pct}% (${fmtBytes(d.used)} / ${fmtBytes(d.size)})` : "";
+}
+// where an instance physically sits — zone if labelled, else the k8s node
+function placeLabel(i){ return i.zone || i.node || ""; }
+
+// backup freshness vs the schedule: is the last successful backup overdue?
+function cronPeriodHours(c){
+  const w = humanCron(c);
+  if(w.startsWith("daily")) return 24;
+  if(/^(Sun|Mon|Tue|Wed|Thu|Fri|Sat)/.test(w)) return 168;
+  return null;   // unusual cron — no overdue judgment
+}
+function backupFreshness(s){
+  const done = (s.backups||[]).filter(b=>b.phase==="completed"&&b.stoppedAt)
+    .map(b=>Date.parse(b.stoppedAt));
+  if(!done.length) return {txt:"no completed backup yet", col:"warn"};
+  const last = Math.max(...done), ageH = (Date.now()-last)/3.6e6;
+  const sc = (s.schedules||[])[0], per = sc ? cronPeriodHours(sc.schedule) : null;
+  let col = "", note = "";
+  if(per){ if(ageH > per*1.5){ col="crit"; note=" · OVERDUE"; } else if(ageH > per){ col="warn"; note=" · due"; } }
+  return {txt:`last backup ${ago(last)}${note}`, col};
+}
+
 // pg_stat_replication sync_state -> a clear sync/async badge
 function syncBadge(state){
   const s = (state||"").toLowerCase();
@@ -398,14 +430,16 @@ function renderTopology(s){
   const replicas = (s.instances||[]).filter(i=>i!==primary);
   const poolers = (s.poolers||[]).map(p=>node("pooler · "+p.type, p.name, "", "ok",
     `PgBouncer pooler (${p.type}) — routes app traffic to the ${p.type==="ro"?"replicas":"primary"}`)).join("");
-  // replica nodes carry the edge state: sync vs async + replication lag
+  // replica nodes carry the edge state: sync vs async + replication lag, plus
+  // disk headroom and physical placement
   const reps = replicas.map(r=>{
     const b = syncBadge(r.sync_state);
     const lag = (r.lag_bytes!=null) ? fmtBytes(r.lag_bytes) : "";
-    const sub = [r.zone, lag && ("lag "+lag)].filter(Boolean).join(" · ");
+    const sub = [placeLabel(r), lag && ("lag "+lag), diskSpan(r.name)].filter(Boolean).join(" · ");
     const qual = (r.sync_state||"").toLowerCase()==="quorum" ? " (quorum candidate)" : "";
     const tip = `replica ${r.name}\n${b.label||"streaming?"}${qual}\nlag ${lag||"n/a"}\n`+
-      `zone ${r.zone||"—"} · ${r.healthy?"healthy":"unhealthy"}`;
+      `node ${r.node||"—"} / zone ${r.zone||"—"}\n${diskLine(r.name)||"disk n/a"}\n`+
+      `${r.healthy?"healthy":"unhealthy"}`;
     return `<div class="node ${r.healthy?'ok':'bad'}" data-tip="${esc(tip)}">
       <div class="r">replica ${b.label?`<span class="badge ${b.cls}">${b.label}</span>`:""}</div>
       <div class="n">${r.name}</div><div class="z">${sub}</div></div>`;
@@ -418,36 +452,54 @@ function renderTopology(s){
     <div class="n">${cr.active_role||"app"}</div>
     <div class="cr">${cr.rotated_at ? "set "+fmtStamp(cr.rotated_at) : "initial creds"}</div></div>`;
   const sp = s.sync_policy||{};
-  const ptip = `primary ${primary?primary.name:"—"}\nPostgreSQL ${s.version}\n`+
-    `zone ${primary?primary.zone||"—":"—"}\nsync policy: ${sp.label||"?"}`;
-  const pnode = primary
-    ? node("primary", primary.name, primary.zone, "primary", ptip)
-    : node("primary","—","","bad","no primary elected");
+  let pnode;
+  if(primary){
+    const psub = [placeLabel(primary), diskSpan(primary.name)].filter(Boolean).join(" · ");
+    const ptip = `primary ${primary.name}\nPostgreSQL ${s.version}\n`+
+      `node ${primary.node||"—"} / zone ${primary.zone||"—"}\n${diskLine(primary.name)||"disk n/a"}\n`+
+      `sync policy: ${sp.label||"?"}`;
+    pnode = `<div class="node primary" data-tip="${esc(ptip)}"><div class="r">primary</div>
+      <div class="n">${primary.name}</div><div class="z">${psub}</div></div>`;
+  } else {
+    pnode = node("primary","—","","bad","no primary elected");
+  }
   // the object store is part of the system — discover it and show where WAL/backups land
   const os = s.object_store||{}, aw = s.archived_wal||{};
   let store = "";
   if(os.configured){
+    // archive health: is WAL archiving keeping up? (CNPG condition + lag segments)
+    const arch = s.archiving||{}, lag = (aw.lag_segments!=null) ? aw.lag_segments : null;
+    const lastAge = aw.last_time ? ago(+aw.last_time*1000) : "";
+    let aBadge, aState;
+    if(arch.ok === false){ aBadge = `<span class="badge" style="color:var(--crit);border-color:#3a1a1e">STALLED</span>`; aState = "STALLED"; }
+    else if(lag!=null && lag>2){ aBadge = `<span class="badge potential">${lag} behind</span>`; aState = lag+" behind"; }
+    else { aBadge = `<span class="badge sync">LIVE</span>`; aState = "live"; }
     const segs = (aw.archived!=null) ? aw.archived+" WAL segs" : "WAL archive";
     const stip = `object store\ns3://${os.bucket}/${os.path||""}\n@ ${os.endpoint||"?"}\n`+
+      `archiving: ${aState}${arch.message?` (${arch.message})`:""}\n`+
+      `${lag!=null?`${lag} segment(s) behind current`:""}${lastAge?` · last archive ${lastAge}`:""}\n`+
       `${aw.archived!=null?aw.archived+" WAL segments archived":"archiving"}`+
       `${s.data_size!=null?`\n~${fmtBytes(s.data_size)} data (≈ base backup size)`:""}`+
       `${aw.failed?`\n${aw.failed} archive failures (cumulative since stats reset)`:""}`;
     const storeNode = `<div class="node store" data-tip="${esc(stip)}">
-        <div class="r">object store${aw.failed?` <span class="badge potential">${aw.failed} FAIL</span>`:""}</div>
-        <div class="n">${os.bucket||"bucket"}</div><div class="z">${segs}</div></div>`;
+        <div class="r">object store ${aBadge}${aw.failed?` <span class="badge potential">${aw.failed} FAIL</span>`:""}</div>
+        <div class="n">${os.bucket||"bucket"}</div>
+        <div class="z">${segs}${lastAge?` · ${lastAge}`:""}</div></div>`;
     // the auto-backup policy (ScheduledBackup + retention) is part of the system too
     const sc = (s.schedules||[])[0], ret = s.retention||"";
     let policy = "";
     if(sc || ret){
       const when = sc ? humanCron(sc.schedule) : "manual only";
       const susp = sc && sc.suspend;
+      const fresh = backupFreshness(s);
       const ptip = `backup policy\n`+
         (sc ? `schedule: ${sc.schedule}\n${when}${susp?" · SUSPENDED":""}` : "no schedule — manual backups only")+
-        (ret ? `\nretention: ${ret}` : "\nretention: none (backups kept forever)");
-      policy = `<div class="node ${sc&&!susp?'ok':''}" data-tip="${esc(ptip)}">
+        (ret ? `\nretention: ${ret}` : "\nretention: none (backups kept forever)")+
+        `\n${fresh.txt}`;
+      policy = `<div class="node ${susp?'':(fresh.col==='crit'?'bad':fresh.col==='warn'?'':'ok')}" data-tip="${esc(ptip)}">
         <div class="r">backup policy${susp?` <span class="badge potential">SUSPENDED</span>`:""}</div>
         <div class="n" style="font-size:12.5px">${sc?when:"manual"}</div>
-        <div class="z">${ret?"retain "+ret:"no retention"}</div></div>`;
+        <div class="z">${ret?"retain "+ret:"no retention"} · <span${fresh.col?` style="color:var(--${fresh.col})"`:""}>${fresh.txt}</span></div></div>`;
     }
     store = `<span class="arrow">→<small>WAL / backups</small></span>
       <div class="col">${storeNode}${policy}</div>`;
@@ -602,6 +654,25 @@ function confirmRestore(){
   post("restore", {target_time: target});
 }
 
+function connChip(c){
+  if(!c || !c.max) return "";
+  const pct = Math.round(c.active/c.max*100);
+  const col = pct>=85 ? "crit" : pct>=70 ? "warn" : "";
+  return `<span class="chip"${col?` style="color:var(--${col})"`:""} `+
+    `title="active backends vs max_connections">conns <b>${c.active}/${c.max}</b> (${pct}%)</span>`;
+}
+function slotChip(slots){
+  if(!slots || !slots.length) return "";
+  const inactive = slots.filter(s=>!s.active);
+  if(inactive.length){
+    const held = inactive.reduce((a,s)=>a+(s.retained_bytes||0),0);
+    return `<span class="chip" style="color:var(--warn)" title="inactive slots pin WAL: `+
+      `${inactive.map(s=>s.name).join(", ")}">slots <b>${slots.length-inactive.length}/${slots.length}</b> active `+
+      `⚠ ${fmtBytes(held)} held</span>`;
+  }
+  return `<span class="chip" title="all replication slots active">slots <b>${slots.length}/${slots.length}</b> active</span>`;
+}
+
 function renderStatus(s){
   const el = document.getElementById("status");
   const bks = (s.backups||[]).map(b=>{
@@ -623,6 +694,8 @@ function render(data){
     `<span class="chip">primary <b>${SNAP.primary||"—"}</b></span>`,
     `<span class="chip">zones <b>${(SNAP.zones||[]).join(", ")||"—"}</b></span>`,
     `<span class="chip">sync <b>${(SNAP.sync_policy||{}).label||"?"}</b></span>`,
+    connChip(SNAP.connections),
+    slotChip(SNAP.slots),
     `<span class="chip">backups <b>${SNAP.backups_completed||0}</b></span>`,
     SNAP.fault_in_flight?`<span class="chip" style="color:var(--warn)">fault in flight</span>`:"",
   ].join("");

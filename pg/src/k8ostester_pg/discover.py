@@ -19,6 +19,39 @@ def pg_version(image: str) -> str:
     return image.rsplit(":", 1)[-1] if ":" in image else ""
 
 
+def list_clusters(k8s: ClusterClient, namespace: str | None = None) -> list[dict]:
+    """Discover the CNPG clusters this context can see — the picker's inventory.
+
+    Lists cluster-wide (all namespaces); if that's forbidden and a namespace is
+    given, falls back to that namespace. Each entry is a brief health summary.
+    """
+    from kubernetes.client import ApiException
+    try:
+        items = k8s.custom.list_cluster_custom_object(
+            CNPG_GROUP, CNPG_VERSION, "clusters").get("items", [])
+    except ApiException as e:
+        if e.status in (403, 404) and namespace:
+            items = k8s.custom.list_namespaced_custom_object(
+                CNPG_GROUP, CNPG_VERSION, namespace, "clusters").get("items", [])
+        else:
+            raise
+    out = []
+    for c in items:
+        meta, spec, status = c["metadata"], c.get("spec", {}), c.get("status", {})
+        instances = int(spec.get("instances", 0) or 0)
+        ready = int(status.get("readyInstances", 0) or 0)
+        out.append({
+            "namespace": meta["namespace"],
+            "name": meta["name"],
+            "instances": instances,
+            "ready": ready,
+            "healthy": instances > 0 and ready == instances,
+            "primary": status.get("currentPrimary", ""),
+            "version": pg_version(spec.get("imageName", "")),
+        })
+    return sorted(out, key=lambda c: (c["namespace"], c["name"]))
+
+
 def build_snapshot(
     cluster: dict,
     replica_pods: list[str],
@@ -145,7 +178,7 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
     richer topology the UI renders)."""
     cluster = k8s.custom.get_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, namespace, "clusters", name)
-    replica_pods = harness.replicas(k8s, namespace)
+    replica_pods = harness.replicas(k8s, namespace, name)
     instances = _instances(k8s, namespace, name)
     zones = sorted({i["zone"] for i in instances if i["zone"]})
     backups = k8s.custom.list_namespaced_custom_object(
@@ -154,6 +187,7 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
     snap = build_snapshot(cluster, replica_pods, zones, backups, partitioned, target)
     # topology for the SCADA view (not needed by the capability preconditions)
     snap["namespace"] = namespace
+    snap["cluster"] = name
     snap["instances"] = instances
     snap["poolers"] = [
         {"name": p["metadata"]["name"], "type": p.get("spec", {}).get("type", "rw")}

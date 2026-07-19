@@ -46,9 +46,16 @@ def test_execute_gates_on_the_capability():
 @patch("k8ostester_pg.execute.ops")
 def test_ops_actions_dispatch_to_the_ops_module(mock_ops):
     k8s = MagicMock()
-    execute(k8s, "ns", "upgrade", snap())
-    mock_ops.minor_upgrade.assert_called_once_with(k8s, "ns", "16.6")   # the target
-    execute(k8s, "ns", "rotate", snap())
-    mock_ops.rotate_credentials.assert_called_once_with(k8s, "ns")
-    execute(k8s, "ns", "restore", snap())
-    mock_ops.restore.assert_called_once_with(k8s, "ns", "")
+    execute(k8s, "ns", "upgrade", snap(), name="orders")
+    mock_ops.minor_upgrade.assert_called_once_with(k8s, "ns", "16.6", "orders")
+    execute(k8s, "ns", "rotate", snap(), name="orders")
+    mock_ops.rotate_credentials.assert_called_once_with(k8s, "ns", "orders")
+    execute(k8s, "ns", "restore", snap(), name="orders")
+    mock_ops.restore.assert_called_once_with(k8s, "ns", "", "orders")
+
+
+def test_backup_uses_the_selected_cluster_name():
+    k8s = MagicMock()
+    execute(k8s, "ns", "backup", snap(), name="orders")
+    body = k8s.custom.create_namespaced_custom_object.call_args.args[-1]
+    assert body["spec"]["cluster"]["name"] == "orders"

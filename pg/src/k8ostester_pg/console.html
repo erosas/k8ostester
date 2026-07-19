@@ -32,6 +32,20 @@
   .chip b{color:var(--ink)}
   .err{background:#2a1416;border:1px solid #5a2327;color:#f2a1a4;padding:10px 14px;
     border-radius:8px;font-family:var(--mono);font-size:12.5px;margin-bottom:18px;display:none}
+  /* context + cluster pickers */
+  .pickers{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .pick{display:flex;flex-direction:column;gap:3px}
+  .pick label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--dim)}
+  .pick select{background:var(--panel2);border:1px solid var(--border);color:var(--ink);
+    border-radius:7px;padding:6px 9px;font-family:var(--mono);font-size:12.5px;color-scheme:dark;
+    max-width:230px}
+  .pick select:focus{outline:none;border-color:var(--accent)}
+  .pick select:disabled{opacity:.5}
+  /* unselected landing */
+  .landing{border:1px dashed var(--border);border-radius:12px;padding:34px 22px;text-align:center;
+    color:var(--muted);font-family:var(--mono);font-size:13px;background:var(--panel2)}
+  .landing b{color:var(--ink)}
   /* view selector in the header */
   .views{display:flex;gap:2px;border:1px solid var(--border);border-radius:9px;padding:3px;
     background:var(--panel2);margin-left:20px}
@@ -189,7 +203,13 @@
   <header>
     <div>
       <div class="eyebrow">k8ostester · control plane</div>
-      <h1 id="title">CNPG cluster</h1>
+      <h1 id="title">CNPG clusters</h1>
+    </div>
+    <div class="pickers">
+      <div class="pick"><label>Context</label>
+        <select id="ctx-sel" onchange="onContext()"></select></div>
+      <div class="pick"><label>Cluster</label>
+        <select id="cl-sel" onchange="onCluster()"></select></div>
     </div>
     <div class="views" id="views">
       <button class="vbtn on" data-tab="ops" onclick="pick('ops')">Ops</button>
@@ -202,6 +222,10 @@
   <div class="meta" id="meta"></div>
   <div class="err" id="err"></div>
   <div class="lock" id="lock"></div>
+
+  <div class="landing" id="landing" style="display:none">
+    Select a <b>cluster</b> above to begin. The picker lists every CNPG cluster this context can see.
+  </div>
 
   <div id="cluster">
     <div class="scada" id="scada"></div>
@@ -300,17 +324,59 @@
 </div>
 
 <script>
-let TAB = "ops", CAPS = [], SNAP = {};
+let TAB = "ops", CAPS = [], SNAP = {}, UNSEL = true;
 
+function applyLayout(){
+  const isBuild = TAB==="builder";
+  document.getElementById("builder").style.display = isBuild ? "block" : "none";
+  document.getElementById("landing").style.display = (!isBuild && UNSEL) ? "block" : "none";
+  document.getElementById("cluster").style.display = (isBuild || UNSEL) ? "none" : "block";
+  document.getElementById("meta").style.display = (isBuild || UNSEL) ? "none" : "flex";
+}
 function pick(t){
   TAB = t;
   document.querySelectorAll(".vbtn").forEach(e=>e.classList.toggle("on", e.dataset.tab===t));
-  const isBuild = t==="builder";
-  document.getElementById("builder").style.display = isBuild ? "block" : "none";
-  document.getElementById("cluster").style.display = isBuild ? "none" : "block";
-  document.getElementById("meta").style.display = isBuild ? "none" : "flex";
-  if(isBuild) generateManifest();
-  else renderActions();
+  applyLayout();
+  if(t==="builder") generateManifest();
+  else if(!UNSEL) renderActions();
+}
+
+/* ---- context + cluster pickers ---- */
+async function loadContexts(){
+  try{
+    const j = await (await fetch("/api/contexts")).json();
+    const sel = document.getElementById("ctx-sel");
+    const want = (j.selected && j.selected.context) || j.current;
+    sel.innerHTML = (j.contexts.length ? j.contexts : [j.current||""]).map(c=>
+      `<option value="${esch(c||"")}"${c===want?" selected":""}>${esch(c||"(current)")}</option>`).join("");
+    sel.disabled = !!j.locked;
+    await loadClusters(want, j.selected);
+  }catch(e){ /* leave pickers empty */ }
+}
+async function loadClusters(context, preselect){
+  const sel = document.getElementById("cl-sel");
+  sel.innerHTML = `<option>loading…</option>`;
+  try{
+    const j = await (await fetch("/api/clusters?context="+encodeURIComponent(context||""))).json();
+    if(!j.ok){ sel.innerHTML = `<option value="">— ${esch(j.error||"unavailable")} —</option>`; return; }
+    if(!j.clusters.length){ sel.innerHTML = `<option value="">— no CNPG clusters —</option>`; return; }
+    const cur = preselect && preselect.namespace ? preselect.namespace+"/"+preselect.name : "";
+    sel.innerHTML = `<option value="">— select —</option>` + j.clusters.map(c=>{
+      const key = c.namespace+"/"+c.name;
+      return `<option value="${esch(key)}"${key===cur?" selected":""}>`+
+        `${c.healthy?"●":"○"} ${esch(key)} · pg ${esch(c.version||"?")} · ${c.ready}/${c.instances}</option>`;
+    }).join("");
+  }catch(e){ sel.innerHTML = `<option value="">— error —</option>`; }
+}
+async function onContext(){ await loadClusters(document.getElementById("ctx-sel").value, null); }
+async function onCluster(){
+  const v = document.getElementById("cl-sel").value;
+  if(!v) return;
+  const [namespace, name] = v.split("/");
+  const context = document.getElementById("ctx-sel").value;
+  await fetch("/api/select", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({context, namespace, name})});
+  // the SSE stream reflects the new selection on its next tick
 }
 
 // Activity: a meaningful record — operation, status, round-trip duration, detail
@@ -715,10 +781,15 @@ function slotChip(slots){
 
 function render(data){
   const err = document.getElementById("err");
+  if(data.unselected){ UNSEL = true; err.style.display="none";
+    document.getElementById("title").textContent = "CNPG clusters"; applyLayout(); return; }
+  if(data.warming){ return; }   // a selection is warming up; the next tick has the snapshot
   if(data.error){ err.style.display="block"; err.textContent = "discovery: "+data.error; return; }
   err.style.display="none";
+  UNSEL = false;
   SNAP = data.snapshot; CAPS = data.capabilities;
-  document.getElementById("title").textContent = `CNPG · ${SNAP.namespace||""}`;
+  applyLayout();
+  document.getElementById("title").textContent = `${SNAP.cluster||"CNPG"} · ${SNAP.namespace||""}`;
   document.getElementById("meta").innerHTML = [
     `<span class="chip">state <b>${SNAP.ready?"healthy":"degraded"}</b></span>`,
     `<span class="chip">version <b>${SNAP.version||"?"}</b>${SNAP.target?` → ${SNAP.target}`:""}</span>`,
@@ -782,6 +853,8 @@ function downloadManifest(){
 }
 document.addEventListener("input", e=>{ if(e.target.id && e.target.id.startsWith("b-")) generateManifest(); });
 document.addEventListener("change", e=>{ if(e.target.id && e.target.id.startsWith("b-")) generateManifest(); });
+
+loadContexts();          // populate the context + cluster pickers
 
 const es = new EventSource("/api/stream");
 es.onmessage = e => {

@@ -33,10 +33,12 @@ def cluster_field(k8s: ClusterClient, namespace: str, field: str, name: str = "p
     return str(obj.get("status", {}).get(field, ""))
 
 
-def replicas(k8s: ClusterClient, namespace: str) -> list[str]:
-    """Names of the current replica instance pods (not the primary)."""
+def replicas(k8s: ClusterClient, namespace: str, name: str = "pg") -> list[str]:
+    """Names of the current replica instance pods (not the primary) for a cluster.
+    Scoped to the cluster label so two clusters in one namespace don't mix."""
     pods = k8s.core.list_namespaced_pod(
-        namespace, label_selector="cnpg.io/instanceRole=replica"
+        namespace,
+        label_selector=f"cnpg.io/instanceRole=replica,cnpg.io/cluster={name}",
     )
     return [p.metadata.name for p in pods.items]
 

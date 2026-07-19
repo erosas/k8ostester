@@ -25,33 +25,33 @@ class ActionDenied(Exception):
 
 
 def execute(k8s: ClusterClient, namespace: str, action_id: str, snapshot: dict,
-            params: dict | None = None) -> str:
+            params: dict | None = None, name: str = "pg") -> str:
     """Gate on the capability map, then run the action. Returns a one-line summary."""
     if not is_enabled(CNPG_ACTIONS, action_id, snapshot):
         raise ActionDenied(f"{action_id} is not enabled for the current cluster state")
     handler = _HANDLERS.get(action_id)
     if handler is None:
         raise NotImplementedError(f"no executor for {action_id!r} yet")
-    return handler(k8s, namespace, snapshot, params or {})
+    return handler(k8s, namespace, snapshot, params or {}, name)
 
 
-def _kill_primary(k8s: ClusterClient, ns: str, s: dict, p: dict) -> str:
+def _kill_primary(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
     chaos.kill_pod(k8s, ns, s["primary"])
     return f"killed primary {s['primary']}"
 
 
-def _partition_primary(k8s: ClusterClient, ns: str, s: dict, p: dict) -> str:
+def _partition_primary(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
     chaos.partition_pod(k8s, ns, s["primary"])
     return f"partitioned primary {s['primary']}"
 
 
-def _kill_replica(k8s: ClusterClient, ns: str, s: dict, p: dict) -> str:
+def _kill_replica(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
     replica = s["replicas"][0]
     chaos.kill_pod(k8s, ns, replica)
     return f"killed replica {replica}"
 
 
-def _backup(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str = "pg") -> str:
+def _backup(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
     backup = "console-" + datetime.now(UTC).strftime("%Y%m%d%H%M%S")   # unique per run
     k8s.custom.create_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, ns, "backups", {
@@ -68,7 +68,7 @@ _HANDLERS = {
     "partition-primary": _partition_primary,
     "kill-replica": _kill_replica,
     "backup": _backup,
-    "rotate": lambda k8s, ns, s, p: ops.rotate_credentials(k8s, ns),
-    "upgrade": lambda k8s, ns, s, p: ops.minor_upgrade(k8s, ns, s["target"]),
-    "restore": lambda k8s, ns, s, p: ops.restore(k8s, ns, p.get("target_time", "")),
+    "rotate": lambda k8s, ns, s, p, name: ops.rotate_credentials(k8s, ns, name),
+    "upgrade": lambda k8s, ns, s, p, name: ops.minor_upgrade(k8s, ns, s["target"], name),
+    "restore": lambda k8s, ns, s, p, name: ops.restore(k8s, ns, p.get("target_time", ""), name),
 }

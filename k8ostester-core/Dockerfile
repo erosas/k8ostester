@@ -3,8 +3,11 @@
 # the repo root (mounts kubeconfig + CWD, allocates a TTY for the dashboard,
 # reroutes 127.0.0.1 kubeconfigs via the host gateway).
 #
-#   docker build -t k8os-tester:local k8ostester-core
+#   docker build -t k8os-tester:local -f k8ostester-core/Dockerfile .
 #   ./k8ost-docker env check
+#
+# Build context is the REPO ROOT: k8ostester depends on the workspace kernel
+# (k8ostester-kernel), so the image installs both packages.
 #
 # Built on Chainguard's Wolfi (glibc, so python wheels/psycopg work) — a minimal,
 # continuously-rebuilt base with ~0 OS CVEs. kubectl and helm come from Wolfi's
@@ -20,8 +23,11 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77
 
 RUN apk add --no-cache python-3.14 py3.14-pip ca-certificates-bundle kubectl helm
 
-COPY . /src
-RUN pip install --break-system-packages --no-cache-dir /src \
+# kernel first (core depends on it), then core — both from the workspace.
+COPY kernel /src/kernel
+COPY k8ostester-core /src/k8ostester-core
+RUN pip install --break-system-packages --no-cache-dir /src/kernel \
+    && pip install --break-system-packages --no-cache-dir /src/k8ostester-core \
     && rm -rf /src \
     && adduser -D -u 10001 k8ost
 

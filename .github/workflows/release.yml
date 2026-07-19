@@ -32,7 +32,7 @@ jobs:
       matrix:
         include:
           - name: k8os-tester
-            context: k8ostester-core
+            context: .
             dockerfile: k8ostester-core/Dockerfile
           - name: k8os-loadgen
             context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg

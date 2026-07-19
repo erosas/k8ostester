@@ -1,0 +1,12 @@
+# Root build context for the tool image (repo root, so the kernel is included).
+.venv
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+.git
+results
+experiments
+docs
+k8os-testbed
+*.md

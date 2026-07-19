@@ -449,6 +449,28 @@ function openConnect(){
     [p.type==="rw"?"pool-rw":"pool-ro", p.host, `PgBouncer pooler (${p.type}) — recommended for apps`]));
   const epHtml=eps.map(([t,h,d])=>`<div class="ep"><span class="tag">${t}</span>`+
     `<span class="host">${esch(h)}:5432</span><span class="desc">${esch(d)}</span></div>`).join("");
+  // external access: any Service actually exposed outside the cluster?
+  const svcs = SNAP.services||[];
+  const extSvcs = svcs.filter(x=>x.external);
+  const npSvcs = svcs.filter(x=>x.type==="NodePort" && x.node_port);
+  const pf = `kubectl -n ${ns} port-forward svc/${c}-rw 5432:5432`;
+  let extHtml;
+  if(extSvcs.length){
+    extHtml = extSvcs.map(x=>`<div class="ep"><span class="tag">${esch(x.type)}</span>`+
+      `<span class="host">${esch(x.external)}:${x.port}</span>`+
+      `<span class="desc">${esch(x.name)} — reachable from outside the cluster (use sslmode=verify-full)</span></div>`).join("");
+  } else if(npSvcs.length){
+    extHtml = npSvcs.map(x=>`<div class="ep"><span class="tag">NodePort</span>`+
+      `<span class="host">&lt;any-node-ip&gt;:${x.node_port}</span>`+
+      `<span class="desc">${esch(x.name)} — reachable on any node's IP</span></div>`).join("");
+  } else {
+    extHtml = `<div class="kv">No external Service — this cluster is <b>in-cluster only</b>. To reach it `+
+      `from outside: a <b>LoadBalancer</b> Service (an AWS NLB — Postgres is L4/TCP, not an ALB) on the `+
+      `<b>${esch(c)}-rw</b> service or the pooler; a <b>TCP ingress / Gateway API TCPRoute</b>; or keep it `+
+      `private and reach it over <b>VPN / bastion / PrivateLink</b>. Always front the <b>service</b> (it `+
+      `follows failover), never a pod. For dev, port-forward:</div>`;
+  }
+  extHtml += codeRow(pf) + `<div class="kv" style="margin-top:4px">…then connect to <b>localhost:5432</b>.</div>`;
   const rolesHtml = roles.length
     ? roles.map(r=>`<div class="kv">${r.name===active?"● ":"○ "}<b>${esch(r.name)}</b> — secret `+
         `<b>${esch(r.secret||"—")}</b>${r.name===active?" · active":""}`+
@@ -461,15 +483,15 @@ function openConnect(){
     : "";
   openSheet(`<h2>Connect to ${esch(c)}</h2>
     <div class="lede">Endpoints, credentials and ready-to-use connection strings for this cluster.</div>
-    <div class="sec"><h3>Endpoints (all :5432)</h3>${epHtml}</div>
+    <div class="sec"><h3>In-cluster endpoints (DNS, :5432)</h3>${epHtml}</div>
+    <div class="sec"><h3>External access</h3>${extHtml}</div>
     <div class="sec"><h3>Database &amp; credentials</h3>
       <div class="kv">database <b>${esch(db)}</b> · owner <b>${esch((SNAP.database||{}).owner||"app")}</b></div>
       ${rolesHtml}${rot}
       <div style="margin-top:8px">${codeRow(getpw)}</div></div>
     <div class="sec"><h3>Connect as ${esch(active)}${rwPool?" (via pooler)":""}</h3>
       ${codeRow(uri)}${codeRow(psql)}${codeRow(jdbc)}
-      <div class="kv" style="margin-top:6px">For read-only queries use host <b>${esch(ro)}</b>`+
-      `${poolers.some(p=>p.type==="ro")?" or the ro pooler":""}.</div></div>
+      <div class="kv" style="margin-top:6px">Uses the in-cluster host; from outside, swap it for your external endpoint (or <b>localhost</b> when port-forwarding). For read-only queries use <b>${esch(ro)}</b>${poolers.some(p=>p.type==="ro")?" or the ro pooler":""}.</div></div>
     <div class="mbtns"><button data-close>Close</button></div>`);
 }
 

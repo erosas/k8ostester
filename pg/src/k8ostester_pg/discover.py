@@ -312,12 +312,47 @@ def heavy(k8s: ClusterClient, namespace: str, name: str = "pg") -> dict:
         CNPG_GROUP, CNPG_VERSION, namespace, "clusters", name)
     primary = cluster.get("status", {}).get("currentPrimary", "")
     instances = _instances(k8s, namespace, name)
+    try:
+        poolers = [p["metadata"]["name"] for p in k8s.custom.list_namespaced_custom_object(
+            CNPG_GROUP, CNPG_VERSION, namespace, "poolers").get("items", [])]
+    except Exception:
+        poolers = []
     return {
         "data_size": _data_size(k8s, namespace, primary),
         "disk": _disk(k8s, namespace, instances),
         "connections": _connections(k8s, namespace, primary),
         "slots": _slots(k8s, namespace, primary),
+        "services": _services(k8s, namespace, name, poolers),
     }
+
+
+def _services(k8s: ClusterClient, namespace: str, name: str,
+              pooler_names: list[str]) -> list[dict]:
+    """The cluster's / poolers' Services and how they're exposed — so the console
+    can tell in-cluster-only from an actual external (LoadBalancer/NodePort) entry
+    point, and surface the external address when one exists."""
+    wanted = {f"{name}-rw", f"{name}-ro", f"{name}-r", *pooler_names}
+    out = []
+    try:
+        svcs = k8s.core.list_namespaced_service(namespace).items
+    except Exception:
+        return []
+    for s in svcs:
+        if s.metadata.name not in wanted:
+            continue
+        ports = s.spec.ports or []
+        ext = ""
+        lb = getattr(getattr(s.status, "load_balancer", None), "ingress", None) or []
+        if lb:
+            ext = lb[0].hostname or lb[0].ip or ""
+        out.append({
+            "name": s.metadata.name,
+            "type": s.spec.type or "ClusterIP",
+            "port": ports[0].port if ports else 5432,
+            "node_port": (ports[0].node_port if ports else None),
+            "external": ext,
+        })
+    return out
 
 
 def _parse_df(out: str) -> dict:

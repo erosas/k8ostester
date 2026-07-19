@@ -1,6 +1,9 @@
 # Remote-control console — design
 
-Status: **design, for review** (no code yet).
+Status: **building.** The capability model (the core idea below) is implemented
+and unit-tested — `kernel/control.py` (generic) + `pg/control.py` (the 8 CNPG
+Ops/Chaos actions). Next: discovery (snapshot builder), the SSE server + action
+executor, and the web UI.
 
 A web control plane for a live cluster: connect over a kubeconfig, **discover**
 its state, and drive both **ops** (backups, PITR restore, credential rotation,

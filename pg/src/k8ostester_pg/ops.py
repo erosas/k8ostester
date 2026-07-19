@@ -9,7 +9,12 @@ from datetime import UTC, datetime
 
 from k8ostester_kernel.k8s import ClusterClient
 
-from k8ostester_pg.discover import CNPG_GROUP, CNPG_VERSION
+from k8ostester_pg.discover import (
+    ACTIVE_ROLE_ANN,
+    CNPG_GROUP,
+    CNPG_VERSION,
+    ROTATED_AT_ANN,
+)
 
 
 def _stamp() -> str:
@@ -32,24 +37,36 @@ def minor_upgrade(k8s: ClusterClient, ns: str, target: str, name: str = "pg") ->
 
 
 def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg") -> str:
-    """Blue/green: refresh the IDLE role's password, flip the selector, roll the
-    app onto it. Both roles stay valid, so no auth gap. Fast (no long waits)."""
-    active = k8s.core.read_namespaced_config_map("app-active", ns).data["active"]
-    idle = "b" if active == "a" else "a"
-    new_pw = f"app-{idle}-{_stamp()}"
-    primary = _cluster(k8s, ns, name)["status"]["currentPrimary"]
+    """Blue/green: refresh the IDLE login role's password and switch the active
+    marker to it. Both roles stay valid, so there's no auth gap. Generic — it uses
+    the cluster's own managed roles and an annotation on the Cluster to track which
+    role is active; it does not assume any app-side ConfigMap/Deployment. The app
+    reads the active role's secret however it's wired."""
+    cluster = _cluster(k8s, ns, name)
+    roles = [r for r in cluster["spec"].get("managed", {}).get("roles", [])
+             if r.get("login")]
+    if len(roles) < 2:
+        raise RuntimeError("blue/green rotation needs two login roles")
+    anns = (cluster.get("metadata", {}) or {}).get("annotations", {}) or {}
+    active = anns.get(ACTIVE_ROLE_ANN) or roles[0]["name"]
+    idle = next((r for r in roles if r["name"] != active), roles[1])
+    idle_secret = idle.get("passwordSecret", {}).get("name", "")
+    new_pw = f"{idle['name']}-{_stamp()}"
+    primary = cluster["status"]["currentPrimary"]
     # immediate ALTER ROLE (the operator's secret reconcile is not prompt)
     k8s.exec_pod(ns, primary,
                  ["psql", "-U", "postgres", "-c",
-                  f"alter role app_{idle} password '{new_pw}'"],
+                  f"alter role {idle['name']} password '{new_pw}'"],
                  container="postgres")
-    k8s.core.patch_namespaced_secret(f"app-cred-{idle}", ns,
-                                     {"stringData": {"password": new_pw}})
-    k8s.core.patch_namespaced_config_map("app-active", ns, {"data": {"active": idle}})
-    # trigger a rolling restart so the app picks up the new selector
-    k8s.apps.patch_namespaced_deployment("app", ns, {"spec": {"template": {
-        "metadata": {"annotations": {"k8ostester.io/rotatedAt": _stamp()}}}}})
-    return f"rotated app_{active} → app_{idle} (blue/green, no auth gap)"
+    if idle_secret:
+        k8s.core.patch_namespaced_secret(idle_secret, ns,
+                                         {"stringData": {"password": new_pw}})
+    # record the new active role on the cluster (drives the credential view)
+    k8s.custom.patch_namespaced_custom_object(
+        CNPG_GROUP, CNPG_VERSION, ns, "clusters", name,
+        {"metadata": {"annotations": {ACTIVE_ROLE_ANN: idle["name"],
+                                      ROTATED_AT_ANN: _stamp()}}})
+    return f"rotated {active} → {idle['name']} (blue/green, no auth gap)"
 
 
 def restore(k8s: ClusterClient, ns: str, target_time: str = "", name: str = "pg") -> str:

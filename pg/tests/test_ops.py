@@ -4,11 +4,15 @@ from unittest.mock import MagicMock
 from k8ostester_pg import ops
 
 
-def cluster_obj():
+def cluster_obj(**meta):
     return {
+        "metadata": {"annotations": meta.get("annotations", {})},
         "spec": {"imageName": "ghcr.io/cloudnative-pg/postgresql:16.4",
                  "storage": {"size": "1Gi"},
-                 "backup": {"barmanObjectStore": {"destinationPath": "s3://backups/x"}}},
+                 "backup": {"barmanObjectStore": {"destinationPath": "s3://backups/x"}},
+                 "managed": {"roles": [
+                     {"name": "app_a", "login": True, "passwordSecret": {"name": "app-cred-a"}},
+                     {"name": "app_b", "login": True, "passwordSecret": {"name": "app-cred-b"}}]}},
         "status": {"currentPrimary": "pg-1"},
     }
 
@@ -21,18 +25,30 @@ def test_minor_upgrade_swaps_only_the_tag():
     assert patch["spec"]["imageName"] == "ghcr.io/cloudnative-pg/postgresql:16.6"
 
 
-def test_rotate_alters_idle_role_flips_selector_and_rolls():
+def test_rotate_alters_idle_role_and_records_active_on_the_cluster():
     k8s = MagicMock()
-    k8s.core.read_namespaced_config_map.return_value.data = {"active": "a"}
+    # no active-role annotation yet -> defaults to the first role (app_a) as active
     k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
     msg = ops.rotate_credentials(k8s, "ns")
-    # ALTER ROLE on the IDLE role (b), through the primary
+    # ALTER ROLE on the IDLE role (app_b), through the primary
     exec_cmd = k8s.exec_pod.call_args.args
     assert exec_cmd[1] == "pg-1" and "alter role app_b password" in exec_cmd[2][-1]
-    # selector flipped to the idle role, app rolled
-    assert k8s.core.patch_namespaced_config_map.call_args.args[2] == {"data": {"active": "b"}}
-    k8s.apps.patch_namespaced_deployment.assert_called_once()
+    # the idle role's OWN secret is refreshed
+    assert k8s.core.patch_namespaced_secret.call_args.args[0] == "app-cred-b"
+    # active role recorded on the Cluster annotation (no configmap/deployment)
+    patch = k8s.custom.patch_namespaced_custom_object.call_args.args[-1]
+    assert patch["metadata"]["annotations"]["k8ostester.io/active-role"] == "app_b"
+    k8s.apps.patch_namespaced_deployment.assert_not_called()
     assert "app_a → app_b" in msg
+
+
+def test_rotate_switches_back_when_app_b_is_active():
+    k8s = MagicMock()
+    k8s.custom.get_namespaced_custom_object.return_value = cluster_obj(
+        annotations={"k8ostester.io/active-role": "app_b"})
+    ops.rotate_credentials(k8s, "ns")
+    assert "alter role app_a password" in k8s.exec_pod.call_args.args[2][-1]
+    assert k8s.core.patch_namespaced_secret.call_args.args[0] == "app-cred-a"
 
 
 def test_restore_creates_a_uniquely_named_recovery_cluster():

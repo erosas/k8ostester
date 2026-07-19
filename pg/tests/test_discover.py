@@ -10,7 +10,9 @@ def cluster(**status):
             "instances": 3,
             "imageName": "ghcr.io/cloudnative-pg/postgresql:16.4",
             "backup": {"barmanObjectStore": {}},
-            "managed": {"roles": [{"name": "app_a"}, {"name": "app_b"}]},
+            "managed": {"roles": [
+                {"name": "app_a", "login": True, "passwordSecret": {"name": "app-cred-a"}},
+                {"name": "app_b", "login": True, "passwordSecret": {"name": "app-cred-b"}}]},
         },
         "status": {"currentPrimary": "pg-1", "readyInstances": 3, **status},
     }
@@ -74,6 +76,18 @@ def test_snapshot_drives_the_capability_map_end_to_end():
     caps = {c["id"]: c["enabled"] for c in capabilities(CNPG_ACTIONS, s)}
     assert caps["upgrade"] is True and caps["rotate"] is True
     assert caps["kill-primary"] is False   # a partition fault is in flight → interlock
+
+
+def test_credentials_active_role_from_the_cluster_annotation():
+    from k8ostester_pg.discover import _credentials
+    roles = [{"name": "app_a"}, {"name": "app_b"}]
+    # no annotation -> defaults to the first login role
+    assert _credentials({}, roles) == {"active_role": "app_a", "rotated_at": "", "roles": ["app_a", "app_b"]}
+    # annotation records the active role + when it rotated
+    c = {"metadata": {"annotations": {"k8ostester.io/active-role": "app_b",
+                                      "k8ostester.io/rotatedAt": "20260101000000"}}}
+    got = _credentials(c, roles)
+    assert got["active_role"] == "app_b" and got["rotated_at"] == "20260101000000"
 
 
 def test_database_and_login_roles_for_connection_info():

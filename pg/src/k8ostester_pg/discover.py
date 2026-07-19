@@ -65,7 +65,7 @@ def build_snapshot(
     status = cluster.get("status", {})
     instances = spec.get("instances", 0)
     ready_n = int(status.get("readyInstances", 0) or 0)
-    managed = [r.get("name") for r in spec.get("managed", {}).get("roles", [])]
+    login = _login_roles(spec)
     completed = sum(
         1 for b in backups if b.get("status", {}).get("phase") == "completed"
     )
@@ -89,9 +89,10 @@ def build_snapshot(
         # the PITR window: WAL is archived from the earliest recoverable point to now
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
-        "blue_green": "app_a" in managed and "app_b" in managed,
+        "blue_green": len(login) >= 2,              # two login roles → rotation possible
         "database": _database(spec),                # app db + owner, for connection info
-        "login_roles": _login_roles(spec),          # role -> secret, for credential view
+        "login_roles": login,                       # role -> secret, for credential view
+        "credentials": _credentials(cluster, login),  # active role from the cluster itself
         "archiving": _condition(conditions, "ContinuousArchiving"),  # WAL archive health
         "sync_policy": _sync_policy(spec),     # quorum/priority synchronous config
         "object_store": _object_store(spec),   # where backups/WAL go (part of the system)
@@ -223,7 +224,6 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
             i.update(repl[i["name"]])
     snap["archived_wal"] = _archiver(k8s, namespace, snap["primary"])
     snap["schedules"] = _schedules(k8s, namespace)          # auto-backup policy
-    snap["credentials"] = _credentials(k8s, namespace, snap["blue_green"])
     # a restore cluster still bootstrapping also locks the tool
     others = k8s.custom.list_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, namespace, "clusters").get("items", [])
@@ -504,23 +504,21 @@ def _replication(k8s: ClusterClient, namespace: str, primary: str) -> dict:
     return _parse_replication(out)
 
 
-def _credentials(k8s: ClusterClient, namespace: str, blue_green: bool) -> dict:
-    """Which blue/green role the app authenticates as, and when it was last set."""
-    active = rotated = ""
-    try:
-        active = k8s.core.read_namespaced_config_map("app-active", namespace).data.get("active", "")
-    except Exception:
-        pass
-    try:
-        dep = k8s.apps.read_namespaced_deployment("app", namespace)
-        rotated = (dep.spec.template.metadata.annotations or {}).get("k8ostester.io/rotatedAt", "")
-    except Exception:
-        pass
+ACTIVE_ROLE_ANN = "k8ostester.io/active-role"
+ROTATED_AT_ANN = "k8ostester.io/rotatedAt"
+
+
+def _credentials(cluster: dict, login_roles: list[dict]) -> dict:
+    """Which login role is active, and when it last rotated — tracked on the
+    Cluster itself (an annotation), not app-side wiring. Defaults to the first
+    login role until a rotation records a choice."""
+    anns = (cluster.get("metadata", {}) or {}).get("annotations", {}) or {}
+    names = [r["name"] for r in login_roles]
+    active = anns.get(ACTIVE_ROLE_ANN) or (names[0] if names else "")
     return {
-        "active": active,
-        "active_role": f"app_{active}" if active else "",
-        "rotated_at": rotated,
-        "roles": ["app_a", "app_b"] if blue_green else [],
+        "active_role": active,
+        "rotated_at": anns.get(ROTATED_AT_ANN, ""),
+        "roles": names,
     }
 
 

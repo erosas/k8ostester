@@ -36,22 +36,37 @@ def build_snapshot(
     completed = sum(
         1 for b in backups if b.get("status", {}).get("phase") == "completed"
     )
-    phase = str(status.get("phase", "")).lower()
+    phase = str(status.get("phase", ""))
     return {
         "ready": instances > 0 and ready_n == instances,
+        "phase": phase,                 # the cluster's own status line (live)
         "primary": status.get("currentPrimary", ""),
         "replicas": replica_pods,
         "zones": zones,
         "version": pg_version(spec.get("imageName", "")),
         # target may be a full image (…:tag) or a bare version
         "target": (pg_version(target) if ":" in target else target) if target else "",
-        "upgrading": "upgrad" in phase,
+        "upgrading": "upgrad" in phase.lower(),
         "backup_configured": "backup" in spec,
         "backups_completed": completed,
+        "backups": _recent_backups(backups),   # name + phase, newest first (live)
         "pitr_window": completed > 0,   # a completed base backup opens the window
         "blue_green": "app_a" in managed and "app_b" in managed,
         "fault_in_flight": partitioned,
     }
+
+
+def _recent_backups(backups: list[dict]) -> list[dict]:
+    ordered = sorted(
+        backups,
+        key=lambda b: b.get("metadata", {}).get("creationTimestamp", ""),
+        reverse=True,
+    )
+    return [
+        {"name": b.get("metadata", {}).get("name", ""),
+         "phase": b.get("status", {}).get("phase", "")}
+        for b in ordered[:5]
+    ]
 
 
 def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",

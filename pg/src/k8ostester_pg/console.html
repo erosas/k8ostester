@@ -32,6 +32,13 @@
   .chip b{color:var(--ink)}
   .err{background:#2a1416;border:1px solid #5a2327;color:#f2a1a4;padding:10px 14px;
     border-radius:8px;font-family:var(--mono);font-size:12.5px;margin-bottom:18px;display:none}
+  .status{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:16px;
+    font-family:var(--mono);font-size:12px}
+  .status .phase{color:var(--ink)}
+  .bk{border:1px solid var(--border);border-radius:20px;padding:3px 11px;color:var(--muted)}
+  .bk.running,.bk.started{color:var(--warn);border-color:#4a3a1a}
+  .bk.completed{color:var(--ok);border-color:#1a3a2a}
+  .bk.failed{color:var(--crit);border-color:#3a1a1e}
 
   /* SCADA topology */
   .scada{border:1px solid var(--border);border-radius:12px;padding:18px 16px;
@@ -81,6 +88,7 @@
 
   <div class="meta" id="meta"></div>
   <div class="err" id="err"></div>
+  <div class="status" id="status"></div>
 
   <div class="scada" id="scada"></div>
 
@@ -139,6 +147,15 @@ function node(role, name, zone, cls){
     <div class="n">${name}</div><div class="z">${zone||""}</div></div>`;
 }
 
+function renderStatus(s){
+  const el = document.getElementById("status");
+  const bks = (s.backups||[]).map(b=>{
+    const ph = (b.phase||"").toLowerCase();
+    return `<span class="bk ${ph}">● ${b.name}: ${b.phase||"—"}</span>`;
+  }).join("");
+  el.innerHTML = (s.phase ? `<span class="phase">▸ ${s.phase}</span>` : "") + bks;
+}
+
 function renderTopology(s){
   const scada = document.getElementById("scada");
   const primary = (s.instances||[]).find(i=>i.role==="primary");
@@ -171,6 +188,7 @@ function render(data){
     `<span class="chip">backups <b>${SNAP.backups_completed||0}</b></span>`,
     SNAP.fault_in_flight?`<span class="chip" style="color:var(--warn)">fault in flight</span>`:"",
   ].join("");
+  renderStatus(SNAP);
   renderTopology(SNAP);
   renderActions();
 }

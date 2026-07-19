@@ -9,6 +9,8 @@ next. See docs/remote-control.md.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from k8ostester_kernel import chaos
 from k8ostester_kernel.control import is_enabled
 from k8ostester_kernel.k8s import ClusterClient
@@ -48,7 +50,7 @@ def _kill_replica(k8s: ClusterClient, ns: str, s: dict) -> str:
 
 
 def _backup(k8s: ClusterClient, ns: str, s: dict, name: str = "pg") -> str:
-    backup = f"console-{s['primary'] or 'pg'}"
+    backup = "console-" + datetime.now(UTC).strftime("%Y%m%d%H%M%S")   # unique per run
     k8s.custom.create_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, ns, "backups", {
             "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",

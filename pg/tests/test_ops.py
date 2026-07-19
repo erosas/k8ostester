@@ -17,12 +17,20 @@ def cluster_obj(**meta):
     }
 
 
-def test_minor_upgrade_swaps_only_the_tag():
+def test_minor_upgrade_bare_tag_keeps_the_repo():
     k8s = MagicMock()
     k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
-    ops.minor_upgrade(k8s, "ns", "16.6")
+    ops.minor_upgrade(k8s, "ns", "16.6")   # bare tag -> current repo
     patch = k8s.custom.patch_namespaced_custom_object.call_args.args[-1]
     assert patch["spec"]["imageName"] == "ghcr.io/cloudnative-pg/postgresql:16.6"
+
+
+def test_minor_upgrade_full_ref_switches_the_repo():
+    k8s = MagicMock()
+    k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
+    ops.minor_upgrade(k8s, "ns", "my-mirror.io/pg/postgresql:16.6")   # full ref -> as-is
+    patch = k8s.custom.patch_namespaced_custom_object.call_args.args[-1]
+    assert patch["spec"]["imageName"] == "my-mirror.io/pg/postgresql:16.6"
 
 
 def test_rotate_alters_idle_role_and_records_active_on_the_cluster():

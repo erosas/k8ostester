@@ -242,6 +242,13 @@
     border:1px solid var(--border);border-left:2px solid var(--crit);background:var(--panel2);color:var(--ink)}
   .fbtn:hover:not(:disabled){border-color:var(--crit)}
   .fbtn:disabled{opacity:.35;cursor:not-allowed}
+  /* upgrade modal: repo + tag list + pull check */
+  .taglist{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;max-height:116px;overflow-y:auto}
+  .tagpill{font-family:var(--mono);font-size:11.5px;padding:3px 9px;border-radius:5px;cursor:pointer;
+    border:1px solid var(--border);background:var(--panel2);color:var(--muted)}
+  .tagpill:hover{border-color:var(--accent);color:var(--ink)}
+  .imgstatus{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap;align-self:center}
+  .imgstatus.ok{color:var(--ok)} .imgstatus.bad{color:var(--crit)}
   /* builder presets */
   .bpre{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
   .bpre button{font-family:var(--mono);font-size:12px;padding:7px 14px;border-radius:5px;
@@ -609,33 +616,72 @@ function openRotate(){
       <button class="go" style="background:var(--accent);border-color:var(--accent)" onclick="confirmRotate()">Rotate → ${esch(idle)}</button></div>`);
 }
 
-/* ---- minor upgrade modal (target chosen at press time) ---- */
+/* ---- minor upgrade modal: editable repo + tag list + pull check ---- */
+let repoTimer = null, imgTimer = null;
 async function openUpgrade(){
-  openSheet(`<h2>Minor upgrade</h2><div class="lede">discovering available versions…</div>`);
+  openSheet(`<h2>Minor upgrade</h2><div class="lede">discovering current image…</div>`);
   let info = {};
   try{ info = await (await fetch("/api/image-tags")).json(); }catch(e){}
   const current = info.current || SNAP.version || "";
-  const repo = (info.image||"").split(":")[0];
-  const tags = info.tags || [];
-  const suggest = SNAP.target || current;
+  const repo = (info.image||"").split(":")[0] || "";
   openSheet(`<h2>Minor upgrade</h2>
-    <div class="lede">Rolls the cluster to a new image tag — replicas first, then a switchover. Currently <b>${esch(current||"?")}</b>${repo?` · <span class="kv">${esch(repo)}</span>`:""}.</div>
-    <div class="sec"><h3>Target version / tag</h3>
-      <input id="up-tag" class="pwin" list="up-tags" spellcheck="false" value="${esch(suggest)}" placeholder="e.g. 16.6">
-      <datalist id="up-tags">${tags.map(t=>`<option value="${esch(t)}">`).join("")}</datalist>
-      <div class="kv" style="margin-top:8px">${tags.length
-        ? `${tags.length} version tags found in the repo — pick one or type your own.`
-        : "couldn't list the registry (no egress / private repo) — type the target tag."}</div>
-    </div>
+    <div class="lede">Rolls the cluster to a new image — replicas first, then a switchover. Currently <b>${esch(current||"?")}</b>. The repo is auto-detected — edit it to try another (a mirror, a fork, a private registry).</div>
+    <div class="sec"><h3>Image repository</h3>
+      <input id="up-repo" class="pwin" spellcheck="false" value="${esch(repo)}" oninput="onRepo()"></div>
+    <div class="sec"><h3>Version / tag</h3>
+      <div class="pwrow">
+        <input id="up-tag" class="pwin" spellcheck="false" value="${esch(SNAP.target||current)}" oninput="scheduleCheck()" placeholder="e.g. 16.6">
+        <span id="up-status" class="imgstatus"></span></div>
+      <div class="taglist" id="up-taglist"></div></div>
     <div class="mbtns"><button data-close>Cancel</button>
       <button class="go" onclick="confirmUpgrade()">Upgrade</button></div>`);
+  refreshTags(); checkImage();
+}
+function onRepo(){
+  clearTimeout(repoTimer);
+  document.getElementById("up-taglist").innerHTML = `<span class="kv">…</span>`;
+  repoTimer = setTimeout(()=>{ refreshTags(); scheduleCheck(); }, 500);
+}
+async function refreshTags(){
+  const repo = document.getElementById("up-repo").value.trim();
+  const box = document.getElementById("up-taglist");
+  box.innerHTML = `<span class="kv">discovering release tags…</span>`;
+  try{
+    const j = await (await fetch("/api/image-tags?image="+encodeURIComponent(repo))).json();
+    const tags = j.tags || [];
+    box.innerHTML = tags.length
+      ? tags.map(t=>`<span class="tagpill" onclick="pickTag('${esch(t)}')">${esch(t)}</span>`).join("")
+      : `<span class="kv">no release tags listed (private repo / no egress) — type a tag</span>`;
+  }catch(e){ box.innerHTML = `<span class="kv">registry unreachable — type a tag</span>`; }
+}
+function pickTag(t){ document.getElementById("up-tag").value = t; scheduleCheck(); }
+function scheduleCheck(){
+  clearTimeout(imgTimer);
+  const st = document.getElementById("up-status"); st.textContent = "…"; st.className = "imgstatus";
+  imgTimer = setTimeout(checkImage, 400);
+}
+async function checkImage(){
+  const repo = document.getElementById("up-repo").value.trim();
+  const tag = document.getElementById("up-tag").value.trim();
+  const st = document.getElementById("up-status");
+  if(!repo || !tag){ st.textContent = ""; return; }
+  st.textContent = "checking…"; st.className = "imgstatus";
+  try{
+    const j = await (await fetch("/api/image-check?image="+encodeURIComponent(repo+":"+tag))).json();
+    if(j.exists){ st.textContent = "✓ pullable"; st.className = "imgstatus ok"; }
+    else { st.textContent = "✗ not found"; st.className = "imgstatus bad"; }
+  }catch(e){ st.textContent = "? unverified"; st.className = "imgstatus"; }
 }
 function confirmUpgrade(){
-  const t = document.getElementById("up-tag").value.trim();
-  if(!t){ return; }
+  const repo = document.getElementById("up-repo").value.trim();
+  const tag = document.getElementById("up-tag").value.trim();
+  if(!repo || !tag) return;
+  const image = repo + ":" + tag;
+  const bad = document.getElementById("up-status").textContent.includes("✗");
   closeSheet();
-  if(!confirm(`Upgrade to ${t} — rolls the cluster (replicas, then a switchover). Continue?`)) return;
-  post("upgrade", {target: t}, "Minor upgrade → "+t);
+  const warn = bad ? " The image did NOT verify as pullable — double-check the repo/tag." : "";
+  if(!confirm(`Upgrade to ${image} — rolls the cluster (replicas, then a switchover).${warn} Continue?`)) return;
+  post("upgrade", {target: image}, "Upgrade → "+image);
 }
 
 /* ---- unified fault picker (kill / partition, per node) ---- */

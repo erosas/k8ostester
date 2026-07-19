@@ -27,13 +27,15 @@ def _cluster(k8s: ClusterClient, ns: str, name: str) -> dict:
 
 
 def minor_upgrade(k8s: ClusterClient, ns: str, target: str, name: str = "pg") -> str:
-    """Bump the cluster image to the target version — the operator rolls the
-    replicas then switches the primary over. Progress = the cluster phase."""
-    repo = _cluster(k8s, ns, name)["spec"]["imageName"].rsplit(":", 1)[0]
+    """Change the cluster image — the operator rolls the replicas then switches the
+    primary over. ``target`` is a full image ref (has a '/' or ':', e.g. a different
+    repo) used as-is, or a bare tag applied to the current repo. Progress = phase."""
+    current = _cluster(k8s, ns, name)["spec"]["imageName"]
+    image = target if ("/" in target or ":" in target) else f"{current.rsplit(':', 1)[0]}:{target}"
     k8s.custom.patch_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, ns, "clusters", name,
-        {"spec": {"imageName": f"{repo}:{target}"}})
-    return f"upgrade to {target} started (rolling)"
+        {"spec": {"imageName": image}})
+    return f"upgrade to {image} started (rolling)"
 
 
 def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg",

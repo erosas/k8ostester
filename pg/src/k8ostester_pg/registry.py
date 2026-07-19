@@ -77,6 +77,47 @@ def list_tags(image: str, max_pages: int = 8) -> list[str]:
     return tags
 
 
+_MANIFEST_ACCEPT = (
+    "application/vnd.oci.image.index.v1+json,"
+    "application/vnd.docker.distribution.manifest.list.v2+json,"
+    "application/vnd.docker.distribution.manifest.v2+json,"
+    "application/vnd.oci.image.manifest.v1+json"
+)
+
+
+def image_exists(image: str) -> bool:
+    """Can this exact image ref be pulled? HEADs its manifest in the registry.
+    Returns False on 404 / any error (so an unreachable registry reads as unknown)."""
+    registry, repo = _parse_ref(image)
+    last = image.split("@", 1)[0].rsplit("/", 1)[-1]
+    tag = last.rsplit(":", 1)[1] if ":" in last else "latest"
+    host = "registry-1.docker.io" if registry in ("docker.io", "index.docker.io") else registry
+    if host == "registry-1.docker.io" and "/" not in repo:
+        repo = "library/" + repo
+    url = f"https://{host}/v2/{repo}/manifests/{tag}"
+
+    def _head(token: str | None = None) -> bool:
+        req = urllib.request.Request(url, method="HEAD", headers={"Accept": _MANIFEST_ACCEPT})
+        if token:
+            req.add_header("Authorization", "Bearer " + token)
+        with urllib.request.urlopen(req, timeout=8) as r:  # noqa: S310 (registry API)
+            return 200 <= r.status < 300
+
+    try:
+        return _head()
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            token = _token_from_challenge(e.headers.get("Www-Authenticate", ""))
+            if token:
+                try:
+                    return _head(token)
+                except Exception:
+                    return False
+        return False                                   # 404 -> not found
+    except Exception:
+        return False
+
+
 def _version_key(tag: str) -> tuple[int, ...]:
     return tuple(int(n) for n in re.findall(r"\d+", tag)[:4])
 

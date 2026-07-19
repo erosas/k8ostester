@@ -10,8 +10,9 @@ pg/
     slo.py        standard CNPG SLO checks (kernel SloChecks over Prometheus)
     harness.py    shared provisioning (deploy ideal config, bucket, cluster helpers)
   experiments/    linear experiment scripts (the new model, replacing goals)
-    kill-primary/run.py    killing the primary breaches strict SLOs → FAIL
-    kill-replica/run.py    killing a replica is a non-event          → PASS
+    kill-primary/run.py       killing the primary → real disruption
+    kill-replica/run.py       killing a replica   → non-event (contrast)
+    partition-primary/run.py  network-isolate the primary → self-fence + failover
   testbed/        the production-readiness golden path (see testbed/README.md)
   tests/
 ```

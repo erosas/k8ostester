@@ -1,0 +1,27 @@
+# uv workspace root (virtual — no package of its own). Members are the shared
+# kernel and the technology verticals; each is its own package with a pyproject,
+# so IntelliJ/PyCharm sees them as modules with real dependency edges.
+# See docs/architecture-restructure.md.
+[tool.uv.workspace]
+members = ["kernel", "k8ostester-core"]
+
+[tool.uv.sources]
+k8ostester-kernel = { workspace = true }
+
+[dependency-groups]
+# dev tools shared across the workspace
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.0",
+    "pytest-cov>=6.0.0",
+    "pytest-timeout>=2.4.0",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501", "B008", "UP042", "UP047"]

@@ -16,15 +16,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: k8ostester-core
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
-      - run: uv sync
+      - run: uv sync                                    # syncs the whole workspace
       - run: uv run ruff check .
-      - run: uv run pytest -q
+      - run: uv run --directory kernel pytest -q        # each member with its own config
+      - run: uv run --directory k8ostester-core pytest -q
 
   # Build both images (single-arch, for the runner) and fail on any fixable
   # HIGH/CRITICAL vuln. ignore-unfixed avoids blocking on CVEs with no upstream
@@ -73,11 +71,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - name: Generate badge
-        working-directory: k8ostester-core
         run: |
           uv sync
-          uv run pytest --cov=k8ostester --cov-report=xml -q
-          uv run --with 'genbadge[coverage]' genbadge coverage -i coverage.xml -o ../coverage.svg
+          uv run --directory k8ostester-core pytest --cov=k8ostester --cov-report=xml -q
+          uv run --with 'genbadge[coverage]' genbadge coverage -i k8ostester-core/coverage.xml -o coverage.svg
       - name: Publish to badges branch
         run: |
           cp coverage.svg "$RUNNER_TEMP/coverage.svg"

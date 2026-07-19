@@ -27,7 +27,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 NS = "k8os-testbed"
@@ -104,7 +104,7 @@ def poll(desc: str, fn, timeout: int = 600, interval: int = 5):
 # events / reporting
 # --------------------------------------------------------------------------- #
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def event(step: str, kind: str, status: str, detail: str, **extra) -> None:
@@ -238,7 +238,7 @@ def steady(seconds: int = 30) -> None:
 
 def step_backup() -> bool:
     print("→ backup: base backup to the object store")
-    name = "backup-" + datetime.now(timezone.utc).strftime("%H%M%S")
+    name = "backup-" + datetime.now(UTC).strftime("%H%M%S")
     kns("apply", "-f", "-", input=(
         "apiVersion: postgresql.cnpg.io/v1\nkind: Backup\n"
         f"metadata:\n  name: {name}\n"
@@ -276,7 +276,7 @@ def step_rotate_credentials() -> bool:
     # rejected auth. Rollback = flip the selector back (old role untouched).
     active = kns("get", "configmap", "app-active", "-o", "jsonpath={.data.active}")
     idle = "b" if active == "a" else "a"
-    new_pw = f"app-{idle}-" + datetime.now(timezone.utc).strftime("%H%M%S")
+    new_pw = f"app-{idle}-" + datetime.now(UTC).strftime("%H%M%S")
     # 1) rotate the IDLE role's password. Do the ALTER ROLE directly (immediate
     #    and deterministic — CNPG's managed-role reconcile of a bare secret patch
     #    is not prompt), and set the secret to the same value so the app reads it
@@ -443,8 +443,8 @@ def run(keep: bool) -> int:
               results=results)
     finally:
         stop_grafana_pf()
-    print("\nConsole:  kubectl -n {0} port-forward svc/grafana 3000:3000  "
-          "→ http://localhost:3000 (admin/admin)".format(NS))
+    print(f"\nConsole:  kubectl -n {NS} port-forward svc/grafana 3000:3000  "
+          "→ http://localhost:3000 (admin/admin)")
     if not keep:
         cleanup()
     else:

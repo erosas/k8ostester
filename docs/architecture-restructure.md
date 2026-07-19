@@ -159,6 +159,12 @@ environment, in a shared namespace, outliving runs. Runs emit into it, labeled.
 Retention (7–30 days) manages the `run`-label cardinality. This is a feature —
 one console shows every run, live and historical.
 
+**RBAC note (review):** because it scrapes pods across *every* run namespace, the
+shared Prometheus needs a **ClusterRole** (cluster-wide pod/endpoint discovery),
+not the namespaced `Role` the per-run testbed Prometheus uses today. The
+`experiment`/`run` labels come from relabeling the discovered pods' namespace and
+labels — so no per-workload scrape config.
+
 ---
 
 ## What survives, what dissolves
@@ -180,7 +186,11 @@ console (kernel) + inline correctness verifies + a tiny SLO-query verdict.**
 2. **Add the SLO-verdict helper.** Port a couple of existing goals to Prometheus
    range queries; run alongside the current evaluator to confirm parity.
 3. **Extract kernel primitives** (k8s client, chaos) from `k8ostester-core` into
-   `kernel/` as a workspace member.
+   `kernel/` as a workspace member. To avoid breaking core mid-extraction, make
+   **core depend on kernel** (import the moved primitives from it) during the
+   transition — nothing breaks, and PG code migrates to the `pg` vertical
+   gradually. (Done so far: the workspace + `kernel` module + the SLO-verdict
+   helper — step 2's primitive — landed first, as it needs no live cluster.)
 4. **Move** `postgres_cnpg` + experiments + the testbed into `pg/`; wire the uv
    workspace.
 5. **Convert experiments**, one at a time, from the fault-timeline/goals format

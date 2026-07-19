@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 Direction = Literal["max", "min"]
+Aggregate = Literal["worst", "avg"]
 
 # A fetcher returns the raw samples for a query over [start, end]. Injecting it
 # keeps evaluate_slos() pure and testable; prometheus_fetcher() is the real one.
@@ -28,22 +29,30 @@ Fetcher = Callable[[str, float, float], list[float]]
 
 @dataclass(frozen=True)
 class SloCheck:
-    """One SLO gate. ``direction`` says how ``threshold`` is applied to the
-    worst-case observed value over the run window:
-    - ``max``: the metric must stay AT OR BELOW threshold (e.g. error_rate, p99,
-      downtime) — we take the MAX sample (worst case).
-    - ``min``: the metric must stay AT OR ABOVE threshold (e.g. uptime) — we take
-      the MIN sample (worst case).
+    """One SLO gate.
+
+    ``direction`` says how ``threshold`` is applied — ``max``: stay at or below
+    (error_rate, p99); ``min``: stay at or above (availability).
+
+    ``aggregate`` says how the window's samples reduce to one observed value:
+    - ``avg`` (default): the mean over the window — the right choice for
+      resilience SLOs, where a sub-second blip is not an outage and only
+      *sustained* impact should fail the run.
+    - ``worst``: the single worst sample (max for ``max``, min for ``min``) —
+      zero-tolerance, for gates where any breach at all matters.
     """
 
     name: str
     query: str
     threshold: float
     direction: Direction = "max"
+    aggregate: Aggregate = "avg"
 
     def observed(self, samples: list[float]) -> float:
         if not samples:
             return 0.0
+        if self.aggregate == "avg":
+            return sum(samples) / len(samples)
         return max(samples) if self.direction == "max" else min(samples)
 
     def passed(self, observed: float) -> bool:

@@ -7,29 +7,34 @@ def fetcher(samples_by_query):
     return lambda query, start, end: samples_by_query.get(query, [])
 
 
-def test_max_check_passes_when_worst_case_under_threshold():
+def test_avg_is_the_default_a_brief_blip_does_not_fail():
+    # the resilience default: a single spike is averaged away, not fatal
     c = SloCheck("error_rate", "err", threshold=0.01, direction="max")
-    # worst-case (max) sample is 0.004 ≤ 0.01
-    res = evaluate_slos(fetcher({"err": [0.001, 0.004, 0.002]}), [c], 0, 100)
-    assert res["error_rate"]["observed"] == 0.004
+    res = evaluate_slos(fetcher({"err": [0.0, 0.0, 0.03, 0.0]}), [c], 0, 100)
+    assert round(res["error_rate"]["observed"], 4) == 0.0075   # mean, not the 0.03 spike
     assert res["error_rate"]["pass"] is True
 
 
-def test_max_check_fails_on_a_single_breach():
-    c = SloCheck("p99_ms", "p99", threshold=200, direction="max")
-    # one spike above threshold fails the whole window
+def test_avg_fails_on_sustained_impact():
+    c = SloCheck("error_rate", "err", threshold=0.01, direction="max")
+    res = evaluate_slos(fetcher({"err": [0.02, 0.03, 0.02]}), [c], 0, 100)  # mean 0.0233
+    assert res["error_rate"]["pass"] is False
+
+
+def test_min_direction_uses_average_availability():
+    c = SloCheck("availability", "up", threshold=0.95, direction="min")
+    # up 95% of the window on average → pass, even though it dipped to 0 once
+    res = evaluate_slos(fetcher({"up": [1, 1, 1, 1, 0, 1, 1, 1, 1, 1]}), [c], 0, 100)
+    assert res["availability"]["observed"] == 0.9      # dipped too much → below 0.95
+    assert res["availability"]["pass"] is False
+
+
+def test_worst_aggregate_is_zero_tolerance():
+    # aggregate="worst" restores the strict "any breach fails" behavior
+    c = SloCheck("p99_ms", "p99", threshold=200, direction="max", aggregate="worst")
     res = evaluate_slos(fetcher({"p99": [50, 80, 240, 60]}), [c], 0, 100)
     assert res["p99_ms"]["observed"] == 240
     assert res["p99_ms"]["pass"] is False
-
-
-def test_min_check_uses_worst_case_minimum():
-    c = SloCheck("uptime_pct", "up", threshold=95, direction="min")
-    res_ok = evaluate_slos(fetcher({"up": [100, 99, 96]}), [c], 0, 100)
-    assert res_ok["uptime_pct"]["observed"] == 96
-    assert res_ok["uptime_pct"]["pass"] is True
-    res_bad = evaluate_slos(fetcher({"up": [100, 92, 99]}), [c], 0, 100)
-    assert res_bad["uptime_pct"]["pass"] is False
 
 
 def test_empty_samples_treated_as_zero():

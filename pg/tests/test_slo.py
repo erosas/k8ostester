@@ -15,7 +15,9 @@ def test_thresholds_and_directions_match_the_goals():
     by = {c.name: c for c in default_checks("x")}
     assert by["error_rate"].threshold == 0.01 and by["error_rate"].direction == "max"
     assert by["write_latency_p99_s"].threshold == 0.2 and by["write_latency_p99_s"].direction == "max"
-    assert by["app_availability"].threshold == 1 and by["app_availability"].direction == "min"
+    # availability is 95% of the window (avg), not "never dipped"
+    assert by["app_availability"].threshold == 0.95 and by["app_availability"].direction == "min"
+    assert all(c.aggregate == "avg" for c in default_checks("x"))
 
 
 def test_checks_feed_the_kernel_verdict():

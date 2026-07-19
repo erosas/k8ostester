@@ -16,15 +16,19 @@ from k8ostester_kernel.verdict import SloCheck
 # defaults mirror 20-cnpg-reference's goals (error_rate 1%, p99 200ms)
 DEFAULT_ERROR_RATE = 0.01
 DEFAULT_WRITE_P99_S = 0.2
+DEFAULT_AVAILABILITY = 0.95   # up at least 95% OF THE WINDOW (avg), not "never dipped"
 
 
 def default_checks(
     experiment: str,
     error_rate: float = DEFAULT_ERROR_RATE,
     write_p99_s: float = DEFAULT_WRITE_P99_S,
+    availability: float = DEFAULT_AVAILABILITY,
 ) -> list[SloCheck]:
     """The standard SLO gate for a CNPG experiment, scoped to one experiment's
-    metrics. Pair with the run's verify-steps to form the verdict."""
+    metrics. All checks aggregate over the run window (avg) — a sub-second blip
+    is not an outage; only sustained impact fails the run. Pair with the run's
+    verify-steps to form the verdict."""
     exp = f'experiment="{experiment}"'
     return [
         SloCheck(
@@ -43,7 +47,7 @@ def default_checks(
         SloCheck(
             "app_availability",
             f"min(app_up{{{exp}}})",
-            threshold=1,
+            threshold=availability,
             direction="min",
         ),
     ]

@@ -7,6 +7,9 @@ dependencies = [
     "k8ostester-kernel",   # k8s client, chaos primitives, SLO-verdict helper
 ]
 
+[project.scripts]
+k8ost-console = "k8ostester_pg.server:main"
+
 [tool.uv.sources]
 k8ostester-kernel = { workspace = true }
 

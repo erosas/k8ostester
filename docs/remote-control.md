@@ -1,159 +1,171 @@
-# Remote-control console — design
+# Remote-control console
 
-Status: **walking skeleton working.** End to end: `kernel/control.py` (capability
-model) + `pg/control.py` (8 CNPG actions) + `pg/discover.py` (state snapshot +
-topology) + `pg/execute.py` (gated executor, chaos + backup wired) + `pg/server.py`
-(stdlib SSE server) + `pg/console.html` (the SPA: live SCADA topology, Ops/Chaos
-tabs, capability-gated buttons, destructive confirmation). Run it:
+A laptop-side web control plane for live CloudNativePG clusters. It holds your
+kubeconfig, **discovers** what's really running, and lets you **operate**
+(backup, rotate credentials), **break-glass** (PITR restore, minor upgrade,
+chaos faults), and **design** (generate a starter manifest) — all from one page.
+It mutates real clusters, so it's an owned, interactive UI, not a dashboard;
+read-only telemetry can still live in Grafana beside it.
 
-    uv run python -m k8ostester_pg.server --context <ctx> --namespace <ns> --target 16.6
+## Run it
 
-All 8 actions are wired (`pg/ops.py`: rotate/upgrade/restore + the chaos
-primitives), with live operation status and self-enabling controls. Tabs follow
-the on-call model: **Ops** = routine (backup, rotate) · **Break-glass** =
-destructive/high-risk (restore, upgrade, kill, partition, drain). Verified live:
-rotate ran end to end from the button (blue/green, new cred authenticates).
-Remaining polish: richer topology (pooler routing, replication lag), a PITR time
-picker, and packaging the console entry point.
+```
+k8ost-console                                   # pick context + cluster in the UI
+k8ost-console --context prod                    # lock the picker to one context
+k8ost-console --context prod --namespace prod-east --cluster orders   # pre-select
+k8ost-console --target 16.6                     # offer a minor upgrade to 16.6
+# → open http://127.0.0.1:8700   (binds localhost only)
+```
 
-A web control plane for a live cluster: connect over a kubeconfig, **discover**
-its state, and drive both **ops** (backups, PITR restore, credential rotation,
-version upgrades) and **chaos** (kill, partition, AZ-drain) from a polished UI.
-It is `k8ost session --attach` grown up — the TUI session's chaos control plane,
-plus lifecycle operations, behind a real interface.
-
-## Why / what it is not
-
-- It **operates and attacks a real cluster** — it is not a dashboard. Grafana
-  (read-only viz) is the wrong vehicle; this mutates state, so the UI is owned
-  and interactive. The read-only telemetry can still live in Grafana beside it.
-- It **discovers** — nothing about the target is hardcoded. The panel is a
-  function of what's actually in the cluster right now.
-- It is **remote-first** — laptop-side, holding your kubeconfig (like the
-  `k8ost-docker` shim), pointed at any cluster.
+Nothing about the target is hardcoded — the cluster name, namespace, roles,
+services, backup config, poolers and topology are all discovered.
 
 ## The core idea: capability = precondition over discovered state
 
-The single design decision everything hangs on. A control is **not** tracked as
-"used / unused." Every action declares a **precondition evaluated against live
-discovered state**, and a control is enabled *iff* its precondition holds now.
-"Disable after use" and "multi-use" then fall out of one rule — no special cases:
+A control is **not** tracked as used/unused. Each action declares a **precondition
+evaluated against the live snapshot** and is enabled *iff* it holds now; a second
+**`available`** predicate decides whether the action is offered at all (so a
+control that needs extra config isn't a permanently-dead tile). "Disable after
+use" and "multi-use" fall out of one rule.
 
-| Action | Tab | Precondition (over discovered state) | Resulting behavior |
+| Action | View | Available when | Enabled when |
 | --- | --- | --- | --- |
-| Take base backup | ops | `spec.backup` configured | multi-use |
-| Restore (PITR) | ops | ≥1 completed backup **and** a WAL window exists | enabled once a backup exists |
-| Rotate credentials | ops | cluster Ready **and** blue/green roles present | **multi-use** (precondition always holds) |
-| Minor upgrade | ops | newer minor available **and** `current ≠ target` **and** phase ≠ Upgrading | **self-disables after use** (now `current == target`); re-enables when a newer minor appears |
-| Major upgrade | ops | operator ≥ 1.26 **and** newer major available **and** no upgrade in flight | self-disables after use |
-| Kill primary / replica | chaos | target pod exists **and** no conflicting fault in flight | per-target |
-| Partition | chaos | target exists **and** a partition engine is available | per-target |
-| AZ-drain | chaos | ≥2 zones present **and** a drainable zone | enabled only on multi-AZ |
+| Take base backup | Ops | always | Ready · backup configured · not busy |
+| Rotate credentials | Ops | always | Ready · two login roles · not busy |
+| Restore (PITR) | Break-glass | always | ≥1 completed backup · WAL window · not busy |
+| Minor upgrade | Break-glass | a `--target` image is set | Ready · `version ≠ target` · not upgrading · not busy |
+| Kill primary / a replica | Break-glass | always | target pod exists · no fault in flight |
+| Partition primary | Break-glass | always | primary exists · no fault in flight |
+| Drain a zone | Break-glass | always | ≥2 zones · no fault in flight |
 
-Why this beats a used-flag:
+`enabled` is computed **server-side** from the snapshot (a stale browser can't
+fire a disabled action) and also sent down for rendering. The upgrade proves the
+model: it self-disables because `version == target` is now true, not because we
+remember clicking it — bump the target and it lights up again.
 
-- **Reload-safe** — the UI is a pure function of cluster state; refresh loses nothing.
-- **Correct under concurrency** — if another operator (or an external process)
-  upgrades, the button disables for you too, because the *cluster* changed.
-- **Honest** — it mirrors the plant, exactly like a SCADA interlock. The button
-  isn't "spent"; the goal is simply met.
+Mutating ops also require `not busy` — an exclusivity lock so you can't stack e.g.
+a PITR restore and an upgrade. Chaos faults deliberately skip the lock (they stay
+available during an operation, with an ack).
 
-The upgrade case is the proof: it disables not because we remember clicking it,
-but because `current == target` is now true. Bump the target and it lights up
-again. Nothing to reset.
+## Selecting a cluster
 
-## Discovered state (one snapshot, both tabs)
+Two header dropdowns. **Context** enumerates the kubeconfig's contexts (read
+directly from the file, tolerating a missing `current-context`). Picking one
+lists **every CNPG `Cluster` CR** the credentials can see via
+`list_cluster_custom_object` (falling back to a namespace on RBAC 403), each with
+a health dot, version and ready/total. The chosen `(context, namespace, name)`
+drives everything; switching re-selects live. The console mutates clusters, so
+`--context`/`--namespace` also scope the blast radius.
 
-A poller reads the cluster on an interval and produces a snapshot the whole UI
-renders from:
+## Three views
 
-```jsonc
-{
-  "cluster": {"name": "pg", "phase": "Cluster in healthy state", "instances": 3, "ready": 3},
-  "topology": [   // client → poolers → primary → replicas, with zone + health
-    {"id": "pg-1", "role": "primary", "zone": "us-east-1a", "health": "ok"},
-    {"id": "pg-2", "role": "replica", "zone": "us-east-1b", "health": "ok", "syncState": "sync", "lagBytes": 0},
-    {"id": "pg-pooler", "role": "pooler-rw", "instances": 2}
-  ],
-  "version": {"current": "16.4", "target": "16.6", "upgrading": false},
-  "backups": [{"name": "backup-...", "phase": "completed", "startedAt": "..."}],
-  "pitrWindow": {"from": "12:01:33Z", "to": "now"},
-  "inFlight": null,          // e.g. {"op": "upgrade", "progress": "2/3 rolled"}
-  "app": {"up": true, "errorRate": 0.0}   // if the target app exposes metrics
-}
+- **Ops** — routine on-call: the SCADA topology, the recovery window, and the
+  low-risk actions (backup, rotate).
+- **Break-glass** — destructive / high-risk / infrequent: PITR restore, minor
+  upgrade, and the chaos faults.
+- **Build** — the manifest builder (no cluster needed).
+
+## Discovered state (one snapshot)
+
+A background timer reads the selected cluster and produces the snapshot the whole
+UI renders from. To keep cluster load fixed regardless of viewers, discovery runs
+**once on a shared timer** (not per SSE connection), split into two tiers: a 2s
+**fast** tier (topology, roles, phase, replication, archiver) and a ~20s **heavy**
+tier (disk `df`, connections, replication slots, data size, services) merged in.
+
+Key fields: `cluster`/`namespace`, `ready`/`phase`, `primary`/`replicas`/`zones`,
+`instances[]` (role, node, zone, healthy, `sync_state`, `lag_bytes`), `poolers[]`,
+`version`/`target`, `sync_policy`, `object_store`, `archived_wal` (archived,
+last, failed, `last_time`, current, `lag_segments`), `archiving` (the CNPG
+ContinuousArchiving condition), `schedules[]` + `retention`, `backups[]` +
+`recoverability_point` + `pitr_window`, `database` + `login_roles`, `credentials`
+(active role + rotated-at from the cluster annotation), `disk{}`, `connections`,
+`slots[]`, `services[]`, plus `busy`/`busy_reason` and `fault_in_flight`.
+
+## SCADA topology + health signals
+
+`client → poolers → primary → replicas → object store → backup policy`, adapting
+to what exists (no poolers / no backups ⇒ those nodes vanish). Health encoded in
+form, not just number:
+
+- **Sync vs async** — each replica shows a SYNC / ASYNC / STANDBY badge from
+  `pg_stat_replication.sync_state`, plus replication lag. The `sync_policy` chip
+  shows quorum/priority (e.g. `quorum · any 1`).
+- **Disk headroom** — per instance `disk N%` (amber ≥75, red ≥90) from `df`.
+- **Connection saturation** — `conns active/max` chip (amber ≥70%, red ≥85%).
+- **Replication slots** — chip; an inactive slot (pins WAL, fills disk) turns it
+  amber with the WAL held.
+- **Node placement** — each instance's k8s node + zone (reason about a zone loss).
+- **WAL archiving health** — the object-store node shows LIVE / `N behind` /
+  STALLED (driven by the archive lag + the ContinuousArchiving condition) and the
+  last-archive age. The missing half of the recovery story.
+- **Backup policy + freshness** — the ScheduledBackup cron (humanized) + retention,
+  and "last backup Xh ago" flagged due / OVERDUE vs the schedule's period.
+
+Click the client / primary / a pooler / a replica to open **Connect** (below).
+
+## Recovery window + PITR
+
+When a base backup has completed, a recovery timeline shows the WAL-covered band
+and each backup tick (with time + relative age on hover). **Restore
+(Break-glass)** opens a modal: **Latest** (time shown) or **Point in time** — a
+slider bound to the recoverable window that soft-snaps to backup ticks. As you
+settle, it queries the primary for the **exact** number of WAL segments generated
+since the chosen base backup (LSN-diff, timeline-independent), debounced. Restore
+bootstraps a uniquely-named recovery cluster from the object store; the live
+cluster is untouched.
+
+## Connect & credentials
+
+The Connect sheet shows the **in-cluster endpoints** (`<name>-rw/-ro/-r` and any
+poolers, all :5432), an **External access** section (any LoadBalancer/NodePort
+Service discovered, else a one-line "in-cluster only" note + a `port-forward`
+command), the **app database + owner**, the **login roles and which Secret** each
+password comes from, a copyable `kubectl get secret` to fetch a password, and
+ready-to-paste **URI / psql / JDBC** strings (pointed at the rw pooler when there
+is one).
+
+## Credential rotation (generic)
+
+Blue/green with no auth gap: refresh the **idle** login role's password + Secret,
+then record the new active role as an annotation on the Cluster
+(`k8ostester.io/active-role`). It uses the cluster's own managed roles — no app
+ConfigMap/Deployment — so it works on any cluster with two login roles. The app
+consumes the active role's Secret however it's wired. (The testbed's `flow.py`
+does the full app-inclusive rotation and stamps the same annotation, so the two
+agree.)
+
+## The Builder
+
+Generates a Cluster (+ optional Pooler + ScheduledBackup + app-role Secrets) from
+form choices, assembled from `resources/*.tmpl.yaml` with `${VAR}` substitution —
+no manifest strings in Python. **Presets** fill the form for common cases
+(Reference HA / Read-heavy / Dev-minimal / Durable). **App roles for rotation**
+emits two login roles (`app_a`/`app_b`) that inherit the `app` owner, each from
+its own Secret (CHANGE-ME placeholders) — the prerequisite Rotate switches
+between. A note explains storage is grow-only (online PVC expansion needs
+`allowVolumeExpansion`, never shrinks).
+
+## Architecture & files
+
+```
+kubeconfig ─▶ Console (server.py) ─ shared 2s + 20s timers ─▶ snapshot cache ─SSE─▶ browser (console.html)
+                 ├─ discover.py : cluster + pods + psql/df execs → snapshot
+                 ├─ control.py  : CNPG actions (precondition + available)  [kernel/control.py: the model]
+                 ├─ execute.py  : gate → dispatch (chaos primitives / ops)
+                 ├─ ops.py      : rotate / upgrade / restore
+                 └─ builder.py  : options → manifest (resources/*.tmpl.yaml)
 ```
 
-`inFlight` and `phase` drive both the **progress display** and the
-**interlocks** (a precondition includes "no conflicting op in flight"). Every
-capability's `enabled` is computed **server-side** from this snapshot (so a stale
-browser can't fire a disabled action) and also sent down for rendering.
+- **kernel** supplies the generic capability model (`control.py`), the k8s client,
+  and the chaos primitives.
+- **pg** supplies the CNPG actions, discovery, executor, ops, builder, the stdlib
+  `ThreadingHTTPServer`, and the single-file SPA `console.html`.
+- HTTP surface: `GET /` (SPA), `GET /api/stream` (SSE), `GET /api/contexts`,
+  `GET /api/clusters?context=`, `POST /api/action`, `POST /api/select`,
+  `POST /api/manifest`, `POST /api/wal-count`.
 
-## Two tabs, split by intent
+## Not yet
 
-- **Ops** — the mutations you *want*: the SCADA topology (client → poolers →
-  primary → replicas, colored by health, grouped by zone), the backup/snapshot
-  list + PITR window with a restore control, the version panel + upgrade control,
-  replication lag + sync state. Every control gated by its precondition.
-- **Chaos** — the mutations that *test* it: kill primary/replica, partition,
-  AZ-drain, with a target picker and live blast-radius (the app's error rate from
-  its metrics). This is the session's chaos, polished.
-
-Same discovered snapshot underneath; the split is intent (operate vs. attack).
-
-## Architecture
-
-```
-kubeconfig ──▶ backend (laptop-side, holds the config)
-                 ├─ poller        : cluster → state snapshot  ──SSE──▶ browser
-                 ├─ capability    : snapshot → {action: enabled?}      (SPA, 2 tabs,
-                 └─ executor      : POST /api/action ─▶ kubectl/CNPG    SCADA topology)
-```
-
-- **Backend** — a small server that owns the kubeconfig, polls the cluster into
-  the snapshot, streams it (SSE/websocket), and accepts `POST /api/action
-  {id, params}` which it executes and reflects back through the next poll.
-- **UI** — an owned SPA. The SCADA topology view *is* the topology graph core's
-  session already computes (`topology_graph`), rendered for the web and made
-  interactive. Controls render enabled/disabled from the capability map.
-- **Safety** — it hits real clusters: destructive/irreversible actions (major
-  upgrade, restore) require a typed confirmation; attach-mode teardown removes
-  only k8ost's own artifacts, never the target.
-
-## Reuse vs. new
-
-Most of this already exists:
-
-- **Reuse from core:** attach-mode discovery, `topology_graph`, session actions
-  (`backup`, `restore`), fault workers (`network_partition`, `pod_kill`).
-- **Reuse from the testbed:** rotate (blue/green), minor/major upgrade, AZ logic
-  — but these currently live in `pg/testbed/flow.py` as script steps. To share
-  them, they graduate into first-class **driver actions** (the same registry the
-  session's `session_actions()` uses).
-- **New:** the **capability/precondition layer** (the heart), the **backend
-  poller + action API**, and the **web UI**.
-
-## Where it lives (open decision)
-
-It is the session evolved, so the natural home is **`k8ost console` inside
-`k8ostester-core`** — reusing the session/driver/worker stack directly. The
-alternative is a separate module importing core + testbed. Recommendation:
-console in core, with the ops actions (rotate/upgrade) promoted from the testbed
-into core driver actions so both the console and the testbed call the same code.
-
-## Sequencing
-
-1. **Design (this doc) → review.**
-2. **Walking skeleton:** backend discovers → streams snapshot → SPA renders the
-   SCADA topology; wire **one ops action (rotate)** and **one chaos action (kill
-   primary)** end to end, with server-side capability gating. Proves the model.
-3. **Ops tab:** backups list + PITR restore, version panel + upgrade, lag/sync.
-4. **Chaos tab:** partition, AZ-drain, target picker, live blast-radius.
-5. **Polish:** confirmations, in-flight progress, interlocks, reconnect.
-
-## Open questions
-
-- Console in core (`k8ost console`) vs. a separate module — leaning core.
-- Backend web stack (stdlib + SSE vs. a small framework) — decided at the skeleton.
-- Does the app-health/blast-radius panel assume the target app exposes metrics,
-  or infer impact from CNPG/connection metrics when it doesn't?
-- Multi-cluster (a picker across kubeconfig contexts) — later, or in from the start?
+Auth + TLS (it binds localhost only today), an audit log of actions, and
+RBAC-aware gating — the "harden for real use" track.

@@ -285,9 +285,16 @@ def step_rotate_credentials() -> bool:
         "-p", json.dumps({"stringData": {"password": new_pw}}))
     wait_cred(f"app_{idle}", new_pw)   # confirm it authenticates end-to-end
     before = app_ok_ops(app_metrics())
-    # 2) flip the selector to the idle role and roll the app onto it
+    # 2) flip the selector to the idle role and roll the app onto it.
+    #    Two layers stay in sync: the app-active ConfigMap is THIS app's selector
+    #    (testbed-specific wiring), and the cluster annotation is the canonical
+    #    "active role" the remote-control console reads (ops.rotate_credentials).
+    #    Stamp both so the console reflects reality if pointed at this cluster.
     kns("patch", "configmap", "app-active", "--type", "merge",
         "-p", json.dumps({"data": {"active": idle}}))
+    kns("annotate", "cluster", "pg", "--overwrite",
+        f"k8ostester.io/active-role=app_{idle}",
+        f"k8ostester.io/rotatedAt={datetime.now(UTC).strftime('%Y%m%d%H%M%S')}")
     kns("rollout", "restart", "deploy/app")
     kns("rollout", "status", "deploy/app", "--timeout=180s")
     # 3) assert the app recovered on the new role

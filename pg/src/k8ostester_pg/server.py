@@ -5,8 +5,8 @@ context, streams the selected cluster's snapshot + capability map over SSE, and
 executes gated actions against it. Stdlib http.server — no framework, no new deps.
 See docs/remote-control.md.
 
-    uv run python -m k8ostester_pg.server            # all contexts, pick in the UI
-    uv run python -m k8ostester_pg.server --context prod --namespace prod-east --cluster orders
+    k8ost-console                                    # all contexts, pick in the UI
+    k8ost-console --context prod --namespace prod-east --cluster orders
     # → open http://127.0.0.1:8700
 """
 from __future__ import annotations

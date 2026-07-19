@@ -16,6 +16,15 @@ IDEAL_MANIFESTS = Path(__file__).parents[2] / "testbed" / "manifests"
 CNPG_GROUP, CNPG_VERSION = "postgresql.cnpg.io", "v1"
 
 
+def _seaweedfs_ready(k8s: ClusterClient, namespace: str) -> str | None:
+    """The seaweedfs pod name once it is READY (serving S3), not just Running."""
+    for p in k8s.core.list_namespaced_pod(namespace, label_selector="app=seaweedfs").items:
+        if any(c.type == "Ready" and c.status == "True"
+               for c in (p.status.conditions or [])):
+            return p.metadata.name
+    return None
+
+
 def cluster_field(k8s: ClusterClient, namespace: str, field: str, name: str = "pg") -> str:
     """Read a field from the CNPG cluster's status (e.g. currentPrimary)."""
     obj = k8s.custom.get_namespaced_custom_object(
@@ -64,14 +73,21 @@ def deploy_ideal_config(
         {"spec": {"template": {"metadata": {
             "labels": {"k8ostester.io/experiment": experiment}}}}},
     )
-    # the ideal config archives WAL to seaweedfs — make the bucket before the
-    # cluster comes up, or archiving fails and it never goes healthy
-    sw = wait_until(
-        lambda: [p.metadata.name for p in
-                 k8s.core.list_namespaced_pod(namespace, label_selector="app=seaweedfs").items
-                 if p.status.phase == "Running"],
-        timeout=180, desc="seaweedfs ready")[0]
-    k8s.exec_pod(namespace, sw, ["sh", "-c", 'echo "s3.bucket.create -name backups" | weed shell'])
+    # the ideal config archives WAL to seaweedfs — the bucket must exist before
+    # the cluster comes up, or archiving fails. Wait for seaweedfs to be READY
+    # (a Running pod isn't yet serving S3), then create AND verify the bucket
+    # (weed shell no-ops silently if the master isn't up yet).
+    sw = wait_until(lambda: _seaweedfs_ready(k8s, namespace), timeout=180,
+                    desc="seaweedfs ready")
+
+    def _bucket_ready() -> bool:
+        k8s.exec_pod(namespace, sw, ["sh", "-c",
+                     'echo "s3.bucket.create -name backups" | weed shell'])
+        out = k8s.exec_pod(namespace, sw, ["sh", "-c",
+                     'echo "s3.bucket.list" | weed shell'])
+        return "backups" in out
+
+    wait_until(_bucket_ready, timeout=120, desc="backups bucket created")
     wait_until(
         lambda: cluster_field(k8s, namespace, "readyInstances") == "3",
         timeout=600, desc="cluster healthy")

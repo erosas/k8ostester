@@ -1,22 +1,24 @@
-# Productionization testbed — design
+# Productionization testbed — design record
 
-Status: **design, for review** (no code yet). This describes a second module,
-`pg/testbed`, separate from `k8ostester-core`.
+Status: **implemented**. Kept as the design rationale for `pg/testbed`; the
+authoritative "how to run it" is [pg/testbed/README.md](../pg/testbed/README.md).
 
-## Why a second module
+## Why a separate module
 
-The two have different jobs and should not be forced to share a model:
+The testbed and the resilience **experiments** have different jobs and are not
+forced to share a model:
 
-| | `k8ostester-core` | `pg/testbed` (new) |
+| | the experiments (`pg/experiments`) | the testbed (`pg/testbed`) |
 | --- | --- | --- |
-| Purpose | explore fast, find better configs | prove **the one ideal config** is operable |
-| Shape | generic chaos engine (drivers/workers/goals) | a **linear, pre-determined golden path** |
-| Question it answers | "which config survives chaos?" | "can I run this in production, and automate it?" |
+| Purpose | find where a config breaks under chaos | prove **the one ideal config** is operable |
+| Shape | linear fault scripts (kill / partition) | a **linear, pre-determined golden path** |
+| Question it answers | "does this survive chaos?" | "can I run this in production, and automate it?" |
 | Runs on | k8s | k8s (same substrate — no docker-compose) |
 
-Code reuse is **explicitly not a goal**. `pg/testbed` copies the ideal config
-and re-implements what it needs as a simple script, rather than bending core's
-abstractions. Simplicity over DRY.
+Code reuse is **explicitly not a goal**. `pg/testbed` re-implements what it needs
+as a simple script rather than bending a shared abstraction. Simplicity over DRY.
+(The earlier generic "core" engine this was contrasted against has since been
+retired — see [architecture-restructure.md](architecture-restructure.md).)
 
 ## Principles
 
@@ -37,8 +39,8 @@ pg/testbed/
     app.yaml            # the dummy application (reads + writes, exports OTEL)
     otel-collector.yaml # scrapes DB metrics, receives app metrics → console
   flow.py               # THE golden path, linear, top to bottom
-  events.jsonl          # what flow.py emits (the console's annotation source)
-  console/              # self-contained web SCADA view (later phase)
+  events.jsonl          # what flow.py emits (the annotation source)
+  monitoring/           # in-cluster Prometheus + Grafana (dashboards-as-JSON)
   README.md
 ```
 
@@ -61,7 +63,8 @@ event to `events.jsonl`. Readable as prose:
 ```
 
 Result is a single verdict ("this config is operable") plus the event timeline
-the console renders. Major PG upgrade (step 5b) is a **later** addition.
+Grafana renders. Steps 1–7 are implemented in `flow.py`; the major PG upgrade
+(step 5b) remains a **later** addition.
 
 ## Step mechanics (the parts that aren't obvious)
 
@@ -113,7 +116,7 @@ lines on the metric timelines and drives the component-status view.
 `kind` picks the marker style; `from`/`to` feed the version panel. Deliberately
 flat and boring — the console needs nothing more.
 
-## Observability + the console (later phase)
+## Observability + the console
 
 **Stack: Prometheus → Grafana, all in-cluster** (k8s-native, same substrate).
 This replaces the earlier "build our own web app" plan — one mature tool instead
@@ -149,17 +152,19 @@ The Grafana dashboard (provisioned as JSON, in-cluster) shows:
 So `flow.py`'s only console responsibility is: expose app `/metrics`, and POST an
 annotation per step. Everything else is Grafana config.
 
-## Sequencing
+## Sequencing (as built)
 
-1. **Skeleton + golden path** (this design → code): `manifests/` + `flow.py`
-   doing steps 1–7 with text/JSONL output. Proves the operations run end to end.
-2. **Console**: Prometheus + Grafana in-cluster, dashboard-as-JSON, `flow.py`
-   posting step annotations; SCADA via a Canvas/Node-Graph panel.
-3. **Major upgrade** (step 5b): the `pg_upgrade` path, operator-version gated.
+1. **Skeleton + golden path** — `manifests/` + `flow.py` doing steps 1–7 with
+   text/JSONL output. **Done.**
+2. **Console** — Prometheus + Grafana in-cluster (`monitoring/`), dashboards-as-JSON,
+   `flow.py` posting step annotations. **Done.**
+3. **Major upgrade** (step 5b) — the `pg_upgrade` path, operator-version gated.
+   Still deferred.
 
-## Open questions
+## Resolved design questions
 
-- Dummy app: extend the existing loadgen (add a `/metrics` endpoint) or a
-  purpose-built tiny app? Leaning reuse-the-concept, simplest export.
-- Does the testbed self-provision the operator + Prometheus/Grafana, or assume
-  the cluster already has them (like the attach scenario)?
+- **Dummy app** — reuses the existing `k8os-loadgen` (app-perspective metrics),
+  not a bespoke app.
+- **Provisioning** — the testbed **self-provisions everything**: the CNPG
+  operator, the cluster, and the in-cluster Prometheus/Grafana. See
+  [pg/testbed/README.md](../pg/testbed/README.md).

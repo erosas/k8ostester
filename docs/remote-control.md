@@ -13,9 +13,12 @@ read-only telemetry can still live in Grafana beside it.
 k8ost-console                                   # pick context + cluster in the UI
 k8ost-console --context prod                    # lock the picker to one context
 k8ost-console --context prod --namespace prod-east --cluster orders   # pre-select
-k8ost-console --target 16.6                     # offer a minor upgrade to 16.6
-# → open http://127.0.0.1:8700   (binds localhost only)
+k8ost-console --target 16.6                     # offer a specific image as an upgrade
+k8ost-console --grafana http://localhost:3000   # deep-link the metrics chips to Grafana
+# → open http://127.0.0.1:8700   (--host/--port to change the bind; localhost by default)
 ```
+
+Launch it via the workspace with `uv run --directory pg k8ost-console …`.
 
 Nothing about the target is hardcoded — the cluster name, namespace, roles,
 services, backup config, poolers and topology are all discovered.
@@ -28,20 +31,20 @@ evaluated against the live snapshot** and is enabled *iff* it holds now; a secon
 control that needs extra config isn't a permanently-dead tile). "Disable after
 use" and "multi-use" fall out of one rule.
 
-| Action | View | Available when | Enabled when |
+| Action | Where | Available when | Enabled when |
 | --- | --- | --- | --- |
-| Take base backup | Ops | always | Ready · backup configured · not busy |
-| Rotate credentials | Ops | always | Ready · two login roles · not busy |
-| Restore (PITR) | Break-glass | always | ≥1 completed backup · WAL window · not busy |
-| Minor upgrade | Break-glass | a `--target` image is set | Ready · `version ≠ target` · not upgrading · not busy |
-| Kill primary / a replica | Break-glass | always | target pod exists · no fault in flight |
-| Partition primary | Break-glass | always | primary exists · no fault in flight |
-| Drain a zone | Break-glass | always | ≥2 zones · no fault in flight |
+| Take base backup | Operate · routine | always | Ready · backup configured · not busy |
+| Rotate credentials | Operate · routine | always | Ready · two login roles · not busy |
+| Restore (PITR) | Operate · break-glass | always | ≥1 completed backup · WAL window · not busy |
+| Minor upgrade | Operate · break-glass | always (asks for the image on press) | Ready · not upgrading · not busy |
+| Inject fault (kill / partition a pod) | Operate · break-glass | always | target pod exists · no fault in flight |
+| Deploy a built manifest | Build | a manifest is generated | RBAC allows create (see `console-lab.yaml`) |
 
 `enabled` is computed **server-side** from the snapshot (a stale browser can't
-fire a disabled action) and also sent down for rendering. The upgrade proves the
-model: it self-disables because `version == target` is now true, not because we
-remember clicking it — bump the target and it lights up again.
+fire a disabled action) and also sent down for rendering. Restore proves the
+model: it lights up the moment the snapshot shows a completed backup + a WAL
+window, and greys out again if the recovery window lapses — no per-control
+used/unused bookkeeping, just the precondition re-evaluated each tick.
 
 Mutating ops also require `not busy` — an exclusivity lock so you can't stack e.g.
 a PITR restore and an upgrade. Chaos faults deliberately skip the lock (they stay
@@ -57,13 +60,19 @@ a health dot, version and ready/total. The chosen `(context, namespace, name)`
 drives everything; switching re-selects live. The console mutates clusters, so
 `--context`/`--namespace` also scope the blast radius.
 
-## Three views
+## Two views
 
-- **Ops** — routine on-call: the SCADA topology, the recovery window, and the
-  low-risk actions (backup, rotate).
-- **Break-glass** — destructive / high-risk / infrequent: PITR restore, minor
-  upgrade, and the chaos faults.
-- **Build** — the manifest builder (no cluster needed).
+A header selector switches between **Operate** and **Build**:
+
+- **Operate** — the live cluster: the SCADA topology, the conditions strip, the
+  recovery window, and the routine actions (backup, rotate). The destructive
+  **break-glass** actions (PITR restore, minor upgrade, inject a fault) sit below
+  in a cordoned danger zone that stays disabled until you **arm** it — so you
+  can't fire one by reflex or without realizing you're in a dangerous mode.
+- **Build** — the manifest builder + observability, and a one-click **Deploy** of
+  what you built into the selected namespace. No cluster needed to design.
+
+Every mutating action confirms before it runs.
 
 ## Discovered state (one snapshot)
 
@@ -146,24 +155,41 @@ its own Secret (CHANGE-ME placeholders) — the prerequisite Rotate switches
 between. A note explains storage is grow-only (online PVC expansion needs
 `allowVolumeExpansion`, never shrinks).
 
+**Observability** is built from the same form. Turning on a scrape (the
+Prometheus PodMonitor, or an **OTEL endpoint** that also emits a collector)
+unlocks an adaptive **Grafana dashboard** (`dashboard.py`, panels adapt to the
+config) and a **goals** block: a max replication lag / connections / WAL-archive
+delay becomes both a red **waterline** on the matching dashboard panel and a
+**PrometheusRule** alert — one `goals.py` source of truth for both. The output
+switch shows the manifest (YAML) or the dashboard (JSON); **Copy**, **Download**,
+or **Deploy** it.
+
+**Deploy** applies every doc in the generated manifest into the selected
+namespace via the dynamic client, reporting created / skipped / failed. In-cluster
+this needs the additive `pg/deploy/console-lab.yaml` RBAC (create rights); without
+it the console reports the 403 rather than pretending it worked.
+
 ## Architecture & files
 
 ```
 kubeconfig ─▶ Console (server.py) ─ shared 2s + 20s timers ─▶ snapshot cache ─SSE─▶ browser (console.html)
-                 ├─ discover.py : cluster + pods + psql/df execs → snapshot
-                 ├─ control.py  : CNPG actions (precondition + available)  [kernel/control.py: the model]
-                 ├─ execute.py  : gate → dispatch (chaos primitives / ops)
-                 ├─ ops.py      : rotate / upgrade / restore
-                 └─ builder.py  : options → manifest (resources/*.tmpl.yaml)
+                 ├─ discover.py  : cluster + pods + psql/df execs → snapshot
+                 ├─ control.py   : CNPG actions (precondition + available)  [kernel/control.py: the model]
+                 ├─ execute.py   : gate → dispatch (chaos primitives / ops)
+                 ├─ ops.py       : rotate / upgrade / restore
+                 ├─ builder.py   : options → manifest (resources/*.tmpl.yaml)
+                 ├─ dashboard.py : options → Grafana dashboard JSON
+                 └─ registry.py  : image tag discovery + pull checks (upgrades)
 ```
 
 - **kernel** supplies the generic capability model (`control.py`), the k8s client,
   and the chaos primitives.
-- **pg** supplies the CNPG actions, discovery, executor, ops, builder, the stdlib
-  `ThreadingHTTPServer`, and the single-file SPA `console.html`.
-- HTTP surface: `GET /` (SPA), `GET /api/stream` (SSE), `GET /api/contexts`,
-  `GET /api/clusters?context=`, `POST /api/action`, `POST /api/select`,
-  `POST /api/manifest`, `POST /api/wal-count`.
+- **pg** supplies the CNPG actions, discovery, executor, ops, builder, dashboard,
+  registry, the stdlib `ThreadingHTTPServer`, and the single-file SPA `console.html`.
+- HTTP surface — GET: `/` (SPA), `/api/stream` (SSE), `/api/contexts`,
+  `/api/clusters?context=`, `/api/secret?name=`, `/api/image-tags?image=`,
+  `/api/image-check?image=`. POST: `/api/action`, `/api/select`, `/api/manifest`,
+  `/api/dashboard`, `/api/deploy`, `/api/wal-count`.
 
 ## Deploy in-cluster (control plane)
 
@@ -180,6 +206,9 @@ kubectl -n <ns> port-forward svc/k8ost-console 8700:8700 # port-forward IS the a
   Role grants — a readable, revocable YAML boundary. `pg/deploy/rbac-clusterwide.yaml`
   is the fleet-wide (ClusterRole) variant, which also reads nodes for zone info.
   Note `pods/exec` needs **both `get` and `create`** (the websocket-stream exec is a GET).
+- **Build → Deploy is opt-in.** `pg/deploy/console.yaml` grants only operate/read;
+  applying the additive `pg/deploy/console-lab.yaml` adds the create rights the
+  Builder's Deploy needs. Leave it off for a pure operator console.
 - **No ingress.** The Service is ClusterIP; the only way in is `port-forward`,
   which already requires Kubernetes RBAC — so k8s authn/authz is the login.
 - **Audit** comes largely from the cluster's API audit log (every mutation is

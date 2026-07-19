@@ -203,14 +203,16 @@ console (kernel) + inline correctness verifies + a tiny SLO-query verdict.**
 
 ---
 
-## Open questions
+## Resolved
 
-- Keep a thin comparison-summary collector, or rely purely on Grafana? (Leaning:
-  Grafana, plus a tiny optional collector.)
-- Console lifecycle — does k8ost install the shared Prometheus/Grafana per
-  environment, or assume it's present (attach-style)?
-- How much of the current `experiments/` suite is worth porting vs. letting the
-  testbed + a few reference experiments cover it?
+- **Comparison** relies on Grafana's native overlay/repeat/table (the `compare`
+  dashboard in `kernel/console`); no custom collector.
+- **Console lifecycle** — the shared Prometheus/Grafana install once per
+  environment via standalone `kubectl apply` manifests (`kernel/console/*.yaml`),
+  not per run.
+- **Experiment coverage** — three reference experiments (kill-primary /
+  kill-replica / partition-primary) plus the testbed golden path; more are added
+  as thin linear scripts on the harness.
 
 ## Related
 

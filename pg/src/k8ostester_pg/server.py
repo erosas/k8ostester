@@ -338,7 +338,7 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                         payload = console.state()
                         self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
                         self.wfile.flush()
-                        time.sleep(2)
+                        time.sleep(console._interval)   # push at the fast-tier discovery rate
                 except (BrokenPipeError, ConnectionResetError):
                     pass
             else:

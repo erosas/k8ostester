@@ -13,8 +13,7 @@ from __future__ import annotations
 import json
 from importlib import resources
 
-from k8ostester_pg.builder import _clamp
-from k8ostester_pg.goals import GOALS, num
+from k8ostester_pg.goals import GOALS, clamp, num
 
 _PANEL_GOAL = {panel: key for key, (panel, *_rest) in GOALS.items()}   # panel key -> goal key
 
@@ -33,7 +32,7 @@ def _waterline(panel: dict, value: float) -> None:
 
 def build_dashboard(opts: dict) -> str:
     name = (opts.get("name") or "pg").strip()
-    instances = _clamp(opts.get("instances"), 1, 9, 3)
+    instances = clamp(opts.get("instances"), 1, 9, 3)
     goals = opts.get("goals") or {}
     # which series label carries the pod name — 'pod' for a PodMonitor / our OTel
     # collector, but a hand-rolled scrape may relabel it to 'instance'

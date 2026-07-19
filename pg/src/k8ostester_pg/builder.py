@@ -12,7 +12,7 @@ from __future__ import annotations
 from importlib import resources
 from string import Template
 
-from k8ostester_pg.goals import GOALS, num
+from k8ostester_pg.goals import GOALS, clamp, num
 
 # sync policy choice -> (CNPG method, number). "async" omits the block entirely.
 _SYNC = {"quorum": ("any", 1), "priority": ("first", 1)}
@@ -23,20 +23,13 @@ def _tmpl(name: str) -> Template:
     return Template(text)
 
 
-def _clamp(value, lo: int, hi: int, default: int) -> int:
-    try:
-        return max(lo, min(hi, int(value)))
-    except (TypeError, ValueError):
-        return default
-
-
 def build_manifest(opts: dict) -> str:
     """Render the manifest for these options. Unknown/blank fields fall back to
     sensible defaults, so a bare ``{}`` still yields a valid single-Cluster spec."""
     name = (opts.get("name") or "pg").strip()
     version = (opts.get("version") or "16.6").strip()
     storage = (opts.get("storage") or "10Gi").strip()
-    instances = _clamp(opts.get("instances"), 1, 9, 3)
+    instances = clamp(opts.get("instances"), 1, 9, 3)
 
     # optional spec fragments, in the order they appear under spec
     extra = ""
@@ -75,7 +68,7 @@ def build_manifest(opts: dict) -> str:
 
     if opts.get("pooler"):
         docs.append(_tmpl("pooler.tmpl.yaml").substitute(
-            name=name, instances=_clamp(opts.get("pooler_instances"), 1, 5, 2)))
+            name=name, instances=clamp(opts.get("pooler_instances"), 1, 5, 2)))
     if opts.get("backups") and opts.get("schedule"):
         docs.append(_tmpl("scheduledbackup.tmpl.yaml").substitute(
             name=name, schedule=(opts.get("schedule_cron") or "0 0 2 * * *").strip()))

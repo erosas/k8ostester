@@ -1,8 +1,9 @@
 """Base exceptions shared by the kernel and the verticals.
 
-Verticals subclass ``K8osError`` for their own error types; because the kernel
-raises ``K8osInfraError`` from these same classes, a vertical's
-``except K8osError`` catches kernel-raised infra errors too.
+``K8osError`` is the common base: catching it also catches the kernel's
+``K8osInfraError``. Verticals may subclass ``K8osError`` when they want their
+errors to participate in that shared catch (otherwise they raise plain
+exceptions).
 """
 
 

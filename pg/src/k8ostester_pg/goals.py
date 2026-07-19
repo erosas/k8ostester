@@ -35,3 +35,11 @@ def num(x: object) -> float | int | None:
     except (TypeError, ValueError):
         return None
     return int(v) if v == int(v) else v
+
+
+def clamp(value: object, lo: int, hi: int, default: int) -> int:
+    """Coerce ``value`` to an int in [lo, hi]; ``default`` if it isn't a number."""
+    try:
+        return max(lo, min(hi, int(value)))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default

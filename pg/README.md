@@ -8,9 +8,20 @@ kernel primitives, no framework abstraction. See
 pg/
   src/k8ostester_pg/
     slo.py        standard CNPG SLO checks (kernel SloChecks over Prometheus)
+  experiments/    linear experiment scripts (the new model, replacing goals)
+    kill-primary/run.py
   testbed/        the production-readiness golden path (see testbed/README.md)
   tests/
 ```
+
+## Experiments — the linear model
+
+`experiments/kill-primary/run.py` is the first experiment in the new model,
+replacing the old fault-timeline + goals engine. It reads top to bottom — deploy
+the ideal config, drive load, `chaos.kill_pod` the primary, verify failover — and
+the **kernel `Run` helper** assembles the verdict from inline verify-steps
+(correctness) + `slo.py` SLO range-queries over the run window. No generic
+runner, no goals evaluator; just a script + the kernel primitives.
 
 ## What's here
 

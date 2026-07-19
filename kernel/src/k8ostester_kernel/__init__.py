@@ -6,6 +6,7 @@ tech-specific logic directly. There is deliberately no "every tech implements
 this" driver interface here. See docs/architecture-restructure.md.
 """
 
+from k8ostester_kernel.experiment import Run
 from k8ostester_kernel.verdict import SloCheck, evaluate_slos, verdict
 
-__all__ = ["SloCheck", "evaluate_slos", "verdict"]
+__all__ = ["Run", "SloCheck", "evaluate_slos", "verdict"]

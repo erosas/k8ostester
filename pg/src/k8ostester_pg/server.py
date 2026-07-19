@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,16 +26,48 @@ SPA = (Path(__file__).parent / "console.html").read_text()
 
 
 class Console:
-    """The control plane: discovery + capability + execution over one cluster."""
+    """The control plane: discovery + capability + execution over one cluster.
 
-    def __init__(self, context: str | None, namespace: str, target: str):
+    Discovery runs on ONE shared background timer, not per SSE connection — so the
+    load on the cluster (and the psql execs into the primary) is fixed regardless
+    of how many browser tabs are watching. Connections just read the latest cache.
+    """
+
+    def __init__(self, context: str | None, namespace: str, target: str,
+                 interval: float = 2.0, start: bool = True):
         self.k8s = ClusterClient(context)
         self.ns = namespace
         self.target = target
+        self._interval = interval
+        self._lock = threading.Lock()
+        self._cache: dict = {"error": "warming up…"}
+        if start:                                  # off in tests
+            self.refresh()                         # warm synchronously
+            threading.Thread(target=self._refresh_loop, daemon=True).start()
+
+    def _safe_state(self) -> dict:
+        try:
+            snap = discover.snapshot(self.k8s, self.ns, target=self.target)
+            return {"snapshot": snap, "capabilities": capabilities(CNPG_ACTIONS, snap)}
+        except Exception as e:                     # surface discovery errors to the UI
+            return {"error": str(e).splitlines()[0][:200]}
+
+    def refresh(self) -> dict:
+        """Recompute the cached state once (called on the timer and at startup)."""
+        st = self._safe_state()
+        with self._lock:
+            self._cache = st
+        return st
+
+    def _refresh_loop(self) -> None:
+        while True:
+            self.refresh()
+            time.sleep(self._interval)
 
     def state(self) -> dict:
-        snap = discover.snapshot(self.k8s, self.ns, target=self.target)
-        return {"snapshot": snap, "capabilities": capabilities(CNPG_ACTIONS, snap)}
+        """The latest cached snapshot + capability map (refreshed on the timer)."""
+        with self._lock:
+            return self._cache
 
     def act(self, action_id: str, params: dict | None = None) -> str:
         snap = discover.snapshot(self.k8s, self.ns, target=self.target)
@@ -70,10 +103,9 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self.end_headers()
                 try:
                     while True:
-                        try:
-                            payload = console.state()
-                        except Exception as e:  # surface discovery errors to the UI
-                            payload = {"error": str(e).splitlines()[0][:200]}
+                        # read the shared cache — discovery happens once on the
+                        # Console timer, not per connection
+                        payload = console.state()
                         self.wfile.write(f"data: {json.dumps(payload)}\n\n".encode())
                         self.wfile.flush()
                         time.sleep(2)

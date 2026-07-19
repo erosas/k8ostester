@@ -545,7 +545,7 @@ function onSlide(){
 }
 // exact WAL-segment counts from the server, cached per base backup for this modal
 const WALX = {}, WALINFLIGHT = new Set();
-let LAST_SNAP = "";
+let LAST_SNAP = "", walTimer = null;
 function ensureWal(endWal){
   if(!endWal || endWal in WALX || WALINFLIGHT.has(endWal)) return;
   WALINFLIGHT.add(endWal);
@@ -565,7 +565,14 @@ function renderPitInfo(){
   let seg;
   if(typeof v === "number") seg = `<b>${v}</b> WAL segments (~${fmtBytes(v*16*1048576)}) generated since`;
   else if(v === "err") seg = "WAL count unavailable";
-  else { seg = "counting WAL segments…"; ensureWal(base.endWal); }
+  else {
+    // debounce: only ask the server once the slider has been still for a beat,
+    // so dragging across ticks doesn't fire an exec per tick
+    seg = "release to count WAL…";
+    clearTimeout(walTimer);
+    const target = base.endWal;
+    walTimer = setTimeout(()=>{ ensureWal(target); }, 450);
+  }
   info.innerHTML =
     `restores from base backup <b>${base.name}</b> (${ago(base.ms)}, ~${sz})` +
     `<br>${seg} — replayed forward to your target` +

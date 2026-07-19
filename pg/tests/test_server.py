@@ -16,7 +16,7 @@ def test_spa_is_a_self_contained_page_with_the_hooks():
 @patch("k8ostester_pg.server.execute.execute", return_value="killed primary pg-1")
 @patch("k8ostester_pg.server.discover.snapshot", return_value={"primary": "pg-1"})
 def test_console_act_discovers_then_executes(snap, ex, _cc):
-    c = server.Console("ctx", "ns", "")
+    c = server.Console("ctx", "ns", "", start=False)   # no background timer in tests
     msg = c.act("kill-primary")
     assert msg == "killed primary pg-1"
     snap.assert_called_once()                       # fresh discovery before acting
@@ -26,8 +26,13 @@ def test_console_act_discovers_then_executes(snap, ex, _cc):
 
 @patch("k8ostester_pg.server.ClusterClient")
 @patch("k8ostester_pg.server.discover.snapshot", return_value={"primary": "pg-1"})
-def test_console_state_bundles_snapshot_and_capabilities(snap, _cc):
-    c = server.Console("ctx", "ns", "")
+def test_console_state_serves_the_cached_snapshot(snap, _cc):
+    c = server.Console("ctx", "ns", "", start=False)
+    c.refresh()                                     # the timer would do this
     st = c.state()
     assert st["snapshot"] == {"primary": "pg-1"}
     assert any(cap["id"] == "kill-primary" for cap in st["capabilities"])
+    snap.assert_called_once()                       # discovery runs once, not per read
+    c.state()
+    c.state()
+    snap.assert_called_once()                       # extra reads don't re-discover

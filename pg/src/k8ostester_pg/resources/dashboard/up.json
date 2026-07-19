@@ -3,7 +3,7 @@
   "title": "Instances up",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "cnpg_collector_up{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
+    {"expr": "cnpg_collector_up{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
   ],
   "options": {"colorMode": "background", "reduceOptions": {"calcs": ["lastNotNull"]}},
   "fieldConfig": {

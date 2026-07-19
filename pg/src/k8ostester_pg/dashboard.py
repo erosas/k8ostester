@@ -35,17 +35,21 @@ def build_dashboard(opts: dict) -> str:
     name = (opts.get("name") or "pg").strip()
     instances = _clamp(opts.get("instances"), 1, 9, 3)
     goals = opts.get("goals") or {}
+    # which series label carries the pod name — 'pod' for a PodMonitor / our OTel
+    # collector, but a hand-rolled scrape may relabel it to 'instance'
+    label = (opts.get("scrape_label") or "pod").strip()
 
     # panels, in order — some only make sense for certain configs
-    order = ["up", "connections", "db-size"]
+    order = ["up", "connections", "connections-by-role", "db-size", "wal"]
     if instances > 1:
-        order.append("replication-lag")
+        order += ["replication-lag", "replication-slots"]
     if opts.get("backups"):
-        order.append("archiving")
+        order += ["backups", "archiving"]
 
     panels = []
     for i, key in enumerate(order):
-        panel = json.loads(_text(f"dashboard/{key}.json").replace("__CLUSTER__", name))
+        raw = _text(f"dashboard/{key}.json").replace("__LABEL__", label).replace("__CLUSTER__", name)
+        panel = json.loads(raw)
         panel["id"] = i + 1
         panel["gridPos"] = {"h": 8, "w": 12, "x": (i % 2) * 12, "y": (i // 2) * 8}
         goal_val = num(goals.get(_PANEL_GOAL.get(key)))   # a goal for this panel?

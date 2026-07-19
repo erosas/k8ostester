@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Replication & slots",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "max(cnpg_pg_replication_streaming_replicas{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "streaming replicas", "refId": "A"},
+    {"expr": "max(cnpg_pg_replication_slots_active{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "active slots", "refId": "B"}
+  ],
+  "fieldConfig": {
+    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

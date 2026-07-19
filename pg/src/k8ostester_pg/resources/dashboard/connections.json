@@ -3,7 +3,7 @@
   "title": "Active connections",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "sum(cnpg_backends_total{pod=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "backends", "refId": "A"}
+    {"expr": "sum(cnpg_backends_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "backends", "refId": "A"}
   ],
   "fieldConfig": {
     "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 12}, "color": {"mode": "palette-classic"}},

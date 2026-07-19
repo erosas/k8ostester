@@ -12,17 +12,17 @@ from __future__ import annotations
 GOALS: dict[str, tuple[str, str, str, str]] = {
     "repl_lag": (
         "replication-lag", "ReplicationLagHigh",
-        'cnpg_pg_replication_lag{{pod=~"{pods}"}} > {v}',
+        'cnpg_pg_replication_lag{{{label}=~"{pods}"}} > {v}',
         "replication lag over {v}s",
     ),
     "connections": (
         "connections", "ConnectionsHigh",
-        'sum(cnpg_backends_total{{pod=~"{pods}"}}) > {v}',
+        'sum(cnpg_backends_total{{{label}=~"{pods}"}}) > {v}',
         "connections over {v}",
     ),
     "archive_delay": (
         "archiving", "ArchiveDelayHigh",
-        'time() - cnpg_pg_stat_archiver_last_archived_time{{pod=~"{pods}"}} > {v}',
+        'time() - cnpg_pg_stat_archiver_last_archived_time{{{label}=~"{pods}"}} > {v}',
         "WAL archive delayed over {v}s",
     ),
 }

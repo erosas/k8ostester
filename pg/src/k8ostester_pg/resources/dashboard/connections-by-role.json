@@ -1,0 +1,12 @@
+{
+  "type": "timeseries",
+  "title": "Connections by role (credential)",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "sum by (usename) (cnpg_backends_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "{{usename}}", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 22, "stacking": {"mode": "normal"}}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

@@ -364,6 +364,8 @@
       <label class="check"><input id="b-monitoring" type="checkbox" checked> Prometheus PodMonitor</label>
       <label>OTEL endpoint (optional)<input id="b-otel" placeholder="otel-collector.obs.svc:4317">
         <span class="fcap">emits an OpenTelemetry Collector</span></label>
+      <label>Metrics pod label<input id="b-scrape-label" value="pod">
+        <span class="fcap">dashboard filter — 'pod' (PodMonitor/OTel) or 'instance'</span></label>
     </div>
     <div class="bgrid">
       <label>Goal · max replication lag (s)<input id="b-goal-lag" placeholder="e.g. 30">
@@ -1269,7 +1271,7 @@ function builderOpts(){
     endpoint:v("b-endpoint"), secret:v("b-secret"), retention:v("b-retention"),
     schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
     app_roles:ck("b-approles"),
-    monitoring:ck("b-monitoring"), otel_endpoint:v("b-otel"),
+    monitoring:ck("b-monitoring"), otel_endpoint:v("b-otel"), scrape_label:v("b-scrape-label"),
     goals:{ repl_lag:v("b-goal-lag"), connections:v("b-goal-conn"), archive_delay:v("b-goal-archive") },
   };
 }

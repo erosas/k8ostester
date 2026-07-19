@@ -3,8 +3,8 @@
   "title": "WAL archiving",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "time() - cnpg_pg_stat_archiver_last_archived_time{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "since last archive (s)", "refId": "A"},
-    {"expr": "cnpg_pg_stat_archiver_failed_count{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "failed count", "refId": "B"}
+    {"expr": "time() - cnpg_pg_stat_archiver_last_archived_time{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "since last archive (s)", "refId": "A"},
+    {"expr": "cnpg_pg_stat_archiver_failed_count{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "failed count", "refId": "B"}
   ],
   "fieldConfig": {
     "defaults": {"custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},

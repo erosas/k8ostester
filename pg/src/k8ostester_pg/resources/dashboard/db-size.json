@@ -3,7 +3,7 @@
   "title": "Database size",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "cnpg_pg_database_size_bytes{pod=~\"__CLUSTER__-[0-9]+\", datname!~\"template.*\"}", "legendFormat": "{{datname}}", "refId": "A"}
+    {"expr": "cnpg_pg_database_size_bytes{__LABEL__=~\"__CLUSTER__-[0-9]+\", datname!~\"template.*\"}", "legendFormat": "{{datname}}", "refId": "A"}
   ],
   "fieldConfig": {
     "defaults": {"unit": "bytes", "custom": {"drawStyle": "line", "fillOpacity": 12}, "color": {"mode": "palette-classic"}},

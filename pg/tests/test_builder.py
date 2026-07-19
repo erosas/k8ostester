@@ -78,13 +78,28 @@ def test_dashboard_panels_adapt_to_the_config():
     single = json.loads(build_dashboard({"name": "solo", "instances": 1, "backups": False}))
     titles = [p["title"] for p in single["panels"]]
     assert "Replication lag" not in titles and "WAL archiving" not in titles
+    assert "Connections by role (credential)" in titles   # always present
     assert single["uid"] == "k8ost-solo"
 
     full = json.loads(build_dashboard({"name": "pg", "instances": 3, "backups": True}))
     ftitles = [p["title"] for p in full["panels"]]
-    assert "Replication lag" in ftitles and "WAL archiving" in ftitles
-    # queries scope to this cluster's instance pods
+    for t in ("Replication lag", "Replication & slots", "Backups & recovery window", "WAL archiving"):
+        assert t in ftitles
+    # queries scope to this cluster's instance pods, default 'pod' label
     assert 'pod=~"pg-[0-9]+"' in full["panels"][0]["targets"][0]["expr"]
+
+
+def test_dashboard_scrape_label_is_configurable():
+    import json
+
+    from k8ostester_pg.dashboard import build_dashboard
+    d = json.loads(build_dashboard({"name": "pg", "scrape_label": "instance"}))
+    assert 'instance=~"pg-[0-9]+"' in d["panels"][0]["targets"][0]["expr"]
+    assert "pod=~" not in json.dumps(d)
+    # goals/alerts honour the same label
+    m = build_manifest({"name": "pg", "scrape_label": "instance", "goals": {"repl_lag": 30}})
+    rule = next(x for x in yaml.safe_load_all(m) if x and x["kind"] == "PrometheusRule")
+    assert 'instance=~"pg-[0-9]+"' in rule["spec"]["groups"][0]["rules"][0]["expr"]
 
 
 def test_goals_become_waterlines_and_alert_rules():

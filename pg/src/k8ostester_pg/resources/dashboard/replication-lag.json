@@ -3,7 +3,7 @@
   "title": "Replication lag",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "cnpg_pg_replication_lag{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
+    {"expr": "cnpg_pg_replication_lag{__LABEL__=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "{{pod}}", "refId": "A"}
   ],
   "fieldConfig": {
     "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},

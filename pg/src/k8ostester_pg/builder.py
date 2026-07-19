@@ -86,14 +86,14 @@ def build_manifest(opts: dict) -> str:
         docs.append(_tmpl("otel-collector.tmpl.yaml").substitute(name=name, endpoint=endpoint))
 
     # goals -> Prometheus alert rules (the same goals become dashboard waterlines)
-    rules = _alert_rules(name, opts.get("goals") or {})
+    rules = _alert_rules(name, opts.get("goals") or {}, (opts.get("scrape_label") or "pod").strip())
     if rules:
         docs.append(_tmpl("prometheus-rules.tmpl.yaml").substitute(name=name, rules=rules))
 
     return "\n---\n".join(d.strip() for d in docs) + "\n"
 
 
-def _alert_rules(name: str, goals: dict) -> str:
+def _alert_rules(name: str, goals: dict, label: str = "pod") -> str:
     """The PrometheusRule entries for whichever goals are set (indented for YAML)."""
     pods = f"{name}-[0-9]+"
     frags = []
@@ -102,6 +102,6 @@ def _alert_rules(name: str, goals: dict) -> str:
         if v is None:
             continue
         frags.append(_tmpl("prometheus-rule.tmpl.yaml").substitute(
-            alert=alert, expr=expr_t.format(pods=pods, v=v),
+            alert=alert, expr=expr_t.format(pods=pods, v=v, label=label),
             summary=summary_t.format(v=v), name=name))
     return "".join(frags)

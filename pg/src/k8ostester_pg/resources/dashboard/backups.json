@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Backups & recovery window",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "time() - max(cnpg_collector_last_available_backup_timestamp{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "since last backup", "refId": "A"},
+    {"expr": "time() - min(cnpg_collector_first_recoverability_point{__LABEL__=~\"__CLUSTER__-[0-9]+\"} > 0)", "legendFormat": "recovery window covers", "refId": "B"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 6}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

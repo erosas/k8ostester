@@ -22,7 +22,7 @@ GOALS: dict[str, tuple[str, str, str, str]] = {
     ),
     "archive_delay": (
         "archiving", "ArchiveDelayHigh",
-        'cnpg_pg_stat_archiver_seconds_since_last_archival{{pod=~"{pods}"}} > {v}',
+        'time() - cnpg_pg_stat_archiver_last_archived_time{{pod=~"{pods}"}} > {v}',
         "WAL archive delayed over {v}s",
     ),
 }

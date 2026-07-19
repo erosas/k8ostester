@@ -3,7 +3,7 @@
   "title": "WAL archiving",
   "datasource": {"type": "prometheus", "uid": "${datasource}"},
   "targets": [
-    {"expr": "cnpg_pg_stat_archiver_seconds_since_last_archival{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "since last archive (s)", "refId": "A"},
+    {"expr": "time() - cnpg_pg_stat_archiver_last_archived_time{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "since last archive (s)", "refId": "A"},
     {"expr": "cnpg_pg_stat_archiver_failed_count{pod=~\"__CLUSTER__-[0-9]+\"}", "legendFormat": "failed count", "refId": "B"}
   ],
   "fieldConfig": {

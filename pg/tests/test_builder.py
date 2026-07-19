@@ -96,17 +96,32 @@ def test_dashboard_scrape_label_is_configurable():
     d = json.loads(build_dashboard({"name": "pg", "scrape_label": "instance"}))
     assert 'instance=~"pg-[0-9]+"' in d["panels"][0]["targets"][0]["expr"]
     assert "pod=~" not in json.dumps(d)
-    # goals/alerts honour the same label
-    m = build_manifest({"name": "pg", "scrape_label": "instance", "goals": {"repl_lag": 30}})
+    # goals/alerts honour the same label (alerts need monitoring on)
+    m = build_manifest({"name": "pg", "scrape_label": "instance", "monitoring": True,
+                        "goals": {"repl_lag": 30}})
     rule = next(x for x in yaml.safe_load_all(m) if x and x["kind"] == "PrometheusRule")
     assert 'instance=~"pg-[0-9]+"' in rule["spec"]["groups"][0]["rules"][0]["expr"]
+
+
+def test_alerts_need_monitoring_dashboard_waterline_does_not():
+    import json
+
+    from k8ostester_pg.dashboard import build_dashboard
+    # goals set but no PodMonitor -> no PrometheusRule (nothing would load it)...
+    kinds = {d["kind"] for d in yaml.safe_load_all(
+        build_manifest({"goals": {"repl_lag": 30}})) if d}
+    assert "PrometheusRule" not in kinds
+    # ...but the dashboard waterline still renders (works over OTEL too)
+    d = json.loads(build_dashboard({"name": "pg", "goals": {"repl_lag": 30}}))
+    lag = next(p for p in d["panels"] if p["title"] == "Replication lag")
+    assert lag["fieldConfig"]["defaults"]["thresholds"]["steps"][-1]["value"] == 30
 
 
 def test_goals_become_waterlines_and_alert_rules():
     import json
 
     from k8ostester_pg.dashboard import build_dashboard
-    opts = {"name": "pg", "instances": 3, "backups": True,
+    opts = {"name": "pg", "instances": 3, "backups": True, "monitoring": True,
             "goals": {"repl_lag": 30, "connections": "", "archive_delay": 120}}
 
     # waterline: a red threshold line lands on the matching panel, not others

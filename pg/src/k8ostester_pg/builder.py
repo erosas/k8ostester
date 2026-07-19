@@ -85,10 +85,14 @@ def build_manifest(opts: dict) -> str:
     if endpoint:
         docs.append(_tmpl("otel-collector.tmpl.yaml").substitute(name=name, endpoint=endpoint))
 
-    # goals -> Prometheus alert rules (the same goals become dashboard waterlines)
-    rules = _alert_rules(name, opts.get("goals") or {}, (opts.get("scrape_label") or "pod").strip())
-    if rules:
-        docs.append(_tmpl("prometheus-rules.tmpl.yaml").substitute(name=name, rules=rules))
+    # goals -> Prometheus alert rules — only with a PodMonitor (a PrometheusRule is
+    # consumed by the Prometheus Operator; over OTEL-only there's nothing to load it).
+    # The same goals still become dashboard waterlines regardless.
+    if opts.get("monitoring"):
+        rules = _alert_rules(name, opts.get("goals") or {},
+                             (opts.get("scrape_label") or "pod").strip())
+        if rules:
+            docs.append(_tmpl("prometheus-rules.tmpl.yaml").substitute(name=name, rules=rules))
 
     return "\n---\n".join(d.strip() for d in docs) + "\n"
 

@@ -1,0 +1,10 @@
+  backup:
+    barmanObjectStore:
+      destinationPath: s3://${bucket}/${path}
+      endpointURL: ${endpoint}
+      s3Credentials:
+        accessKeyId: {name: ${secret}, key: ACCESS_KEY}
+        secretAccessKey: {name: ${secret}, key: SECRET_KEY}
+      wal:
+        compression: gzip
+    retentionPolicy: ${retention}

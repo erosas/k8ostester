@@ -18,7 +18,7 @@ from pathlib import Path
 from k8ostester_kernel.control import capabilities
 from k8ostester_kernel.k8s import ClusterClient
 
-from k8ostester_pg import discover, execute
+from k8ostester_pg import builder, discover, execute
 from k8ostester_pg.control import CNPG_ACTIONS
 
 SPA = (Path(__file__).parent / "console.html").read_text()
@@ -76,11 +76,20 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self._send(404, "text/plain", b"not found")
 
         def do_POST(self):
-            if self.path != "/api/action":
+            if self.path not in ("/api/action", "/api/manifest"):
                 self._send(404, "text/plain", b"not found")
                 return
             n = int(self.headers.get("Content-Length", 0) or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
+            if self.path == "/api/manifest":
+                # pure YAML generation from the builder — no cluster access
+                try:
+                    body.setdefault("namespace", console.ns)
+                    out = {"ok": True, "manifest": builder.build_manifest(body)}
+                except Exception as e:
+                    out = {"ok": False, "error": str(e).splitlines()[0][:200]}
+                self._send(200, "application/json", json.dumps(out).encode())
+                return
             try:
                 msg = console.act(body.get("id", ""), body.get("params"))
                 out = {"ok": True, "message": msg}

@@ -1,0 +1,64 @@
+"""Generate a starter CNPG manifest from a few high-level choices.
+
+A design aid, not a deploy path: the console's builder posts a set of options
+(how many instances, pooler yes/no, backups + schedule, sync policy) and gets
+back a Cluster — plus an optional Pooler and ScheduledBackup — to copy or apply.
+
+The YAML lives entirely in resource templates (``resources/*.tmpl.yaml``) with
+``${VAR}`` substitution; nothing here bakes manifest strings into Python.
+"""
+from __future__ import annotations
+
+from importlib import resources
+from string import Template
+
+# sync policy choice -> (CNPG method, number). "async" omits the block entirely.
+_SYNC = {"quorum": ("any", 1), "priority": ("first", 1)}
+
+
+def _tmpl(name: str) -> Template:
+    text = resources.files("k8ostester_pg").joinpath("resources", name).read_text()
+    return Template(text)
+
+
+def _clamp(value, lo: int, hi: int, default: int) -> int:
+    try:
+        return max(lo, min(hi, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def build_manifest(opts: dict) -> str:
+    """Render the manifest for these options. Unknown/blank fields fall back to
+    sensible defaults, so a bare ``{}`` still yields a valid single-Cluster spec."""
+    name = (opts.get("name") or "pg").strip()
+    version = (opts.get("version") or "16.6").strip()
+    storage = (opts.get("storage") or "10Gi").strip()
+    instances = _clamp(opts.get("instances"), 1, 9, 3)
+
+    # optional spec fragments, in the order they appear under spec
+    extra = ""
+    method_number = _SYNC.get(opts.get("sync") or "quorum")
+    if method_number:
+        extra += _tmpl("cluster-sync.tmpl.yaml").substitute(
+            method=method_number[0], number=method_number[1])
+    if opts.get("backups"):
+        extra += _tmpl("cluster-backup.tmpl.yaml").substitute(
+            bucket=(opts.get("bucket") or "backups").strip(),
+            path=(opts.get("path") or name).strip(),
+            endpoint=(opts.get("endpoint") or "http://seaweedfs:8333").strip(),
+            secret=(opts.get("secret") or "seaweed-s3").strip(),
+            retention=(opts.get("retention") or "7d").strip(),
+        )
+
+    docs = [_tmpl("cluster.tmpl.yaml").substitute(
+        name=name, instances=instances, version=version, storage=storage, extra=extra)]
+
+    if opts.get("pooler"):
+        docs.append(_tmpl("pooler.tmpl.yaml").substitute(
+            name=name, instances=_clamp(opts.get("pooler_instances"), 1, 5, 2)))
+    if opts.get("backups") and opts.get("schedule"):
+        docs.append(_tmpl("scheduledbackup.tmpl.yaml").substitute(
+            name=name, schedule=(opts.get("schedule_cron") or "0 0 2 * * *").strip()))
+
+    return "\n---\n".join(d.strip() for d in docs) + "\n"

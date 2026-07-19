@@ -1,0 +1,14 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: ${name}
+spec:
+  instances: ${instances}
+  imageName: ghcr.io/cloudnative-pg/postgresql:${version}
+  storage:
+    size: ${storage}
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+${extra}  probes:
+    readiness: {periodSeconds: 3, failureThreshold: 2}
+    liveness: {periodSeconds: 3, timeoutSeconds: 3, failureThreshold: 2}

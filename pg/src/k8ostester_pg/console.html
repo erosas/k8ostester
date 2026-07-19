@@ -104,6 +104,28 @@
   button.act .sub{font-family:var(--mono);font-size:11px;color:var(--muted)}
   button.act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+  /* cluster builder */
+  .builder{border:1px solid var(--border);border-radius:12px;padding:18px;
+    background:linear-gradient(180deg,var(--panel),var(--panel2))}
+  .bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px 16px;
+    margin-bottom:14px}
+  .bgrid label{display:flex;flex-direction:column;gap:5px;font-family:var(--mono);font-size:11px;
+    letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+  .bgrid label.check{flex-direction:row;align-items:center;gap:8px;text-transform:none;
+    letter-spacing:0;font-size:13px;color:var(--ink);align-self:end;padding-bottom:8px}
+  .bgrid input,.bgrid select{background:var(--panel2);border:1px solid var(--border);color:var(--ink);
+    border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:13px;color-scheme:dark}
+  .bgrid input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);padding:0}
+  .bgrid input:focus,.bgrid select:focus{outline:none;border-color:var(--accent)}
+  .bbar{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
+  .bbar .bhint{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-right:auto}
+  .bbar button{font-family:var(--sans);font-size:13px;padding:8px 16px;border-radius:8px;
+    border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer}
+  .bbar button:hover{border-color:var(--accent)}
+  .manifest{background:#05080c;border:1px solid var(--border);border-radius:9px;padding:14px 16px;
+    font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink);overflow-x:auto;
+    white-space:pre;margin:0;max-height:460px;overflow-y:auto}
+
   .log{margin-top:22px;border-top:1px solid var(--border);padding-top:14px;
     font-family:var(--mono);font-size:12.5px;color:var(--muted)}
   .log .line{padding:3px 0}
@@ -175,8 +197,45 @@
   <div class="tabs">
     <div class="tab on" data-tab="ops" onclick="pick('ops')">Ops · routine on-call</div>
     <div class="tab" data-tab="chaos" onclick="pick('chaos')">Break-glass · destructive</div>
+    <div class="tab" data-tab="builder" onclick="pick('builder')">Builder · design a cluster</div>
   </div>
   <div class="actions" id="actions"></div>
+
+  <div class="builder" id="builder" style="display:none">
+    <div class="bgrid">
+      <label>Cluster name<input id="b-name" value="pg"></label>
+      <label>PostgreSQL version<input id="b-version" value="16.6"></label>
+      <label>Instances (1 primary + replicas)
+        <input id="b-instances" type="number" min="1" max="9" value="3"></label>
+      <label>Storage size<input id="b-storage" value="10Gi"></label>
+      <label>Synchronous replication
+        <select id="b-sync">
+          <option value="quorum">quorum · any 1 (RPO 0, tolerates 1 loss)</option>
+          <option value="priority">priority · first 1 (named sync + async)</option>
+          <option value="async">async (no synchronous standby)</option>
+        </select></label>
+      <label class="check"><input id="b-pooler" type="checkbox"> PgBouncer pooler (rw)</label>
+      <label id="b-pooler-n-wrap" style="display:none">Pooler instances
+        <input id="b-pooler-instances" type="number" min="1" max="5" value="2"></label>
+      <label class="check"><input id="b-backups" type="checkbox" checked> Backups + WAL archiving</label>
+    </div>
+    <div class="bgrid" id="b-backup-fields">
+      <label>Bucket<input id="b-bucket" value="backups"></label>
+      <label>Path<input id="b-path" value="pg"></label>
+      <label>S3 endpoint<input id="b-endpoint" value="http://seaweedfs:8333"></label>
+      <label>Credentials secret<input id="b-secret" value="seaweed-s3"></label>
+      <label>Retention<input id="b-retention" value="7d"></label>
+      <label class="check"><input id="b-schedule" type="checkbox" checked> Scheduled base backups</label>
+      <label id="b-schedule-cron-wrap">Schedule (6-field cron)
+        <input id="b-schedule-cron" value="0 0 2 * * *"></label>
+    </div>
+    <div class="bbar">
+      <span class="bhint" id="b-hint">edit any field — the manifest updates live</span>
+      <button onclick="copyManifest()">Copy</button>
+      <button onclick="downloadManifest()">Download .yaml</button>
+    </div>
+    <pre class="manifest" id="manifest">…</pre>
+  </div>
 
   <div class="log" id="log"><div class="line">— no actions yet —</div></div>
 </div>
@@ -221,7 +280,11 @@ let TAB = "ops", CAPS = [], SNAP = {};
 function pick(t){
   TAB = t;
   document.querySelectorAll(".tab").forEach(e=>e.classList.toggle("on", e.dataset.tab===t));
-  renderActions();
+  const isBuild = t==="builder";
+  document.getElementById("builder").style.display = isBuild ? "block" : "none";
+  document.getElementById("actions").style.display = isBuild ? "none" : "grid";
+  if(isBuild) generateManifest();
+  else renderActions();
 }
 
 function log(msg, ok){
@@ -553,6 +616,50 @@ function render(data){
   renderRecovery(SNAP);
   renderActions();
 }
+
+/* ---- cluster builder ---- */
+let MANIFEST = "";
+function builderOpts(){
+  const v = id => document.getElementById(id).value;
+  const ck = id => document.getElementById(id).checked;
+  return {
+    name:v("b-name"), version:v("b-version"), instances:+v("b-instances"),
+    storage:v("b-storage"), sync:v("b-sync"),
+    pooler:ck("b-pooler"), pooler_instances:+v("b-pooler-instances"),
+    backups:ck("b-backups"), bucket:v("b-bucket"), path:v("b-path"),
+    endpoint:v("b-endpoint"), secret:v("b-secret"), retention:v("b-retention"),
+    schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
+  };
+}
+async function generateManifest(){
+  // reveal conditional fields
+  document.getElementById("b-pooler-n-wrap").style.display =
+    document.getElementById("b-pooler").checked ? "flex" : "none";
+  document.getElementById("b-backup-fields").style.display =
+    document.getElementById("b-backups").checked ? "grid" : "none";
+  document.getElementById("b-schedule-cron-wrap").style.display =
+    document.getElementById("b-schedule").checked ? "flex" : "none";
+  try{
+    const r = await fetch("/api/manifest", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify(builderOpts())});
+    const j = await r.json();
+    MANIFEST = j.ok ? j.manifest : ("# error: "+j.error);
+  }catch(e){ MANIFEST = "# error: "+e; }
+  document.getElementById("manifest").textContent = MANIFEST;
+}
+function copyManifest(){
+  navigator.clipboard.writeText(MANIFEST).then(
+    ()=>{ document.getElementById("b-hint").textContent = "copied to clipboard ✓"; },
+    ()=>{ document.getElementById("b-hint").textContent = "copy failed — select the text"; });
+}
+function downloadManifest(){
+  const name = document.getElementById("b-name").value || "cluster";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([MANIFEST], {type:"text/yaml"}));
+  a.download = `${name}.yaml`; a.click(); URL.revokeObjectURL(a.href);
+}
+document.addEventListener("input", e=>{ if(e.target.id && e.target.id.startsWith("b-")) generateManifest(); });
+document.addEventListener("change", e=>{ if(e.target.id && e.target.id.startsWith("b-")) generateManifest(); });
 
 const es = new EventSource("/api/stream");
 es.onmessage = e => {

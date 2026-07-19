@@ -1,0 +1,4 @@
+  postgresql:
+    synchronous:
+      method: ${method}
+      number: ${number}

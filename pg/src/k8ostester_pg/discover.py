@@ -544,7 +544,12 @@ def _instances(k8s: ClusterClient, namespace: str, name: str) -> list[dict]:
 
 
 def _node_zone(k8s: ClusterClient, node: str) -> str:
-    labels = k8s.core.read_node(node).metadata.labels or {}
+    # nodes are cluster-scoped; a namespace-scoped RBAC role can't read them, so
+    # zone is best-effort (node placement still shows the node name either way)
+    try:
+        labels = k8s.core.read_node(node).metadata.labels or {}
+    except Exception:
+        return ""
     return labels.get("topology.kubernetes.io/zone", "")
 
 

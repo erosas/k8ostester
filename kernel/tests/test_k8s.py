@@ -132,12 +132,18 @@ def test_k8s_wait_workloads_ready_timeout_names_pending(mock_config, fake_clock)
         with pytest.raises(TimeoutError, match="not ready: deployment/d1"):
             k8s.wait_workloads_ready("ns", timeout=10)
 
+def _exec_stream(stdout="", stderr="", status='{"metadata":{},"status":"Success"}'):
+    resp = MagicMock()
+    resp.read_stdout.return_value = stdout
+    resp.read_stderr.return_value = stderr
+    resp.read_channel.return_value = status
+    return resp
+
+
 def test_k8s_exec_pod_fail(mock_config):
     k8s = ClusterClient()
-    with patch("shutil.which", return_value="/usr/bin/kubectl"), \
-         patch("subprocess.run") as mock_run:
-        mock_run.return_value.returncode = 1
-        mock_run.return_value.stderr = "exec failed"
+    resp = _exec_stream(stderr="boom", status='{"status":"Failure","reason":"NonZeroExitCode"}')
+    with patch("kubernetes.stream.stream", return_value=resp):
         with pytest.raises(K8osInfraError, match="exec in pod-1 failed"):
             k8s.exec_pod("ns", "pod-1", ["ls"])
 
@@ -210,11 +216,9 @@ def test_k8s_context_flag_propagates(mock_config, tmp_path):
          patch("subprocess.run") as mock_run:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = ""
-        k8s.apply_manifests(tmp_path, "ns")
-        k8s.exec_pod("ns", "pod", ["ls"])
-        for call in mock_run.call_args_list:
-            cmd = call[0][0]
-            assert "--context" in cmd and "my-ctx" in cmd
+        k8s.apply_manifests(tmp_path, "ns")   # kubectl apply still carries --context
+        cmd = mock_run.call_args[0][0]
+        assert "--context" in cmd and "my-ctx" in cmd
 
 def test_k8s_wait_workloads_ready_statefulset_pending(mock_config, fake_clock):
     k8s = ClusterClient()
@@ -232,14 +236,12 @@ def test_k8s_wait_workloads_ready_statefulset_pending(mock_config, fake_clock):
 
 def test_k8s_exec_pod_success(mock_config):
     k8s = ClusterClient()
-    with patch("shutil.which", return_value="/usr/bin/kubectl"), \
-         patch("subprocess.run") as mock_run:
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = "file.txt\n"
+    resp = _exec_stream(stdout="file.txt\n")
+    with patch("kubernetes.stream.stream", return_value=resp) as mock_stream:
         assert k8s.exec_pod("ns", "pod-1", ["ls"], container="main") == "file.txt\n"
-        cmd = mock_run.call_args[0][0]
-        assert cmd[-2:] == ["--", "ls"]
-        assert "-c" in cmd and "main" in cmd
+        # the command + container go to the exec API, not a kubectl subprocess
+        assert mock_stream.call_args.kwargs["command"] == ["ls"]
+        assert mock_stream.call_args.kwargs["container"] == "main"
 
 def test_k8s_api_accessors(mock_config):
     k8s = ClusterClient()

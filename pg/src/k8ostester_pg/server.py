@@ -19,7 +19,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from k8ostester_kernel.control import capabilities
-from k8ostester_kernel.k8s import ClusterClient
+from k8ostester_kernel.k8s import (
+    IN_CLUSTER,
+    ClusterClient,
+    in_cluster_namespace,
+    running_in_cluster,
+)
 from kubernetes import config
 
 from k8ostester_pg import builder, discover, execute
@@ -277,12 +282,24 @@ def main() -> int:
     ap.add_argument("--cluster", default="", help="pre-select this cluster (with --namespace)")
     ap.add_argument("--target", default="", help="a newer PG image/version to offer as an upgrade")
     ap.add_argument("--port", type=int, default=8700)
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="bind address (default localhost; a pod needs 0.0.0.0)")
     args = ap.parse_args()
 
-    console = Console(args.context, args.namespace, args.cluster, args.target)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), _handler(console))
-    where = f"{args.namespace}/{args.cluster}" if args.cluster else "pick a cluster in the UI"
-    print(f"console → http://127.0.0.1:{args.port}   ({where})")
+    context, namespace = args.context, args.namespace
+    # deployed in a pod: use the ServiceAccount and, by default, scope the picker
+    # to (and bind for) the cluster it runs in
+    in_pod = not context and running_in_cluster()
+    if in_pod:
+        context = IN_CLUSTER
+        namespace = namespace or in_cluster_namespace()
+    host = args.host if not in_pod else "0.0.0.0"   # reachable via the Service
+
+    console = Console(context, namespace, args.cluster, args.target)
+    server = ThreadingHTTPServer((host, args.port), _handler(console))
+    where = f"{namespace}/{args.cluster}" if args.cluster else "pick a cluster in the UI"
+    mode = "in-cluster ServiceAccount" if in_pod else "kubeconfig"
+    print(f"console → http://{host}:{args.port}   ({mode}; {where})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

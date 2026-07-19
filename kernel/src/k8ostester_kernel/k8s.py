@@ -1,7 +1,10 @@
-"""Kubernetes access for a chosen kubeconfig context.
+"""Kubernetes access for a chosen kubeconfig context — or the in-cluster
+ServiceAccount when running as a pod.
 
 Everything in the framework talks to the cluster through a ClusterClient so that
-experiments can target any context (local or remote) without global state.
+experiments can target any context (local or remote) without global state. The
+same client works laptop-side (a kubeconfig context) and deployed in-cluster (the
+mounted ServiceAccount token) — pass the ``IN_CLUSTER`` sentinel for the latter.
 Manifest application shells out to kubectl (server-side apply handles arbitrary
 kinds, including CRs, without us re-implementing apply semantics).
 """
@@ -21,6 +24,23 @@ from kubernetes import client, config
 from k8ostester_kernel.exceptions import K8osInfraError
 
 T = TypeVar("T")
+
+# sentinel context meaning "use the pod's mounted ServiceAccount", not a kubeconfig
+IN_CLUSTER = "in-cluster"
+_SA_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+
+
+def running_in_cluster() -> bool:
+    """True when this process is a pod with a mounted ServiceAccount token."""
+    return (_SA_DIR / "token").exists()
+
+
+def in_cluster_namespace() -> str:
+    """The namespace of the pod's ServiceAccount ("" if not in a cluster)."""
+    try:
+        return (_SA_DIR / "namespace").read_text().strip()
+    except OSError:
+        return ""
 
 
 def wait_until(
@@ -49,7 +69,11 @@ def wait_until(
 class ClusterClient:
     def __init__(self, context: str | None = None) -> None:
         self.context = context
-        self._api_client = config.new_client_from_config(context=context)
+        if context == IN_CLUSTER:
+            config.load_incluster_config()      # the pod's mounted SA token + CA
+            self._api_client = client.ApiClient()
+        else:
+            self._api_client = config.new_client_from_config(context=context)
 
     @cached_property
     def core(self) -> client.CoreV1Api:
@@ -181,20 +205,29 @@ class ClusterClient:
         container: str | None = None,
         timeout: int = 120,
     ) -> str:
-        """Run a command in a pod via kubectl exec; returns stdout."""
-        kubectl = self._check_kubectl()
-        cmd = [kubectl, "exec", "-n", namespace, pod]
-        if self.context:
-            cmd += ["--context", self.context]
+        """Run a command in a pod and return its stdout.
+
+        Uses the API exec stream (not ``kubectl exec``), so it authenticates with
+        whatever this client holds — a kubeconfig context laptop-side, or the
+        mounted ServiceAccount when deployed in-cluster — and needs no kubectl in
+        the image. Non-zero exit is reported via the exec error channel.
+        """
+        from kubernetes.stream import stream
+        from kubernetes.stream.ws_client import ERROR_CHANNEL
+        kwargs = {"command": command, "stderr": True, "stdin": False,
+                  "stdout": True, "tty": False, "_preload_content": False}
         if container:
-            cmd += ["-c", container]
-        cmd += ["--", *command]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode != 0:
+            kwargs["container"] = container
+        resp = stream(self.core.connect_get_namespaced_pod_exec, pod, namespace, **kwargs)
+        resp.run_forever(timeout=timeout)
+        out, err = resp.read_stdout(), resp.read_stderr()
+        status = resp.read_channel(ERROR_CHANNEL)
+        resp.close()
+        # the error channel carries a Status object; anything but Success is a fail
+        if status and '"status":"Success"' not in status.replace(" ", ""):
             raise K8osInfraError(
-                f"exec in {pod} failed: {' '.join(command)}\n{result.stderr.strip()}"
-            )
-        return result.stdout
+                f"exec in {pod} failed: {' '.join(command)}\n{(err or status).strip()}")
+        return out
 
     def pod_logs(self, namespace: str, pod: str, container: str | None = None) -> str:
         # _preload_content=False + explicit decode: the client otherwise hands

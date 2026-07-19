@@ -1,0 +1,141 @@
+# Shared, PERSISTENT Prometheus for the k8ostester console. Installed ONCE per
+# environment (namespace k8os-console) — it outlives individual runs so metrics
+# from different runs coexist and can be compared. It scrapes pods across ALL
+# namespaces (hence a ClusterRole, not the per-run Role the testbed uses), and
+# relabels each series with `experiment` and `run` so Grafana can compare them.
+#
+# A run makes its workloads discoverable by labelling their pods:
+#     k8ostester.io/experiment: <experiment-name>
+# `run` is derived from the pod's namespace (each run gets its own namespace).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8os-console
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: k8os-console
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8os-console-prometheus
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, endpoints, nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8os-console-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8os-console-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: k8os-console
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: k8os-console
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+    scrape_configs:
+      # app-perspective metrics — any pod that exposes :8000 and is labelled
+      # with an experiment. `experiment` + `run` are relabeled onto every series.
+      - job_name: app
+        kubernetes_sd_configs: [{role: pod}]        # ALL namespaces
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: dummy-app
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: $1:8000
+          - source_labels: [__meta_kubernetes_pod_label_k8ostester_io_experiment]
+            target_label: experiment
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: run
+      # CNPG DB metrics (:9187) — same experiment/run labels.
+      - job_name: cnpg
+        kubernetes_sd_configs: [{role: pod}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+            action: keep
+            regex: .+
+          - source_labels: [__meta_kubernetes_pod_ip]
+            target_label: __address__
+            replacement: $1:9187
+          - source_labels: [__meta_kubernetes_pod_label_k8ostester_io_experiment]
+            target_label: experiment
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: run
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: instance
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: k8os-console
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: k8os-console
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate            # single PVC, RWO
+  selector:
+    matchLabels: {app: prometheus}
+  template:
+    metadata:
+      labels: {app: prometheus}
+    spec:
+      serviceAccountName: prometheus
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.1.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=30d   # keep runs long enough to compare
+          ports:
+            - {containerPort: 9090, name: web}
+          volumeMounts:
+            - {name: config, mountPath: /etc/prometheus}
+            - {name: data, mountPath: /prometheus}
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits: {cpu: "2", memory: "2Gi"}
+      volumes:
+        - name: config
+          configMap: {name: prometheus-config}
+        - name: data
+          persistentVolumeClaim: {claimName: prometheus-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: k8os-console
+spec:
+  selector: {app: prometheus}
+  ports:
+    - {name: web, port: 9090, targetPort: 9090}

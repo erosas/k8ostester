@@ -195,6 +195,19 @@ class Console:
         primary = cluster.get("status", {}).get("currentPrimary", "")
         return discover.wal_segments_since(k8s, sel["namespace"], from_wal, primary)
 
+    def image_tags(self) -> dict:
+        """The selected cluster's current image + upgrade-candidate tags from its
+        registry (best-effort; empty tags => the modal falls back to free text)."""
+        from k8ostester_pg import registry
+        sel = self._sel
+        if not sel:
+            return {}
+        cluster = self.client(sel["context"]).custom.get_namespaced_custom_object(
+            discover.CNPG_GROUP, discover.CNPG_VERSION, sel["namespace"], "clusters", sel["name"])
+        image = cluster.get("spec", {}).get("imageName", "")
+        return {"image": image, "current": discover.pg_version(image),
+                "tags": registry.upgrade_tags(image)}
+
     def secret(self, name: str) -> dict:
         """Decode a basic-auth secret's username/password — ON DEMAND only (never
         streamed in the snapshot), for the Connect sheet's copy-password button."""
@@ -230,6 +243,11 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self._send(200, "text/html; charset=utf-8", SPA.encode())
             elif self.path == "/api/contexts":
                 self._json(console.contexts_info())
+            elif self.path == "/api/image-tags":
+                try:
+                    self._json({"ok": True, **console.image_tags()})
+                except Exception as e:
+                    self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
             elif self.path.startswith("/api/secret"):
                 from urllib.parse import parse_qs, urlparse
                 name = parse_qs(urlparse(self.path).query).get("name", [""])[0]

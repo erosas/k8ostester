@@ -13,28 +13,20 @@ def snap(**over):
     return {**base, **over}
 
 
-def test_kill_primary_calls_the_kernel_primitive():
+def test_kill_pod_defaults_to_primary_and_honours_a_target():
     k8s = MagicMock()
-    msg = execute(k8s, "ns", "kill-primary", snap())
-    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-1"
-    assert "pg-1" in msg
+    execute(k8s, "ns", "kill-pod", snap())
+    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-1"   # default = primary
+    execute(k8s, "ns", "kill-pod", snap(), params={"pod": "pg-3"})
+    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-3"   # explicit replica
+    execute(k8s, "ns", "kill-pod", snap(), params={"pod": "nope"})
+    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-1"   # unknown -> primary
 
 
-def test_partition_and_kill_replica_wired():
+def test_partition_pod_targets_any_instance():
     k8s = MagicMock()
-    execute(k8s, "ns", "partition-primary", snap())
+    execute(k8s, "ns", "partition-pod", snap(), params={"pod": "pg-2"})
     k8s.networking.create_namespaced_network_policy.assert_called_once()
-    execute(k8s, "ns", "kill-replica", snap())
-    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-2"   # first by default
-
-
-def test_kill_replica_honours_an_explicit_pod():
-    k8s = MagicMock()
-    execute(k8s, "ns", "kill-replica", snap(), params={"pod": "pg-3"})
-    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-3"
-    # an unknown pod falls back to the first replica (can't kill what isn't a replica)
-    execute(k8s, "ns", "kill-replica", snap(), params={"pod": "nope"})
-    assert k8s.core.delete_namespaced_pod.call_args.args[0] == "pg-2"
 
 
 def test_backup_creates_a_backup_cr():
@@ -45,18 +37,19 @@ def test_backup_creates_a_backup_cr():
 
 
 def test_execute_gates_on_the_capability():
-    # a fault in flight disables kill-primary → execute refuses, no primitive fires
+    # a fault in flight disables kill-pod → execute refuses, no primitive fires
     k8s = MagicMock()
     with pytest.raises(ActionDenied):
-        execute(k8s, "ns", "kill-primary", snap(fault_in_flight=True))
+        execute(k8s, "ns", "kill-pod", snap(fault_in_flight=True))
     k8s.core.delete_namespaced_pod.assert_not_called()
 
 
 @patch("k8ostester_pg.execute.ops")
 def test_ops_actions_dispatch_to_the_ops_module(mock_ops):
     k8s = MagicMock()
-    execute(k8s, "ns", "upgrade", snap(), name="orders")
-    mock_ops.minor_upgrade.assert_called_once_with(k8s, "ns", "16.6", "orders")
+    # target comes from the modal (params); falls back to the snapshot's suggestion
+    execute(k8s, "ns", "upgrade", snap(), name="orders", params={"target": "16.8"})
+    mock_ops.minor_upgrade.assert_called_once_with(k8s, "ns", "16.8", "orders")
     execute(k8s, "ns", "rotate", snap(), name="orders", params={"password": "s3cr3t"})
     mock_ops.rotate_credentials.assert_called_once_with(k8s, "ns", "orders", "s3cr3t")
     execute(k8s, "ns", "restore", snap(), name="orders")

@@ -18,11 +18,11 @@ def test_spa_is_a_self_contained_page_with_the_hooks():
 @patch("k8ostester_pg.server.discover.snapshot", return_value={"primary": "pg-1"})
 def test_console_act_discovers_then_executes(snap, ex, _cc, _ctx):
     c = server.Console(context="ctx", namespace="ns", cluster="orders", start=False)
-    msg = c.act("kill-primary")
+    msg = c.act("kill-pod")
     assert msg == "killed primary pg-1"
     snap.assert_called_once()                       # fresh discovery before acting
     ex.assert_called_once()
-    assert ex.call_args.args[2] == "kill-primary"   # dispatched the right action
+    assert ex.call_args.args[2] == "kill-pod"   # dispatched the right action
     assert ex.call_args.kwargs["name"] == "orders"  # against the selected cluster
 
 
@@ -34,7 +34,7 @@ def test_console_state_serves_the_cached_snapshot(snap, _cc, _ctx):
     c.refresh()                                     # the timer would do this
     st = c.state()
     assert st["snapshot"]["primary"] == "pg-1"
-    assert any(cap["id"] == "kill-primary" for cap in st["capabilities"])
+    assert any(cap["id"] == "kill-pod" for cap in st["capabilities"])
     snap.assert_called_once()                       # discovery runs once, not per read
     c.state()
     c.state()

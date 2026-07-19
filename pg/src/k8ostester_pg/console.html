@@ -609,6 +609,35 @@ function openRotate(){
       <button class="go" style="background:var(--accent);border-color:var(--accent)" onclick="confirmRotate()">Rotate → ${esch(idle)}</button></div>`);
 }
 
+/* ---- minor upgrade modal (target chosen at press time) ---- */
+async function openUpgrade(){
+  openSheet(`<h2>Minor upgrade</h2><div class="lede">discovering available versions…</div>`);
+  let info = {};
+  try{ info = await (await fetch("/api/image-tags")).json(); }catch(e){}
+  const current = info.current || SNAP.version || "";
+  const repo = (info.image||"").split(":")[0];
+  const tags = info.tags || [];
+  const suggest = SNAP.target || current;
+  openSheet(`<h2>Minor upgrade</h2>
+    <div class="lede">Rolls the cluster to a new image tag — replicas first, then a switchover. Currently <b>${esch(current||"?")}</b>${repo?` · <span class="kv">${esch(repo)}</span>`:""}.</div>
+    <div class="sec"><h3>Target version / tag</h3>
+      <input id="up-tag" class="pwin" list="up-tags" spellcheck="false" value="${esch(suggest)}" placeholder="e.g. 16.6">
+      <datalist id="up-tags">${tags.map(t=>`<option value="${esch(t)}">`).join("")}</datalist>
+      <div class="kv" style="margin-top:8px">${tags.length
+        ? `${tags.length} version tags found in the repo — pick one or type your own.`
+        : "couldn't list the registry (no egress / private repo) — type the target tag."}</div>
+    </div>
+    <div class="mbtns"><button data-close>Cancel</button>
+      <button class="go" onclick="confirmUpgrade()">Upgrade</button></div>`);
+}
+function confirmUpgrade(){
+  const t = document.getElementById("up-tag").value.trim();
+  if(!t){ return; }
+  closeSheet();
+  if(!confirm(`Upgrade to ${t} — rolls the cluster (replicas, then a switchover). Continue?`)) return;
+  post("upgrade", {target: t}, "Minor upgrade → "+t);
+}
+
 /* ---- unified fault picker (kill / partition, per node) ---- */
 function faultBtn(id, label, desc, enabled, params){
   return `<button class="fbtn"${enabled?"":" disabled"} data-fault="${id}" `+
@@ -619,13 +648,12 @@ function openFaultPicker(){
   const rows = (SNAP.instances||[]).map(i=>{
     const primary = i.role==="primary", b = syncBadge(i.sync_state);
     const meta = [primary?"PRIMARY":"REPLICA", i.zone||i.node||"", primary?"":(b.label||"")].filter(Boolean).join(" · ");
-    let btns;
-    if(primary){
-      btns = faultBtn("kill-primary","Kill pod","deletes the primary pod; CNPG fails over to a standby",cap["kill-primary"],{})
-           + faultBtn("partition-primary","Partition","network-isolates the primary; tests fencing + failover",cap["partition-primary"],{});
-    } else {
-      btns = faultBtn("kill-replica","Kill pod","deletes this replica pod; CNPG reschedules it",cap["kill-replica"],{pod:i.name});
-    }
+    const killDesc = primary ? "deletes the primary pod; CNPG fails over to a standby"
+                             : "deletes this replica pod; CNPG reschedules it";
+    const partDesc = primary ? "network-isolates the primary; tests fencing + failover"
+                             : "network-isolates this replica; tests isolation + catch-up";
+    const btns = faultBtn("kill-pod","Kill pod",killDesc,cap["kill-pod"],{pod:i.name})
+               + faultBtn("partition-pod","Partition",partDesc,cap["partition-pod"],{pod:i.name});
     return `<div class="frow"><div class="ftgt"><b>${esch(i.name)}</b><span>${esch(meta)}</span></div>`+
       `<div class="fbtns">${btns}</div></div>`;
   }).join("");
@@ -740,9 +768,14 @@ async function post(id, params, label){
 }
 
 function act(a){
-  if(a.id === "rotate"){ openRotate(); return; }   // type-or-generate a password
-  if(a.id === "restore"){ openModal(); return; }   // PITR gets its own interface
-  if(a.destructive && !confirm(`${a.label} — this mutates a real cluster. Continue?`)) return;
+  if(a.id === "rotate"){ openRotate(); return; }    // type-or-generate a password
+  if(a.id === "restore"){ openModal(); return; }    // PITR gets its own interface
+  if(a.id === "upgrade"){ openUpgrade(); return; }  // pick the target image/version
+  // every other button confirms before it mutates the cluster
+  const msg = a.id === "backup"
+    ? "Take a base backup to the object store now?"
+    : a.destructive ? `${a.label} — this mutates a real cluster. Continue?` : `${a.label}?`;
+  if(!confirm(msg)) return;
   post(a.id, null, a.label);
 }
 

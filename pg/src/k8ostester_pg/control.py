@@ -45,24 +45,20 @@ CNPG_ACTIONS: list[Action] = [
            lambda s: s.get("backups_completed", 0) > 0 and s.get("pitr_window")
            and not s.get("busy"),
            destructive=True),
-    # Minor upgrade is only offered when the operator supplied a target image
-    # (server --target). Without one it's absent, not a dead disabled tile — the
-    # control stays generic: "give me an upgrade image and I'll expose the button".
+    # Minor upgrade: always available when healthy; the target image is chosen at
+    # press time (no --target flag needed), so there's nothing to gate on beyond
+    # "not already upgrading / busy".
     Action("upgrade", "Minor upgrade", "chaos",
-           lambda s: s.get("ready") and s.get("version") != s.get("target")
-           and not s.get("upgrading") and not s.get("busy"),
-           destructive=True,
-           available=lambda s: bool(s.get("target"))),
-    Action("kill-primary", "Kill primary", "chaos",
-           lambda s: bool(s.get("primary")) and not s.get("fault_in_flight"),
+           lambda s: s.get("ready") and not s.get("upgrading") and not s.get("busy"),
            destructive=True),
-    Action("partition-primary", "Partition primary", "chaos",
-           lambda s: bool(s.get("primary")) and not s.get("fault_in_flight"),
+    # Generic per-pod faults: the fault picker passes the target pod, so one
+    # action each covers the primary AND any replica (kill or partition either).
+    Action("kill-pod", "Kill a pod", "chaos",
+           lambda s: bool(s.get("primary") or s.get("replicas"))
+           and not s.get("fault_in_flight"),
            destructive=True),
-    Action("kill-replica", "Kill a replica", "chaos",
-           lambda s: bool(s.get("replicas")) and not s.get("fault_in_flight"),
-           destructive=True),
-    Action("drain-zone", "Drain a zone", "chaos",
-           lambda s: len(s.get("zones") or []) >= 2 and not s.get("fault_in_flight"),
+    Action("partition-pod", "Partition a pod", "chaos",
+           lambda s: bool(s.get("primary") or s.get("replicas"))
+           and not s.get("fault_in_flight"),
            destructive=True),
 ]

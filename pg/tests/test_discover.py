@@ -65,7 +65,7 @@ def test_busy_locks_ops_but_not_chaos():
     assert s["busy"] and s["busy_reason"] == "base backup running"
     caps = {c["id"]: c["enabled"] for c in capabilities(CNPG_ACTIONS, s)}
     assert caps["backup"] is False and caps["rotate"] is False   # mutating ops locked
-    assert caps["kill-primary"] is True                          # chaos stays available
+    assert caps["kill-pod"] is True                          # chaos stays available
 
 
 def test_snapshot_drives_the_capability_map_end_to_end():
@@ -75,7 +75,7 @@ def test_snapshot_drives_the_capability_map_end_to_end():
                        target="postgresql:16.6")
     caps = {c["id"]: c["enabled"] for c in capabilities(CNPG_ACTIONS, s)}
     assert caps["upgrade"] is True and caps["rotate"] is True
-    assert caps["kill-primary"] is False   # a partition fault is in flight → interlock
+    assert caps["kill-pod"] is False   # a partition fault is in flight → interlock
 
 
 def test_credentials_active_role_from_the_cluster_annotation():

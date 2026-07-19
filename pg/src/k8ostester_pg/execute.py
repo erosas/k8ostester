@@ -35,24 +35,30 @@ def execute(k8s: ClusterClient, namespace: str, action_id: str, snapshot: dict,
     return handler(k8s, namespace, snapshot, params or {}, name)
 
 
-def _kill_primary(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
-    chaos.kill_pod(k8s, ns, s["primary"])
-    return f"killed primary {s['primary']}"
-
-
-def _partition_primary(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
-    chaos.partition_pod(k8s, ns, s["primary"])
-    return f"partitioned primary {s['primary']}"
-
-
-def _kill_replica(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
-    replicas = s.get("replicas", [])
-    # honour an explicit choice if it's actually a current replica, else the first
-    pod = p.get("pod") if p.get("pod") in replicas else (replicas[0] if replicas else "")
+def _target_pod(s: dict, p: dict) -> str:
+    """The fault target: the requested pod if it's a real instance, else default
+    to the primary (so a fault always hits something valid)."""
+    valid = {s.get("primary"), *(s.get("replicas") or [])}
+    valid.discard("")
+    valid.discard(None)
+    pod = p.get("pod")
+    if pod not in valid:
+        pod = s.get("primary") or next(iter(s.get("replicas") or []), "")
     if not pod:
-        raise ActionDenied("no replica to kill")
+        raise ActionDenied("no target pod")
+    return pod
+
+
+def _kill_pod(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
+    pod = _target_pod(s, p)
     chaos.kill_pod(k8s, ns, pod)
-    return f"killed replica {pod}"
+    return f"killed pod {pod}"
+
+
+def _partition_pod(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
+    pod = _target_pod(s, p)
+    chaos.partition_pod(k8s, ns, pod)
+    return f"partitioned pod {pod}"
 
 
 def _backup(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
@@ -67,13 +73,19 @@ def _backup(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
     return f"requested base backup {backup}"
 
 
+def _upgrade(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
+    target = p.get("target") or s.get("target", "")   # chosen in the modal at press time
+    if not target:
+        raise ActionDenied("no target image/version specified")
+    return ops.minor_upgrade(k8s, ns, target, name)
+
+
 _HANDLERS = {
-    "kill-primary": _kill_primary,
-    "partition-primary": _partition_primary,
-    "kill-replica": _kill_replica,
+    "kill-pod": _kill_pod,
+    "partition-pod": _partition_pod,
     "backup": _backup,
     "rotate": lambda k8s, ns, s, p, name: ops.rotate_credentials(
         k8s, ns, name, p.get("password", "")),
-    "upgrade": lambda k8s, ns, s, p, name: ops.minor_upgrade(k8s, ns, s["target"], name),
+    "upgrade": _upgrade,
     "restore": lambda k8s, ns, s, p, name: ops.restore(k8s, ns, p.get("target_time", ""), name),
 }

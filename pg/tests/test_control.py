@@ -19,19 +19,15 @@ def caps(state):
 def test_healthy_cluster_enables_the_expected_actions():
     c = caps(snap())
     assert c["backup"] and c["restore"] and c["rotate"] and c["upgrade"]
-    assert c["kill-primary"] and c["partition-primary"] and c["kill-replica"] and c["drain-zone"]
+    assert c["kill-pod"] and c["partition-pod"]   # generic per-pod faults
 
 
-def test_upgrade_self_disables_after_reaching_target():
-    # the gotcha: it disables because current == target, not a used-flag
-    assert caps(snap(version="16.6"))["upgrade"] is False
-    assert caps(snap(upgrading=True))["upgrade"] is False        # not while rolling
-
-
-def test_upgrade_absent_unless_a_target_image_is_supplied():
-    # generic gate: no --target -> the control isn't offered at all (not a dead tile)
-    assert "upgrade" not in caps(snap(target=""))
-    assert "upgrade" in caps(snap())
+def test_upgrade_available_when_healthy_target_chosen_at_press_time():
+    # no --target gate anymore — the modal picks the image; only rolling/busy block it
+    assert caps(snap())["upgrade"] is True
+    assert caps(snap(target=""))["upgrade"] is True             # no flag needed
+    assert caps(snap(upgrading=True))["upgrade"] is False       # not while rolling
+    assert caps(snap(busy=True))["upgrade"] is False
 
 
 def test_rotate_and_backup_stay_multi_use():
@@ -45,10 +41,10 @@ def test_restore_needs_a_backup_and_window():
     assert caps(snap(pitr_window=False))["restore"] is False
 
 
-def test_chaos_gated_by_target_and_interlock():
-    assert caps(snap(fault_in_flight=True))["kill-primary"] is False   # interlock
-    assert caps(snap(replicas=[]))["kill-replica"] is False            # no target
-    assert caps(snap(zones=["a"]))["drain-zone"] is False              # single-AZ
+def test_faults_gated_by_the_interlock():
+    assert caps(snap(fault_in_flight=True))["kill-pod"] is False        # interlock
+    assert caps(snap(fault_in_flight=True))["partition-pod"] is False
+    assert caps(snap(primary="", replicas=[]))["kill-pod"] is False     # no target
 
 
 def test_rotate_needs_blue_green_roles():

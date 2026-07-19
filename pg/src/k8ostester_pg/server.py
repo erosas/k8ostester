@@ -66,10 +66,11 @@ class Console:
     """
 
     def __init__(self, context: str | None = None, namespace: str = "",
-                 cluster: str = "", target: str = "",
+                 cluster: str = "", target: str = "", grafana: str = "",
                  interval: float = 2.0, heavy_interval: float = 20.0,
                  start: bool = True):
         self.target = target
+        self.grafana = grafana.rstrip("/")     # base URL to deep-link the dashboard
         self._only_context = context           # restrict the picker to one context
         self._scope_ns = namespace             # namespace fallback for cluster listing
         self._interval = interval
@@ -122,7 +123,8 @@ class Console:
     # --- inventory + selection --------------------------------------------
     def contexts_info(self) -> dict:
         return {"contexts": self._contexts, "current": self._current,
-                "selected": self._sel, "locked": bool(self._only_context)}
+                "selected": self._sel, "locked": bool(self._only_context),
+                "grafana": self.grafana}
 
     def list_clusters(self, context: str | None) -> list[dict]:
         try:
@@ -352,6 +354,8 @@ def main() -> int:
     ap.add_argument("--namespace", default="", help="pre-select / scope to this namespace")
     ap.add_argument("--cluster", default="", help="pre-select this cluster (with --namespace)")
     ap.add_argument("--target", default="", help="a newer PG image/version to offer as an upgrade")
+    ap.add_argument("--grafana", default="",
+                    help="Grafana base URL — Operate then deep-links each cluster's dashboard")
     ap.add_argument("--port", type=int, default=8700)
     ap.add_argument("--host", default="127.0.0.1",
                     help="bind address (default localhost; a pod needs 0.0.0.0)")
@@ -366,7 +370,7 @@ def main() -> int:
         namespace = namespace or in_cluster_namespace()
     host = args.host if not in_pod else "0.0.0.0"   # reachable via the Service
 
-    console = Console(context, namespace, args.cluster, args.target)
+    console = Console(context, namespace, args.cluster, args.target, args.grafana)
     server = ThreadingHTTPServer((host, args.port), _handler(console))
     where = f"{namespace}/{args.cluster}" if args.cluster else "pick a cluster in the UI"
     mode = "in-cluster ServiceAccount" if in_pod else "kubeconfig"

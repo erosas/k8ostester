@@ -31,10 +31,16 @@
   .dot{width:6px;height:6px;border-radius:1px;background:var(--dim)}
   .dot.live{background:var(--ok)}
   .dot.stale{background:var(--warn)}
-  .meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin:14px 0 22px;
-    display:flex;gap:8px 10px;flex-wrap:wrap}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--muted);margin:16px 0 8px;
+    display:flex;gap:8px 10px;flex-wrap:wrap;align-items:center;
+    padding-bottom:16px;border-bottom:1px solid var(--border)}
   .chip{border:1px solid var(--border);background:var(--panel2);padding:5px 10px;border-radius:6px}
   .chip b{color:var(--ink)}
+  .chip .dotc{display:inline-block;width:6px;height:6px;border-radius:1px;margin-right:6px;
+    background:var(--dim);vertical-align:1px}
+  .chip .dotc.ok{background:var(--ok)} .chip .dotc.bad{background:var(--crit)}
+  .chip.link{color:var(--accent);text-decoration:none;margin-left:auto}
+  .chip.link:hover{border-color:var(--accent)}
   .err{background:#2a1416;border:1px solid #5a2327;color:#f2a1a4;padding:10px 14px;
     border-radius:8px;font-family:var(--mono);font-size:12.5px;margin-bottom:18px;display:none}
   /* context + cluster pickers */
@@ -312,6 +318,7 @@
   </div>
 
   <div id="cluster">
+    <div class="alabel" style="margin-top:16px">Topology</div>
     <div class="scada" id="scada"></div>
 
     <div class="recovery" id="recovery" style="display:none">
@@ -457,7 +464,7 @@
 </div>
 
 <script>
-let TAB = "operate", CAPS = [], SNAP = {}, UNSEL = true;
+let TAB = "operate", CAPS = [], SNAP = {}, UNSEL = true, GRAFANA = "";
 
 function applyLayout(){
   const isBuild = TAB==="builder";
@@ -478,6 +485,7 @@ function pick(t){
 async function loadContexts(){
   try{
     const j = await (await fetch("/api/contexts")).json();
+    GRAFANA = j.grafana || "";
     const sel = document.getElementById("ctx-sel");
     const want = (j.selected && j.selected.context) || j.current;
     sel.innerHTML = (j.contexts.length ? j.contexts : [j.current||""]).map(c=>
@@ -1270,16 +1278,16 @@ function render(data){
   applyLayout();
   document.getElementById("title").textContent = `${SNAP.cluster||"CNPG"} · ${SNAP.namespace||""}`;
   document.getElementById("meta").innerHTML = [
-    `<span class="chip">state <b>${SNAP.ready?"healthy":"degraded"}</b></span>`,
+    `<span class="chip"><i class="dotc ${SNAP.ready?'ok':'bad'}"></i>state <b>${SNAP.ready?"healthy":"degraded"}</b></span>`,
     `<span class="chip">version <b>${SNAP.version||"?"}</b>${SNAP.target?` → ${SNAP.target}`:""}</span>`,
     `<span class="chip">primary <b>${SNAP.primary||"—"}</b></span>`,
-    `<span class="chip">zones <b>${(SNAP.zones||[]).join(", ")||"—"}</b></span>`,
     `<span class="chip">sync <b>${(SNAP.sync_policy||{}).label||"?"}</b></span>`,
     connChip(SNAP.connections),
     slotChip(SNAP.slots),
     `<span class="chip">backups <b>${SNAP.backups_completed||0}</b></span>`,
     SNAP.fault_in_flight?`<span class="chip" style="color:var(--warn)">fault in flight</span>`:"",
-  ].join("");
+    (GRAFANA && SNAP.cluster) ? `<a class="chip link" href="${GRAFANA}/d/k8ost-${esch(SNAP.cluster)}" target="_blank" rel="noopener">metrics ↗</a>` : "",
+  ].filter(Boolean).join("");
   const lock = document.getElementById("lock");
   if(SNAP.busy){ lock.style.display="flex"; lock.textContent = "🔒 " + SNAP.busy_reason +
       " — mutating operations are locked until it finishes"; }

@@ -1,8 +1,9 @@
-# Publish the two images we own, multi-arch (amd64 + arm64), on a version tag.
+# Publish the images we own, multi-arch (amd64 + arm64), on a version tag.
 #
 #   <namespace>/k8os-loadgen  — the app-perspective load generator (python + psycopg)
+#   <namespace>/k8os-console  — the remote-control console, deployable in-cluster
 #
-# Both get :<version> (from the tag, minus the leading v) and :latest.
+# Each gets :<version> (from the tag, minus the leading v) and :latest.
 #
 # External users behind an Artifactory/Nexus proxy mirror these two paths and
 # point the framework at the mirror — see README "Running through a mirror".
@@ -33,6 +34,9 @@ jobs:
           - name: k8os-loadgen
             context: pg/loadgen
             dockerfile: pg/loadgen/loadgen.Dockerfile
+          - name: k8os-console          # the remote-control console, deployable in-cluster
+            context: .                   # repo root: needs both workspace members
+            dockerfile: pg/console.Dockerfile
     steps:
       - uses: actions/checkout@v7
 

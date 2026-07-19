@@ -165,7 +165,27 @@ kubeconfig ─▶ Console (server.py) ─ shared 2s + 20s timers ─▶ snapshot
   `GET /api/clusters?context=`, `POST /api/action`, `POST /api/select`,
   `POST /api/manifest`, `POST /api/wal-count`.
 
-## Not yet
+## Deploy in-cluster (control plane)
 
-Auth + TLS (it binds localhost only today), an audit log of actions, and
-RBAC-aware gating — the "harden for real use" track.
+The same image runs laptop-side (kubeconfig) or **in the cluster** as a control
+plane. In a pod it uses the mounted **ServiceAccount** (`config.load_incluster_config`)
+and execs into pods over the **API stream** (no kubectl needed). Deploy it:
+
+```
+kubectl -n <ns> apply -f pg/deploy/console.yaml          # SA + Role + Deployment + ClusterIP Service
+kubectl -n <ns> port-forward svc/k8ost-console 8700:8700 # port-forward IS the auth gate (needs RBAC)
+```
+
+- **RBAC is the blast radius.** The console can do exactly what `pg/deploy/console.yaml`'s
+  Role grants — a readable, revocable YAML boundary. `pg/deploy/rbac-clusterwide.yaml`
+  is the fleet-wide (ClusterRole) variant, which also reads nodes for zone info.
+  Note `pods/exec` needs **both `get` and `create`** (the websocket-stream exec is a GET).
+- **No ingress.** The Service is ClusterIP; the only way in is `port-forward`,
+  which already requires Kubernetes RBAC — so k8s authn/authz is the login.
+- **Audit** comes largely from the cluster's API audit log (every mutation is
+  attributed to the ServiceAccount) plus the console's own Activity record.
+
+Exposing it via Ingress/LoadBalancer instead of port-forward means adding auth
+(token/OIDC) + TLS — the remaining "harden for network exposure" track, along
+with RBAC-aware gating (grey out actions the SA can't perform) and typed
+confirmations for the most destructive break-glass ops.

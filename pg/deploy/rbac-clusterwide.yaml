@@ -1,0 +1,60 @@
+# Cluster-wide RBAC variant: the console can discover and operate CNPG clusters in
+# EVERY namespace, and read nodes (so zone/placement info is complete). Use this
+# instead of the Role/RoleBinding in console.yaml when you want one console to
+# control the whole fleet:
+#
+#   kubectl -n <ns> apply -f console.yaml            # SA + Deployment + Service
+#   kubectl delete role,rolebinding k8ost-console -n <ns>   # drop the namespaced grant
+#   kubectl apply -f rbac-clusterwide.yaml           # cluster-wide grant instead
+#
+# This is a broad, powerful grant (patch clusters + exec into pods + read/patch
+# secrets across all namespaces). Scope deliberately: prefer the namespaced Role
+# unless you truly need fleet-wide reach. Set the SA namespace below to where you
+# deployed the console.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8ost-console
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "patch", "create"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["scheduledbackups", "poolers"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]   # get = websocket-stream exec; create = SPDY exec
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "create", "delete"]
+  # cluster-scoped: zone labels for topology/placement (best-effort otherwise)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8ost-console
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8ost-console
+subjects:
+  - kind: ServiceAccount
+    name: k8ost-console
+    namespace: default            # ← set to the namespace you deployed the console in

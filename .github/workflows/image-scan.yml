@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [k8os-loadgen]
+        image: [k8os-loadgen, k8os-console]
     steps:
       - uses: docker/login-action@v4
         with:

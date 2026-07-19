@@ -1,0 +1,108 @@
+# Deploy the remote-control console INTO a cluster as a namespace-scoped control
+# plane. Apply into the namespace whose CNPG clusters you want to operate:
+#
+#   kubectl -n <ns> apply -f console.yaml
+#   kubectl -n <ns> port-forward svc/k8ost-console 8700:8700
+#   # → http://127.0.0.1:8700   (port-forward is the auth gate: it needs RBAC)
+#
+# The Service is ClusterIP (no ingress), so the only way in is port-forward, which
+# already requires Kubernetes RBAC. The console can do EXACTLY what the Role below
+# grants — that RBAC is the blast radius. For fleet-wide control across namespaces,
+# use rbac-clusterwide.yaml instead (a ClusterRole + node read for zone info).
+#
+# Set the image to your published/mirrored console image before applying.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8ost-console
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8ost-console
+rules:
+  # discover + operate CNPG clusters (patch = upgrade/rotate annotation; create = PITR restore)
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "patch", "create"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["scheduledbackups", "poolers"]
+    verbs: ["get", "list"]
+  # topology + chaos: read pods, kill them, and run psql/df in them
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["get", "create"]   # get = websocket-stream exec; create = SPDY exec
+  # connection endpoints + rotation (patch the idle role's secret)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "patch"]
+  # partition-primary fault applies/removes a NetworkPolicy
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8ost-console
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k8ost-console
+subjects:
+  - kind: ServiceAccount
+    name: k8ost-console
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8ost-console
+  labels: {app: k8ost-console}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: k8ost-console}
+  template:
+    metadata:
+      labels: {app: k8ost-console}
+    spec:
+      serviceAccountName: k8ost-console
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: console
+          image: k8os-console:latest          # set to your published/mirrored image
+          args: ["--port", "8700"]             # in-cluster SA + own namespace auto-detected
+          ports:
+            - {containerPort: 8700, name: http}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: "1", memory: 256Mi}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8ost-console
+spec:
+  type: ClusterIP                              # no ingress — reach it via port-forward
+  selector: {app: k8ost-console}
+  ports:
+    - {port: 8700, targetPort: http, name: http}

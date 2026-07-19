@@ -8,20 +8,32 @@ kernel primitives, no framework abstraction. See
 pg/
   src/k8ostester_pg/
     slo.py        standard CNPG SLO checks (kernel SloChecks over Prometheus)
+    harness.py    shared provisioning (deploy ideal config, bucket, cluster helpers)
   experiments/    linear experiment scripts (the new model, replacing goals)
-    kill-primary/run.py
+    kill-primary/run.py    killing the primary breaches strict SLOs → FAIL
+    kill-replica/run.py    killing a replica is a non-event          → PASS
   testbed/        the production-readiness golden path (see testbed/README.md)
   tests/
 ```
 
 ## Experiments — the linear model
 
-`experiments/kill-primary/run.py` is the first experiment in the new model,
-replacing the old fault-timeline + goals engine. It reads top to bottom — deploy
-the ideal config, drive load, `chaos.kill_pod` the primary, verify failover — and
-the **kernel `Run` helper** assembles the verdict from inline verify-steps
-(correctness) + `slo.py` SLO range-queries over the run window. No generic
-runner, no goals evaluator; just a script + the kernel primitives.
+Each experiment reads top to bottom — deploy the ideal config, drive load, inject
+chaos, verify — and the **kernel `Run` helper** assembles the verdict from inline
+verify-steps (correctness) + `slo.py` SLO range-queries over the run window. No
+generic runner, no goals evaluator. `harness.py` holds the shared provisioning so
+each script stays thin:
+
+```python
+harness.deploy_ideal_config(k8s, NS, EXPERIMENT)   # config + app + bucket + healthy
+chaos.kill_pod(k8s, NS, primary)                    # kernel primitive
+run.verify("primary_moved", ...)                    # correctness
+verdict = run.verdict(fetch, default_checks(EXPERIMENT))   # + SLO queries
+```
+
+`kill-primary` and `kill-replica` are a matched pair: the verdict **discriminates**
+— a primary kill breaches the strict SLOs (FAIL), a replica kill is a non-event
+(PASS). Validated on a real cluster (kill-primary ran end to end on docker-desktop).
 
 ## What's here
 

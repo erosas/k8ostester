@@ -35,8 +35,8 @@ jobs:
             context: .
             dockerfile: k8ostester-core/Dockerfile
           - name: k8os-loadgen
-            context: k8ostester-core/src/k8ostester/technologies/postgres_cnpg
-            dockerfile: k8ostester-core/src/k8ostester/technologies/postgres_cnpg/loadgen.Dockerfile
+            context: pg/loadgen
+            dockerfile: pg/loadgen/loadgen.Dockerfile
     steps:
       - uses: actions/checkout@v7
 

@@ -36,9 +36,9 @@ class Console:
         snap = discover.snapshot(self.k8s, self.ns, target=self.target)
         return {"snapshot": snap, "capabilities": capabilities(CNPG_ACTIONS, snap)}
 
-    def act(self, action_id: str) -> str:
+    def act(self, action_id: str, params: dict | None = None) -> str:
         snap = discover.snapshot(self.k8s, self.ns, target=self.target)
-        return execute.execute(self.k8s, self.ns, action_id, snap)
+        return execute.execute(self.k8s, self.ns, action_id, snap, params)
 
 
 def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
@@ -82,7 +82,7 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
             n = int(self.headers.get("Content-Length", 0) or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
             try:
-                msg = console.act(body.get("id", ""))
+                msg = console.act(body.get("id", ""), body.get("params"))
                 out = {"ok": True, "message": msg}
             except Exception as e:
                 out = {"ok": False, "error": str(e).splitlines()[0][:200]}

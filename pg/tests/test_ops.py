@@ -38,7 +38,7 @@ def test_rotate_alters_idle_role_flips_selector_and_rolls():
 def test_restore_creates_a_uniquely_named_recovery_cluster():
     k8s = MagicMock()
     k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
-    ops.restore_latest(k8s, "ns")
+    ops.restore(k8s, "ns")
     body = k8s.custom.create_namespaced_custom_object.call_args.args[-1]
     assert body["kind"] == "Cluster" and body["metadata"]["name"].startswith("pg-restore-")
     # recover to latest (no recoveryTarget) from the source's object store

@@ -37,6 +37,7 @@ def build_snapshot(
         1 for b in backups if b.get("status", {}).get("phase") == "completed"
     )
     phase = str(status.get("phase", ""))
+    reason = _busy_reason(phase, backups)   # a mutating op is in flight → lock
     return {
         "ready": instances > 0 and ready_n == instances,
         "phase": phase,                 # the cluster's own status line (live)
@@ -49,24 +50,44 @@ def build_snapshot(
         "upgrading": "upgrad" in phase.lower(),
         "backup_configured": "backup" in spec,
         "backups_completed": completed,
-        "backups": _recent_backups(backups),   # name + phase, newest first (live)
+        "backups": _backup_view(backups),   # name/phase/times, newest first
+        # the PITR window: WAL is archived from the earliest recoverable point to now
+        "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
         "blue_green": "app_a" in managed and "app_b" in managed,
         "fault_in_flight": partitioned,
+        "busy": bool(reason),           # exclusivity: a mutating op is in progress
+        "busy_reason": reason,
     }
 
 
-def _recent_backups(backups: list[dict]) -> list[dict]:
+def _backup_view(backups: list[dict]) -> list[dict]:
+    """Recent backups with phase + times (for the timeline), newest first."""
     ordered = sorted(
         backups,
         key=lambda b: b.get("metadata", {}).get("creationTimestamp", ""),
         reverse=True,
     )
-    return [
-        {"name": b.get("metadata", {}).get("name", ""),
-         "phase": b.get("status", {}).get("phase", "")}
-        for b in ordered[:5]
-    ]
+    out = []
+    for b in ordered[:10]:
+        st = b.get("status", {})
+        out.append({
+            "name": b.get("metadata", {}).get("name", ""),
+            "phase": st.get("phase", ""),
+            "startedAt": st.get("startedAt", ""),
+            "stoppedAt": st.get("stoppedAt", ""),
+        })
+    return out
+
+
+def _busy_reason(phase: str, backups: list[dict]) -> str:
+    """A mutating operation the tool should not overlap. Chaos faults are not
+    counted here — they stay available (with an ack)."""
+    if any(b.get("status", {}).get("phase") in ("running", "started") for b in backups):
+        return "base backup running"
+    if "upgrad" in phase.lower():
+        return "upgrading"
+    return ""
 
 
 def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
@@ -90,7 +111,36 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         for p in k8s.custom.list_namespaced_custom_object(
             CNPG_GROUP, CNPG_VERSION, namespace, "poolers").get("items", [])
     ]
+    snap["credentials"] = _credentials(k8s, namespace, snap["blue_green"])
+    # a restore cluster still bootstrapping also locks the tool
+    others = k8s.custom.list_namespaced_custom_object(
+        CNPG_GROUP, CNPG_VERSION, namespace, "clusters").get("items", [])
+    if any("-restore-" in c["metadata"]["name"]
+           and int(c.get("status", {}).get("readyInstances", 0) or 0) < 1
+           for c in others):
+        snap["busy"] = True
+        snap["busy_reason"] = snap["busy_reason"] or "restore in progress"
     return snap
+
+
+def _credentials(k8s: ClusterClient, namespace: str, blue_green: bool) -> dict:
+    """Which blue/green role the app authenticates as, and when it was last set."""
+    active = rotated = ""
+    try:
+        active = k8s.core.read_namespaced_config_map("app-active", namespace).data.get("active", "")
+    except Exception:
+        pass
+    try:
+        dep = k8s.apps.read_namespaced_deployment("app", namespace)
+        rotated = (dep.spec.template.metadata.annotations or {}).get("k8ostester.io/rotatedAt", "")
+    except Exception:
+        pass
+    return {
+        "active": active,
+        "active_role": f"app_{active}" if active else "",
+        "rotated_at": rotated,
+        "roles": ["app_a", "app_b"] if blue_green else [],
+    }
 
 
 def _instances(k8s: ClusterClient, namespace: str, name: str) -> list[dict]:

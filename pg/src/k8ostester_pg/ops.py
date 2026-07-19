@@ -52,23 +52,29 @@ def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg") -> str:
     return f"rotated app_{active} → app_{idle} (blue/green, no auth gap)"
 
 
-def restore_latest(k8s: ClusterClient, ns: str, name: str = "pg") -> str:
-    """Bootstrap a second cluster recovering from the object store to the latest
-    point (a uniquely-named restore cluster, so repeated restores don't clash)."""
+def restore(k8s: ClusterClient, ns: str, target_time: str = "", name: str = "pg") -> str:
+    """Bootstrap a second cluster recovering from the object store. With
+    ``target_time`` (RFC3339, within the WAL window) it's point-in-time; without
+    it, recover to the latest point. Uniquely-named so repeated restores don't
+    clash."""
     src = _cluster(k8s, ns, name)
     store = {**src["spec"]["backup"]["barmanObjectStore"], "serverName": name}
-    restore = f"{name}-restore-{_stamp()}"
+    recovery: dict = {"source": "origin"}
+    if target_time:
+        recovery["recoveryTarget"] = {"targetTime": target_time}
+    restore_name = f"{name}-restore-{_stamp()}"
     k8s.custom.create_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, ns, "clusters", {
             "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",
             "kind": "Cluster",
-            "metadata": {"name": restore},
+            "metadata": {"name": restore_name},
             "spec": {
                 "instances": 1,
                 "imageName": src["spec"]["imageName"],
                 "storage": src["spec"]["storage"],
-                "bootstrap": {"recovery": {"source": "origin"}},   # no target = latest
+                "bootstrap": {"recovery": recovery},
                 "externalClusters": [{"name": "origin", "barmanObjectStore": store}],
             },
         })
-    return f"restore cluster {restore} bootstrapping (recover to latest)"
+    when = f"to {target_time}" if target_time else "to latest"
+    return f"restore cluster {restore_name} bootstrapping (recover {when})"

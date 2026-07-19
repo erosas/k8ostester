@@ -2,7 +2,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-
 from k8ostester_pg.execute import ActionDenied, execute
 
 

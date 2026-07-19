@@ -10,8 +10,9 @@ from k8ostester_kernel import chaos
 from k8ostester_kernel.k8s import ClusterClient
 
 from k8ostester_pg import harness
+from k8ostester_pg.harness import CNPG_GROUP, CNPG_VERSION  # re-exported for execute/ops/server
 
-CNPG_GROUP, CNPG_VERSION = "postgresql.cnpg.io", "v1"
+__all__ = ["CNPG_GROUP", "CNPG_VERSION"]
 
 
 def pg_version(image: str) -> str:
@@ -254,6 +255,23 @@ def wal_seg_index(name: str) -> int | None:
         return None
 
 
+def _psql(k8s: ClusterClient, namespace: str, pod: str, query: str,
+          sep: str | None = "|") -> str | None:
+    """Run ``query`` on a pod's ``postgres`` container via the API exec stream and
+    return the tuples-only (``-tA``) stdout, stripped — or None if the exec fails.
+    ``sep`` sets the field separator (``-F``); None gives single-column output."""
+    if not pod:
+        return None
+    argv = ["psql", "-U", "postgres", "-tA"]
+    if sep is not None:
+        argv += ["-F", sep]
+    argv += ["-c", query]
+    try:
+        return k8s.exec_pod(namespace, pod, argv, container="postgres").strip()
+    except Exception:
+        return None
+
+
 def wal_segments_since(k8s: ClusterClient, namespace: str, from_wal: str,
                        primary: str) -> dict:
     """Exact number of WAL segments from ``from_wal`` to the primary's current WAL
@@ -264,13 +282,10 @@ def wal_segments_since(k8s: ClusterClient, namespace: str, from_wal: str,
         return {}
     query = ("select floor(pg_wal_lsn_diff(pg_current_wal_lsn(),'0/0'::pg_lsn)"
              f"/{_WAL_SEG_BYTES})::bigint, pg_walfile_name(pg_current_wal_lsn())")
-    try:
-        out = k8s.exec_pod(namespace, primary,
-                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
-                           container="postgres")
-    except Exception:
+    out = _psql(k8s, namespace, primary, query)
+    if out is None:
         return {}
-    parts = out.strip().split("|")
+    parts = out.split("|")
     try:
         current = int(parts[0])
     except (ValueError, IndexError):
@@ -296,16 +311,14 @@ def _schedules(k8s: ClusterClient, namespace: str) -> list[dict]:
 def _data_size(k8s: ClusterClient, namespace: str, primary: str) -> int | None:
     """Total on-disk data size (sum of all databases) — a proxy for how much a
     base backup carries. The Backup CR doesn't report its own byte size."""
-    if not primary:
+    out = _psql(k8s, namespace, primary,
+                "select coalesce(sum(pg_database_size(oid)),0)::bigint from pg_database",
+                sep=None)
+    if out is None:
         return None
     try:
-        out = k8s.exec_pod(namespace, primary,
-                           ["psql", "-U", "postgres", "-tA", "-c",
-                            "select coalesce(sum(pg_database_size(oid)),0)::bigint "
-                            "from pg_database"],
-                           container="postgres")
-        return int(out.strip())
-    except Exception:
+        return int(out)
+    except ValueError:
         return None
 
 
@@ -405,13 +418,8 @@ def _connections(k8s: ClusterClient, namespace: str, primary: str) -> dict:
         return {}
     query = ("select (select count(*) from pg_stat_activity), "
              "(select setting::int from pg_settings where name='max_connections')")
-    try:
-        raw = k8s.exec_pod(namespace, primary,
-                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
-                           container="postgres")
-    except Exception:
-        return {}
-    return _parse_conn(raw)
+    raw = _psql(k8s, namespace, primary, query)
+    return _parse_conn(raw) if raw is not None else {}
 
 
 def _parse_slots(out: str) -> list[dict]:
@@ -434,13 +442,8 @@ def _slots(k8s: ClusterClient, namespace: str, primary: str) -> list[dict]:
     query = ("select slot_name, active, "
              "coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn),0)::bigint "
              "from pg_replication_slots order by 1")
-    try:
-        raw = k8s.exec_pod(namespace, primary,
-                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
-                           container="postgres")
-    except Exception:
-        return []
-    return _parse_slots(raw)
+    raw = _psql(k8s, namespace, primary, query)
+    return _parse_slots(raw) if raw is not None else []
 
 
 def _parse_archiver(out: str) -> dict:
@@ -470,13 +473,8 @@ def _archiver(k8s: ClusterClient, namespace: str, primary: str) -> dict:
     query = ("select archived_count, coalesce(last_archived_wal,''), failed_count, "
              "coalesce(extract(epoch from last_archived_time)::bigint::text,''), "
              "(select pg_walfile_name(pg_current_wal_lsn())) from pg_stat_archiver")
-    try:
-        out = k8s.exec_pod(namespace, primary,
-                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
-                           container="postgres")
-    except Exception:
-        return {}
-    return _parse_archiver(out)
+    out = _psql(k8s, namespace, primary, query)
+    return _parse_archiver(out) if out is not None else {}
 
 
 def _parse_replication(out: str) -> dict:
@@ -500,13 +498,8 @@ def _replication(k8s: ClusterClient, namespace: str, primary: str) -> dict:
     query = ("select application_name, sync_state, "
              "coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn),0)::bigint "
              "from pg_stat_replication")
-    try:
-        out = k8s.exec_pod(namespace, primary,
-                           ["psql", "-U", "postgres", "-tAF", "|", "-c", query],
-                           container="postgres")
-    except Exception:
-        return {}
-    return _parse_replication(out)
+    out = _psql(k8s, namespace, primary, query)
+    return _parse_replication(out) if out is not None else {}
 
 
 ACTIVE_ROLE_ANN = "k8ostester.io/active-role"

@@ -1,10 +1,11 @@
 [project]
 name = "k8ostester-pg"
 version = "0.1.0"
-description = "PostgreSQL/CloudNativePG vertical: the production-readiness testbed, SLO checks, and (later) linear experiment scripts"
+description = "PostgreSQL/CloudNativePG vertical: the k8ost-console control plane, the production-readiness testbed, SLO checks, and linear experiment scripts"
 requires-python = ">=3.14"
 dependencies = [
     "k8ostester-kernel",   # k8s client, chaos primitives, SLO-verdict helper
+    "pyyaml>=6.0",         # manifest parse/emit in the console (server.py)
 ]
 
 [project.scripts]

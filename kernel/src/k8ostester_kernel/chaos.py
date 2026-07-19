@@ -1,8 +1,7 @@
 """Chaos primitives — raw fault operations on a ``ClusterClient``.
 
 Plain functions, deliberately *not* wrapped in a Worker/FaultSpec abstraction
-(that lives in the old experiment engine on its way out). Verticals call these
-directly.
+(that lived in the retired experiment engine). Verticals call these directly.
 """
 from __future__ import annotations
 

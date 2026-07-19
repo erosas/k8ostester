@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from k8ostester_kernel.exceptions import K8osInfraError
-from k8ostester_kernel.k8s import ClusterClient, available_contexts, wait_until
+from k8ostester_kernel.k8s import ClusterClient, wait_until
 from kubernetes import client
 
 
@@ -164,16 +164,6 @@ def test_k8s_apply_manifests_fail(mock_config, tmp_path):
         with pytest.raises(K8osInfraError, match="kubectl apply failed"):
             k8s.apply_manifests(tmp_path, "ns")
 
-def test_available_contexts():
-    with patch("k8ostester_kernel.k8s.config.list_kube_config_contexts") as mock_list:
-        mock_list.return_value = (
-            [{"name": "ctx1"}, {"name": "ctx2"}],
-            {"name": "ctx1"}
-        )
-        names, active = available_contexts()
-        assert names == ["ctx1", "ctx2"]
-        assert active == "ctx1"
-
 def test_k8s_delete_namespace_404(mock_config):
     k8s = ClusterClient()
     mock_core = MagicMock()
@@ -203,12 +193,6 @@ def test_k8s_kubectl_missing(mock_config, tmp_path):
     with patch("shutil.which", return_value=None):
         with pytest.raises(K8osInfraError, match="kubectl not found"):
             k8s.apply_manifests(tmp_path, "ns")
-
-def test_k8s_helm_missing(mock_config):
-    k8s = ClusterClient()
-    with patch("shutil.which", return_value=None):
-        with pytest.raises(K8osInfraError, match="helm not found"):
-            k8s._check_helm()
 
 def test_k8s_context_flag_propagates(mock_config, tmp_path):
     k8s = ClusterClient(context="my-ctx")
@@ -247,10 +231,8 @@ def test_k8s_api_accessors(mock_config):
     k8s = ClusterClient()
     assert isinstance(k8s.core, client.CoreV1Api)
     assert isinstance(k8s.apps, client.AppsV1Api)
-    assert isinstance(k8s.storage, client.StorageV1Api)
     assert isinstance(k8s.apiext, client.ApiextensionsV1Api)
     assert isinstance(k8s.custom, client.CustomObjectsApi)
-    assert isinstance(k8s.batch, client.BatchV1Api)
     assert isinstance(k8s.version, client.VersionApi)
 
 def test_k8s_delete_namespace_wait_other_error_raises(mock_config, fake_clock):
@@ -260,8 +242,3 @@ def test_k8s_delete_namespace_wait_other_error_raises(mock_config, fake_clock):
         mock_core.read_namespace.side_effect = client.ApiException(status=500)
         with pytest.raises(client.ApiException):
             k8s.delete_namespace("test-ns", wait=True)
-
-def test_k8s_helm_found(mock_config):
-    k8s = ClusterClient()
-    with patch("shutil.which", return_value="/usr/bin/helm"):
-        assert k8s._check_helm() == "/usr/bin/helm"

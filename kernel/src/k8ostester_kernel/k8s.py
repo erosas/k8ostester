@@ -1,12 +1,12 @@
 """Kubernetes access for a chosen kubeconfig context — or the in-cluster
 ServiceAccount when running as a pod.
 
-Everything in the framework talks to the cluster through a ClusterClient so that
+Everything in the kernel talks to the cluster through a ClusterClient so that
 experiments can target any context (local or remote) without global state. The
 same client works laptop-side (a kubeconfig context) and deployed in-cluster (the
 mounted ServiceAccount token) — pass the ``IN_CLUSTER`` sentinel for the latter.
-Manifest application shells out to kubectl (server-side apply handles arbitrary
-kinds, including CRs, without us re-implementing apply semantics).
+Manifest application shells out to ``kubectl apply`` (arbitrary kinds, including
+CRs, without us re-implementing apply semantics).
 """
 
 from __future__ import annotations
@@ -84,20 +84,12 @@ class ClusterClient:
         return client.AppsV1Api(self._api_client)
 
     @cached_property
-    def storage(self) -> client.StorageV1Api:
-        return client.StorageV1Api(self._api_client)
-
-    @cached_property
     def apiext(self) -> client.ApiextensionsV1Api:
         return client.ApiextensionsV1Api(self._api_client)
 
     @cached_property
     def custom(self) -> client.CustomObjectsApi:
         return client.CustomObjectsApi(self._api_client)
-
-    @cached_property
-    def batch(self) -> client.BatchV1Api:
-        return client.BatchV1Api(self._api_client)
 
     @cached_property
     def version(self) -> client.VersionApi:
@@ -124,12 +116,6 @@ class ClusterClient:
             metadata=client.V1ObjectMeta(name=name, labels=labels or {})
         )
         self.core.create_namespace(body)
-
-    def set_namespace_labels(self, name: str, labels: dict[str, str | None]) -> None:
-        """Patch namespace labels (a value of None removes the label). Used to
-        make an attached namespace discoverable by the concurrent-run guard
-        without owning it — the labels are reverted at teardown."""
-        self.core.patch_namespace(name, {"metadata": {"labels": labels}})
 
     def delete_namespace(self, name: str, wait: bool = True, timeout: float = 300) -> None:
         try:
@@ -159,12 +145,6 @@ class ClusterClient:
         if not kubectl:
             raise K8osInfraError("kubectl not found on PATH")
         return kubectl
-
-    def _check_helm(self) -> str:
-        helm = shutil.which("helm")
-        if not helm:
-            raise K8osInfraError("helm not found on PATH")
-        return helm
 
     def apply_manifests(
         self, path: Path, namespace: str, variables: dict[str, str] | None = None
@@ -257,10 +237,3 @@ class ClusterClient:
             return not pending
 
         wait_until(all_ready, timeout, desc=lambda: f"not ready: {', '.join(pending)}")
-
-
-def available_contexts() -> tuple[list[str], str | None]:
-    """All kubeconfig context names and the current one."""
-    contexts, active = config.list_kube_config_contexts()
-    names = [c["name"] for c in contexts]
-    return names, active["name"] if active else None

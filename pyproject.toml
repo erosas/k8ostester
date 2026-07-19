@@ -12,7 +12,6 @@ k8ostester-kernel = { workspace = true }
 # dev tools shared across the workspace
 dev = [
     "pytest>=9.1.1",
-    "pytest-asyncio>=1.0",
     "pytest-cov>=6.0.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.8",

@@ -4,8 +4,8 @@ The server calls ``execute(action_id, ...)``; it re-checks the capability gate
 against the current snapshot (defense in depth — a stale browser can't fire a
 disabled action) and dispatches to a handler. Chaos actions map straight to
 kernel primitives. Ops actions map to CNPG operations — ``backup`` is wired here;
-the multi-step ops (rotate/upgrade/restore) are extracted from pg/testbed/flow.py
-next. See docs/remote-control.md.
+the multi-step ops (rotate/upgrade/restore) live in ``ops.py``. See
+docs/remote-control.md.
 """
 from __future__ import annotations
 

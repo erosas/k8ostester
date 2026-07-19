@@ -114,13 +114,22 @@ class Console:
             self._clients[ctx] = ClusterClient(ctx)
         return self._clients[ctx]
 
+    def _reset_client(self, context: str | None) -> None:
+        # a long-lived client can hold a dead connection (the API server dropped
+        # it); dropping it forces a fresh one on the next call, so we self-heal
+        self._clients.pop(context or self._current, None)
+
     # --- inventory + selection --------------------------------------------
     def contexts_info(self) -> dict:
         return {"contexts": self._contexts, "current": self._current,
                 "selected": self._sel, "locked": bool(self._only_context)}
 
     def list_clusters(self, context: str | None) -> list[dict]:
-        return discover.list_clusters(self.client(context), self._scope_ns or None)
+        try:
+            return discover.list_clusters(self.client(context), self._scope_ns or None)
+        except Exception:
+            self._reset_client(context)                 # stale connection -> retry fresh once
+            return discover.list_clusters(self.client(context), self._scope_ns or None)
 
     def select(self, context: str | None, namespace: str, name: str) -> None:
         with self._lock:
@@ -143,6 +152,7 @@ class Console:
             snap.update(self._heavy)
             return {"snapshot": snap, "capabilities": capabilities(CNPG_ACTIONS, snap)}
         except Exception as e:
+            self._reset_client(sel["context"])          # rebuild on the next tick (self-heal)
             return {"error": str(e).splitlines()[0][:200]}
 
     def refresh(self) -> dict:

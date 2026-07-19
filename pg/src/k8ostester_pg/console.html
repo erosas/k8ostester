@@ -32,13 +32,13 @@
   .chip b{color:var(--ink)}
   .err{background:#2a1416;border:1px solid #5a2327;color:#f2a1a4;padding:10px 14px;
     border-radius:8px;font-family:var(--mono);font-size:12.5px;margin-bottom:18px;display:none}
-  .status{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin-bottom:16px;
-    font-family:var(--mono);font-size:12px}
-  .status .phase{color:var(--ink)}
-  .bk{border:1px solid var(--border);border-radius:20px;padding:3px 11px;color:var(--muted)}
-  .bk.running,.bk.started{color:var(--warn);border-color:#4a3a1a}
-  .bk.completed{color:var(--ok);border-color:#1a3a2a}
-  .bk.failed{color:var(--crit);border-color:#3a1a1e}
+  /* view selector in the header */
+  .views{display:flex;gap:2px;border:1px solid var(--border);border-radius:9px;padding:3px;
+    background:var(--panel2);margin-left:20px}
+  .vbtn{font-family:var(--mono);font-size:12.5px;padding:6px 15px;border:0;border-radius:6px;
+    background:transparent;color:var(--muted);cursor:pointer}
+  .vbtn.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+  .vbtn:hover:not(.on){color:var(--ink)}
   .lock{display:none;align-items:center;gap:9px;background:#2a2312;border:1px solid #5a4a1a;
     color:var(--warn);padding:9px 14px;border-radius:8px;font-family:var(--mono);
     font-size:12.5px;margin-bottom:16px}
@@ -90,10 +90,6 @@
     display:flex;flex-wrap:wrap;gap:6px 16px}
   .rfoot b{color:var(--ink)}
 
-  .tabs{display:flex;gap:6px;margin-bottom:14px}
-  .tab{font-family:var(--mono);font-size:13px;padding:8px 16px;border:1px solid var(--border);
-    border-radius:8px 8px 0 0;background:var(--panel2);color:var(--muted);cursor:pointer}
-  .tab.on{color:var(--ink);border-bottom-color:transparent;background:var(--panel)}
   .actions{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
   button.act{font-family:var(--sans);font-size:14px;text-align:left;padding:12px 14px;
     border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--ink);
@@ -117,6 +113,11 @@
     border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:13px;color-scheme:dark}
   .bgrid input[type=checkbox]{width:16px;height:16px;accent-color:var(--accent);padding:0}
   .bgrid input:focus,.bgrid select:focus{outline:none;border-color:var(--accent)}
+  .bnote{border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;
+    background:var(--panel2);padding:9px 13px;margin:0 0 14px;font-family:var(--mono);
+    font-size:11.5px;line-height:1.6;color:var(--muted)}
+  .bnote b{color:var(--ink)}
+  .fcap{text-transform:none;letter-spacing:0;color:var(--dim);font-size:10px}
   .bbar{display:flex;align-items:center;gap:10px;margin:4px 0 12px}
   .bbar .bhint{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-right:auto}
   .bbar button{font-family:var(--sans);font-size:13px;padding:8px 16px;border-radius:8px;
@@ -126,10 +127,23 @@
     font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink);overflow-x:auto;
     white-space:pre;margin:0;max-height:460px;overflow-y:auto}
 
-  .log{margin-top:22px;border-top:1px solid var(--border);padding-top:14px;
-    font-family:var(--mono);font-size:12.5px;color:var(--muted)}
-  .log .line{padding:3px 0}
-  .log .ok{color:var(--ok)} .log .fail{color:var(--crit)}
+  /* activity / history — collapsed by default so it doesn't take room */
+  .activity{margin-top:24px;border:1px solid var(--border);border-radius:10px;background:var(--panel2)}
+  .activity>summary{cursor:pointer;padding:11px 15px;font-family:var(--mono);font-size:12.5px;
+    color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px}
+  .activity>summary::-webkit-details-marker{display:none}
+  .activity>summary::before{content:"▸";color:var(--dim)}
+  .activity[open]>summary::before{content:"▾"}
+  .alist{padding:2px 8px 8px}
+  .alist .empty{padding:8px;color:var(--dim);font-family:var(--mono);font-size:12px}
+  .arow{padding:7px 8px;border-top:1px solid var(--border);font-family:var(--mono);font-size:12px}
+  .arow .top{display:flex;gap:10px;align-items:baseline}
+  .arow .atime{color:var(--dim)}
+  .arow .aop{color:var(--ink);margin-right:auto}
+  .arow .astat{font-size:11px}
+  .arow.ok .astat{color:var(--ok)} .arow.fail .astat{color:var(--crit)}
+  .arow .adur{color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+  .arow .adetail{color:var(--muted);font-size:11px;margin-top:3px;word-break:break-word}
 
   /* modal */
   .scrim{position:fixed;inset:0;background:rgba(4,7,11,.72);display:none;align-items:center;
@@ -174,40 +188,48 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="eyebrow">k8ostester · remote control</div>
+      <div class="eyebrow">k8ostester · control plane</div>
       <h1 id="title">CNPG cluster</h1>
+    </div>
+    <div class="views" id="views">
+      <button class="vbtn on" data-tab="ops" onclick="pick('ops')">Ops</button>
+      <button class="vbtn" data-tab="chaos" onclick="pick('chaos')">Break-glass</button>
+      <button class="vbtn" data-tab="builder" onclick="pick('builder')">Build</button>
     </div>
     <div class="conn"><span class="dot" id="dot"></span><span id="conntxt">connecting…</span></div>
   </header>
 
   <div class="meta" id="meta"></div>
   <div class="err" id="err"></div>
-  <div class="status" id="status"></div>
   <div class="lock" id="lock"></div>
 
-  <div class="scada" id="scada"></div>
+  <div id="cluster">
+    <div class="scada" id="scada"></div>
 
-  <div class="recovery" id="recovery" style="display:none">
-    <div class="rhead"><span class="t">Recovery window</span><span class="w" id="rwin"></span></div>
-    <div class="timeline" id="timeline"><div class="wal" id="wal"></div></div>
-    <div class="tends"><span id="rstart"></span><span>now</span></div>
-    <div class="rfoot" id="rfoot"></div>
-  </div>
+    <div class="recovery" id="recovery" style="display:none">
+      <div class="rhead"><span class="t">Recovery window</span><span class="w" id="rwin"></span></div>
+      <div class="timeline" id="timeline"><div class="wal" id="wal"></div></div>
+      <div class="tends"><span id="rstart"></span><span>now</span></div>
+      <div class="rfoot" id="rfoot"></div>
+    </div>
 
-  <div class="tabs">
-    <div class="tab on" data-tab="ops" onclick="pick('ops')">Ops · routine on-call</div>
-    <div class="tab" data-tab="chaos" onclick="pick('chaos')">Break-glass · destructive</div>
-    <div class="tab" data-tab="builder" onclick="pick('builder')">Builder · design a cluster</div>
+    <div class="actions" id="actions"></div>
   </div>
-  <div class="actions" id="actions"></div>
 
   <div class="builder" id="builder" style="display:none">
+    <div class="bnote">
+      <b>Storage is grow-only.</b> After deploy you can raise <b>storage size</b> and CNPG expands
+      each PVC online (no downtime) — but only if the StorageClass has <b>allowVolumeExpansion: true</b>
+      (e.g. an AWS EBS gp3 class). You can <b>never shrink</b> it, and EBS limits growth to once every ~6h
+      per volume. Pick a comfortable starting size. Everything else here can be changed after deploy.
+    </div>
     <div class="bgrid">
       <label>Cluster name<input id="b-name" value="pg"></label>
       <label>PostgreSQL version<input id="b-version" value="16.6"></label>
       <label>Instances (1 primary + replicas)
         <input id="b-instances" type="number" min="1" max="9" value="3"></label>
-      <label>Storage size<input id="b-storage" value="10Gi"></label>
+      <label>Storage size<input id="b-storage" value="10Gi">
+        <span class="fcap">grow-only after deploy</span></label>
       <label>Synchronous replication
         <select id="b-sync">
           <option value="quorum">quorum · any 1 (RPO 0, tolerates 1 loss)</option>
@@ -237,7 +259,10 @@
     <pre class="manifest" id="manifest">…</pre>
   </div>
 
-  <div class="log" id="log"><div class="line">— no actions yet —</div></div>
+  <details class="activity" id="activity">
+    <summary>Activity<span id="act-count"></span></summary>
+    <div class="alist" id="log"><div class="empty">No operations this session.</div></div>
+  </details>
 </div>
 
 <div id="tip"></div>
@@ -279,21 +304,33 @@ let TAB = "ops", CAPS = [], SNAP = {};
 
 function pick(t){
   TAB = t;
-  document.querySelectorAll(".tab").forEach(e=>e.classList.toggle("on", e.dataset.tab===t));
+  document.querySelectorAll(".vbtn").forEach(e=>e.classList.toggle("on", e.dataset.tab===t));
   const isBuild = t==="builder";
   document.getElementById("builder").style.display = isBuild ? "block" : "none";
-  document.getElementById("actions").style.display = isBuild ? "none" : "grid";
+  document.getElementById("cluster").style.display = isBuild ? "none" : "block";
+  document.getElementById("meta").style.display = isBuild ? "none" : "flex";
   if(isBuild) generateManifest();
   else renderActions();
 }
 
-function log(msg, ok){
+// Activity: a meaningful record — operation, status, round-trip duration, detail
+let ACTS = 0;
+function esch(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function logActivity(op, ok, detail, ms){
   const el = document.getElementById("log");
-  if(el.firstChild && el.firstChild.textContent.startsWith("—")) el.innerHTML="";
+  const empty = el.querySelector(".empty");
+  if(empty) empty.remove();
+  ACTS++;
+  document.getElementById("act-count").textContent = ` (${ACTS})`;
+  const dur = ms>=1000 ? (ms/1000).toFixed(1)+"s" : Math.round(ms)+"ms";
   const d = document.createElement("div");
-  d.className = "line " + (ok ? "ok" : "fail");
-  d.textContent = `${new Date().toLocaleTimeString()}  ${ok?"✔":"✗"} ${msg}`;
+  d.className = "arow " + (ok ? "ok" : "fail");
+  d.innerHTML = `<div class="top"><span class="atime">${new Date().toLocaleTimeString()}</span>`+
+    `<span class="aop">${esch(op)}</span>`+
+    `<span class="astat">${ok?"✓ ok":"✗ failed"}</span><span class="adur">${dur}</span></div>`+
+    (detail ? `<div class="adetail">${esch(detail)}</div>` : "");
   el.prepend(d);
+  if(!ok) document.getElementById("activity").open = true;   // surface failures
 }
 
 function ago(ms){
@@ -334,13 +371,16 @@ function baseBackupFor(t){
   return base;
 }
 
-async function post(id, params){
+async function post(id, params, label){
+  const t0 = performance.now();
+  let ok = false, detail = "";
   try{
     const r = await fetch("/api/action", {method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({id, params})});
     const j = await r.json();
-    log(j.ok ? j.message : j.error, j.ok);
-  }catch(e){ log(String(e), false); }
+    ok = !!j.ok; detail = j.ok ? j.message : j.error;
+  }catch(e){ detail = String(e); }
+  logActivity(label || id, ok, detail, performance.now()-t0);
 }
 
 function act(a){
@@ -349,7 +389,7 @@ function act(a){
      !confirm(`An operation is in flight (${SNAP.busy_reason}). Fire ${a.label} anyway?`)) return;
   if(a.id === "restore"){ openModal(); return; }         // PITR gets its own interface
   if(a.destructive && !confirm(`${a.label} — this mutates a real cluster. Continue?`)) return;
-  post(a.id, null);
+  post(a.id, null, a.label);
 }
 
 function renderActions(){
@@ -558,7 +598,7 @@ function renderRecovery(s){
 /* ---- PITR restore modal ---- */
 let MODE = "latest", TICKS = [], T0 = 0, T1 = 0;
 function openModal(){
-  if(!SNAP.recoverability_point){ log("no recovery window yet", false); return; }
+  if(!SNAP.recoverability_point){ logActivity("Restore (PITR)", false, "no recovery window yet", 0); return; }
   MODE = "latest";
   document.querySelector('input[name=rmode][value=latest]').checked = true;
   syncModeUI();
@@ -651,7 +691,7 @@ function confirmRestore(){
   }
   closeModal();
   if(!confirm(`Restore to ${label} — bootstraps a new recovery cluster. Continue?`)) return;
-  post("restore", {target_time: target});
+  post("restore", {target_time: target}, "Restore (PITR)");
 }
 
 function connChip(c){
@@ -671,15 +711,6 @@ function slotChip(slots){
       `⚠ ${fmtBytes(held)} held</span>`;
   }
   return `<span class="chip" title="all replication slots active">slots <b>${slots.length}/${slots.length}</b> active</span>`;
-}
-
-function renderStatus(s){
-  const el = document.getElementById("status");
-  const bks = (s.backups||[]).map(b=>{
-    const ph = (b.phase||"").toLowerCase();
-    return `<span class="bk ${ph}">● ${b.name}: ${b.phase||"—"}</span>`;
-  }).join("");
-  el.innerHTML = (s.phase ? `<span class="phase">▸ ${s.phase}</span>` : "") + bks;
 }
 
 function render(data){
@@ -703,7 +734,6 @@ function render(data){
   if(SNAP.busy){ lock.style.display="flex"; lock.textContent = "🔒 " + SNAP.busy_reason +
       " — mutating operations are locked until it finishes"; }
   else lock.style.display="none";
-  renderStatus(SNAP);
   renderTopology(SNAP);
   renderRecovery(SNAP);
   renderActions();

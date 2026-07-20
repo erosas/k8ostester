@@ -41,6 +41,13 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "create", "delete"]
+  # storage: check whether volumes can be expanded before offering Expand storage
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
   # cluster-scoped: zone labels for topology/placement (best-effort otherwise)
   - apiGroups: [""]
     resources: ["nodes"]

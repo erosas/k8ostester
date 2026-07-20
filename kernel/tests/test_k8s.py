@@ -234,6 +234,7 @@ def test_k8s_api_accessors(mock_config):
     assert isinstance(k8s.apiext, client.ApiextensionsV1Api)
     assert isinstance(k8s.custom, client.CustomObjectsApi)
     assert isinstance(k8s.version, client.VersionApi)
+    assert isinstance(k8s.storage, client.StorageV1Api)
 
 def test_k8s_delete_namespace_wait_other_error_raises(mock_config, fake_clock):
     k8s = ClusterClient()

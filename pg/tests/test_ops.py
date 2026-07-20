@@ -60,6 +60,28 @@ def test_maintenance_rejects_unknown_ops():
     k8s.exec_pod.assert_not_called()
 
 
+def test_storage_expandable_reads_the_explicit_class():
+    from unittest.mock import MagicMock
+    k8s = MagicMock()
+    cl = cluster_obj()
+    cl["spec"]["storage"] = {"size": "1Gi", "storageClass": "fast"}
+    k8s.custom.get_namespaced_custom_object.return_value = cl
+    k8s.storage.read_storage_class.return_value = MagicMock(allow_volume_expansion=True)
+    ok, sc = ops.storage_expandable(k8s, "ns", "pg")
+    assert (ok, sc) == (True, "fast")
+    assert k8s.storage.read_storage_class.call_args.args[0] == "fast"
+
+
+def test_storage_expandable_false_when_class_disallows():
+    from unittest.mock import MagicMock
+    k8s = MagicMock()
+    cl = cluster_obj()
+    cl["spec"]["storage"] = {"size": "1Gi", "storageClass": "standard"}
+    k8s.custom.get_namespaced_custom_object.return_value = cl
+    k8s.storage.read_storage_class.return_value = MagicMock(allow_volume_expansion=None)
+    assert ops.storage_expandable(k8s, "ns", "pg") == (False, "standard")
+
+
 def test_expand_storage_rejects_a_noop():
     import pytest
     k8s = MagicMock()

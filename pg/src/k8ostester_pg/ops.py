@@ -59,7 +59,7 @@ def maintenance(k8s: ClusterClient, ns: str, op: str, name: str = "pg") -> str:
         raise RuntimeError("no primary")
     db = cl.get("spec", {}).get("bootstrap", {}).get("initdb", {}).get("database", "app")
     argv = ["psql", "-U", "postgres", "-d", db, "-c", sql]
-    k8s.exec_pod(ns, primary, argv, container="postgres")
+    k8s.exec_pod(ns, primary, argv, container="postgres", timeout=600)   # VACUUM can run a while
     return f"{sql} completed on {primary} ({db})"
 
 
@@ -77,6 +77,37 @@ def expand_storage(k8s: ClusterClient, ns: str, size: str, name: str = "pg") -> 
         CNPG_GROUP, CNPG_VERSION, ns, "clusters", name,
         {"spec": {"storage": {"size": size}}})
     return f"storage expansion to {size} requested (was {current or '?'})"
+
+
+def storage_expandable(k8s: ClusterClient, ns: str, name: str = "pg") -> tuple[bool | None, str]:
+    """Can this cluster's volumes be expanded online? Returns (expandable, class).
+    ``expandable`` is None when it can't be determined (missing RBAC / no class) —
+    the console warns rather than blocks in that case. A False means the storage
+    class lacks ``allowVolumeExpansion``, so growing the size would silently no-op."""
+    cl = _cluster(k8s, ns, name)
+    sc = cl.get("spec", {}).get("storage", {}).get("storageClass", "")
+    if not sc:   # fall back to a data PVC's class...
+        primary = cl.get("status", {}).get("currentPrimary", "")
+        try:
+            pvc = k8s.core.read_namespaced_persistent_volume_claim(primary, ns)
+            sc = pvc.spec.storage_class_name or ""
+        except Exception:
+            pass
+    if not sc:   # ...then the cluster's default storage class
+        try:
+            for c in k8s.storage.list_storage_class().items:
+                if (c.metadata.annotations or {}).get(
+                        "storageclass.kubernetes.io/is-default-class") == "true":
+                    sc = c.metadata.name
+                    break
+        except Exception:
+            pass
+    if not sc:
+        return None, ""
+    try:
+        return bool(k8s.storage.read_storage_class(sc).allow_volume_expansion), sc
+    except Exception:
+        return None, sc
 
 
 def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg",

@@ -883,11 +883,28 @@ function openExpand(){
   openSheet(`<h2>Expand storage</h2>
     <div class="lede">Grows the data volume in place — <b>online, no downtime</b> — by raising the cluster's storage size. Currently <b>${esch(cur)}</b> per instance.</div>
     <div class="sec"><h3>New size</h3>
-      <div class="pwrow"><input id="exp-size" class="pwin" spellcheck="false" placeholder="e.g. 20Gi" value="${esch(cur)}"></div>
-      <div class="uwarn" style="display:block">⚠ <b>Grow-only.</b> Volumes and PostgreSQL can't shrink — you can raise this but never lower it, so bump it a little at a time. Online expansion also needs the storage class to allow it (<b>allowVolumeExpansion: true</b>); without that the operator can't resize and a bigger volume means a rebuild/restore.</div>
+      <div class="pwrow" style="margin:0"><input id="exp-size" class="pwin" spellcheck="false" placeholder="e.g. 20Gi" value="${esch(cur)}"></div>
+      <div class="fnote" id="exp-sc" style="margin-top:8px">checking storage class…</div>
+      <div class="uwarn" style="display:block">⚠ <b>Grow-only.</b> Volumes and PostgreSQL can't shrink — you can raise this but never lower it, so bump it a little at a time.</div>
     </div>
     <div class="mbtns"><button data-close>Cancel</button>
-      <button class="go" onclick="confirmExpand()">Expand storage</button></div>`);
+      <button class="go" id="exp-go" onclick="confirmExpand()">Expand storage</button></div>`);
+  checkExpandable();
+}
+async function checkExpandable(){
+  const el=document.getElementById("exp-sc"), go=document.getElementById("exp-go");
+  let j; try{ j = await (await fetch("/api/storage-expandable")).json(); }catch(e){ el.textContent="storage-class check unavailable"; return; }
+  const sc = esch(j.storage_class||"?");
+  if(j.expandable===false){
+    el.className="fnote warn";
+    el.innerHTML=`✗ Storage class <b>${sc}</b> does not allow volume expansion — raising the size here would <b>not</b> resize the volume. Migrate/restore to a larger volume instead.`;
+    if(go){ go.disabled=true; go.style.opacity=".4"; go.style.cursor="default"; }
+  } else if(j.expandable===true){
+    el.className="fnote"; el.innerHTML=`✓ Storage class <b>${sc}</b> allows online expansion.`;
+  } else {
+    el.className="fnote warn";
+    el.innerHTML=`⚠ Couldn't confirm storage class <b>${sc}</b> allows expansion${j.error?" ("+esch(j.error)+")":""} — proceed only if you know it does.`;
+  }
 }
 function confirmExpand(){
   const size = document.getElementById("exp-size").value.trim();
@@ -1078,7 +1095,9 @@ function openFaultPicker(){
   }).join("");
   openSheet(`<h2>Inject a fault</h2>
     <div class="lede">Pick a target and a fault.${SNAP.busy?` <b style="color:var(--warn)">An operation is in flight (${esch(SNAP.busy_reason)}) — faults still fire.</b>`:""}</div>
-    ${rows}<div class="mbtns"><button data-close>Cancel</button></div>`);
+    ${rows}
+    <div class="fnote warn" style="margin-top:10px">⚠ <b>Partition</b> applies a NetworkPolicy — it only truly isolates the pod on a CNI that <b>enforces</b> NetworkPolicy (Calico, Cilium…). On kindnet or Docker Desktop the policy is created but has no effect, so the partition is a no-op.</div>
+    <div class="mbtns"><button data-close>Cancel</button></div>`);
 }
 
 /* ---- builder presets ---- */

@@ -27,7 +27,7 @@ from k8ostester_kernel.k8s import (
 )
 from kubernetes import config
 
-from k8ostester_pg import builder, dashboard, discover, execute
+from k8ostester_pg import builder, dashboard, discover, execute, ops
 from k8ostester_pg.control import CNPG_ACTIONS
 
 SPA = (Path(__file__).parent / "console.html").read_text()
@@ -228,6 +228,18 @@ class Console:
         from k8ostester_pg import registry
         return {"exists": registry.image_exists(image)}
 
+    def storage_expandable(self) -> dict:
+        """Whether the selected cluster's storage class allows online expansion —
+        the Expand-storage modal blocks (rather than silently no-ops) if it can't."""
+        sel = self._sel
+        if not sel:
+            return {}
+        try:
+            ok, sc = ops.storage_expandable(self.client(sel["context"]), sel["namespace"], sel["name"])
+            return {"expandable": ok, "storage_class": sc}
+        except Exception as e:
+            return {"expandable": None, "storage_class": "", "error": str(e).splitlines()[0][:200]}
+
     def deploy(self, opts: dict) -> dict:
         """Apply a Builder-generated manifest into the selected context/namespace
         via the dynamic client (no kubectl). Needs the broader 'lab' RBAC to create
@@ -316,6 +328,8 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                     self._json({"ok": True, **console.image_check(img)})
                 except Exception as e:
                     self._json({"ok": False, "error": str(e).splitlines()[0][:200]})
+            elif self.path == "/api/storage-expandable":
+                self._json({"ok": True, **console.storage_expandable()})
             elif self.path.startswith("/api/secret"):
                 from urllib.parse import parse_qs, urlparse
                 name = parse_qs(urlparse(self.path).query).get("name", [""])[0]

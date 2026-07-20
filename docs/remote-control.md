@@ -103,16 +103,20 @@ A background timer reads the selected cluster and produces the snapshot the whol
 UI renders from. To keep cluster load fixed regardless of viewers, discovery runs
 **once on a shared timer** (not per SSE connection), split into two tiers: a 2s
 **fast** tier (topology, roles, phase, replication, archiver) and a ~20s **heavy**
-tier (disk `df`, connections, replication slots, data size, services) merged in.
+tier (disk `df`, connections, replication slots, data size, services, and the ORR
+`health` signals) merged in.
 
-Key fields: `cluster`/`namespace`, `ready`/`phase`, `primary`/`replicas`/`zones`,
-`instances[]` (role, node, zone, healthy, `sync_state`, `lag_bytes`), `poolers[]`,
-`version`/`target`, `sync_policy`, `object_store`, `archived_wal` (archived,
-last, failed, `last_time`, current, `lag_segments`), `archiving` (the CNPG
-ContinuousArchiving condition), `schedules[]` + `retention`, `backups[]` +
-`recoverability_point` + `pitr_window`, `database` + `login_roles`, `credentials`
-(active role + rotated-at from the cluster annotation), `disk{}`, `connections`,
-`slots[]`, `services[]`, plus `busy`/`busy_reason` and `fault_in_flight`.
+Key fields: `cluster`/`namespace`, `ready`/`phase`/`conditions`,
+`primary`/`replicas`/`zones`, `instances[]` (role, node, zone, healthy,
+`sync_state`, `lag_bytes`), `poolers[]`, `version`/`target`, `storage_size`,
+`sync_policy`, `object_store`, `archived_wal` (archived, last, failed,
+`last_time`, current, `lag_segments`), `archiving` (the CNPG ContinuousArchiving
+condition), `schedules[]` + `retention`, `backup_configured` + `backups_completed`
++ `backups[]` + `recoverability_point` + `pitr_window`, `upgrading`, `database` +
+`login_roles` + `blue_green`, `credentials` (active role + rotated-at from the
+cluster annotation), `disk{}`, `data_size`, `connections`, `slots[]`, `services[]`,
+`health` (the ORR query: xid age, longest txn, oldest connection, idle-in-txn,
+dead-tuple %, cache-hit %), plus `busy`/`busy_reason` and `fault_in_flight`.
 
 ## SCADA topology + health signals
 
@@ -232,9 +236,12 @@ kubectl -n <ns> port-forward svc/k8ost-console 8700:8700 # port-forward IS the a
 ```
 
 - **RBAC is the blast radius.** The console can do exactly what `pg/deploy/console.yaml`'s
-  Role grants — a readable, revocable YAML boundary. `pg/deploy/rbac-clusterwide.yaml`
-  is the fleet-wide (ClusterRole) variant, which also reads nodes for zone info.
-  Note `pods/exec` needs **both `get` and `create`** (the websocket-stream exec is a GET).
+  Role grants — a readable, revocable YAML boundary. Alongside the CNPG/pod/secret
+  grants it also reads `storageclasses` + `persistentvolumeclaims` (the Expand-storage
+  expandability pre-check) and creates/deletes `networkpolicies` (the partition fault).
+  `pg/deploy/rbac-clusterwide.yaml` is the fleet-wide (ClusterRole) variant, which also
+  reads nodes for zone info. Note `pods/exec` needs **both `get` and `create`** (the
+  websocket-stream exec is a GET).
 - **Build → Deploy is opt-in.** `pg/deploy/console.yaml` grants only operate/read;
   applying the additive `pg/deploy/console-lab.yaml` adds the create rights the
   Builder's Deploy needs. Leave it off for a pure operator console.

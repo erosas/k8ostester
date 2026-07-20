@@ -4,22 +4,23 @@ The Ops + Chaos actions from docs/remote-control.md, each a kernel ``Action``
 whose precondition is evaluated against a discovered CNPG state snapshot. The
 console renders/gates them from this list; nothing tracks "used".
 
-Snapshot shape (produced by discovery, not here) — the fields the preconditions
-read::
+Snapshot shape (produced by discovery, not here) — the core fields the
+preconditions gate on. Discovery produces many more (topology, health, disk,
+connections, …); these are the ones the ``CNPG_ACTIONS`` lambdas read::
 
     {
       "ready": bool,                 # cluster healthy
       "primary": str,                # current primary pod ("" if none)
       "replicas": [str, ...],
-      "zones": [str, ...],           # distinct node zones in play
-      "version": "16.4",             # current PG version
-      "target": "16.6",              # a newer version available ("" if none)
       "upgrading": bool,
-      "backup_configured": bool,
+      "backup_configured": bool,     # an object store is configured
       "backups_completed": int,
       "pitr_window": bool,           # a WAL window exists
-      "blue_green": bool,            # two-role credentials present
+      "blue_green": bool,            # two login roles present (rotation)
       "fault_in_flight": bool,       # a chaos fault is currently active
+      "busy": bool,                  # exclusivity lock — a mutating op is in progress
+      # also present but not gated on: zones, version, target, storage_size,
+      # health, disk, connections, slots, sync_policy, object_store, credentials, …
     }
 """
 from __future__ import annotations

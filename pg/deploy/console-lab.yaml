@@ -4,7 +4,7 @@
 # only when you want the Build → Deploy loop; leave it off for a pure operator
 # deployment (deploy then 403s, which the UI reports).
 #
-#   kubectl -n <ns> apply -f console.yaml console-lab.yaml
+#   kubectl -n <ns> apply -f console.yaml -f console-lab.yaml
 #
 # This is a broad grant (create Deployments, Secrets, RBAC, CRs). Scope it to a
 # throwaway/lab namespace — you would not give an operator console this.

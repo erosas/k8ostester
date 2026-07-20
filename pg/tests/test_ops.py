@@ -82,6 +82,26 @@ def test_storage_expandable_false_when_class_disallows():
     assert ops.storage_expandable(k8s, "ns", "pg") == (False, "standard")
 
 
+def test_qty_bytes_parses_k8s_quantities():
+    assert ops._qty_bytes("10Gi") == 10 * 2**30
+    assert ops._qty_bytes("500M") == 500 * 10**6
+    assert ops._qty_bytes("1024") == 1024
+    assert ops._qty_bytes("bad") is None
+
+
+def test_expand_storage_rejects_a_shrink():
+    from unittest.mock import MagicMock
+
+    import pytest
+    k8s = MagicMock()
+    cl = cluster_obj()
+    cl["spec"]["storage"] = {"size": "10Gi"}
+    k8s.custom.get_namespaced_custom_object.return_value = cl
+    with pytest.raises(RuntimeError, match="grow-only"):
+        ops.expand_storage(k8s, "ns", "5Gi")   # smaller than current
+    k8s.custom.patch_namespaced_custom_object.assert_not_called()
+
+
 def test_expand_storage_rejects_a_noop():
     import pytest
     k8s = MagicMock()

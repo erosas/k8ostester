@@ -5,6 +5,7 @@ docs/remote-control.md.
 """
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from k8ostester_kernel.k8s import ClusterClient
@@ -63,6 +64,18 @@ def maintenance(k8s: ClusterClient, ns: str, op: str, name: str = "pg") -> str:
     return f"{sql} completed on {primary} ({db})"
 
 
+_QTY_UNITS = {"": 1, "K": 1e3, "M": 1e6, "G": 1e9, "T": 1e12, "P": 1e15,
+              "Ki": 2**10, "Mi": 2**20, "Gi": 2**30, "Ti": 2**40, "Pi": 2**50}
+
+
+def _qty_bytes(s: str) -> float | None:
+    """Parse a k8s quantity (e.g. '10Gi', '500M', '1024') to bytes; None if unparseable."""
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([KMGTP]i?)?", (s or "").strip())
+    if not m:
+        return None
+    return float(m.group(1)) * _QTY_UNITS[m.group(2) or ""]
+
+
 def expand_storage(k8s: ClusterClient, ns: str, size: str, name: str = "pg") -> str:
     """Grow the data volume by patching ``spec.storage.size``. The operator expands
     each PVC in place — online, no downtime — IF the storage class allows it
@@ -73,6 +86,9 @@ def expand_storage(k8s: ClusterClient, ns: str, size: str, name: str = "pg") -> 
     current = _cluster(k8s, ns, name).get("spec", {}).get("storage", {}).get("size", "")
     if size == current:
         raise RuntimeError(f"storage is already {size}")
+    nb, cb = _qty_bytes(size), _qty_bytes(current)
+    if nb is not None and cb is not None and nb <= cb:
+        raise RuntimeError(f"storage is grow-only: {size} is not larger than {current}")
     k8s.custom.patch_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, ns, "clusters", name,
         {"spec": {"storage": {"size": size}}})

@@ -888,27 +888,46 @@ function openExpand(){
       <div class="uwarn" style="display:block">⚠ <b>Grow-only.</b> Volumes and PostgreSQL can't shrink — you can raise this but never lower it, so bump it a little at a time.</div>
     </div>
     <div class="mbtns"><button data-close>Cancel</button>
-      <button class="go" id="exp-go" onclick="confirmExpand()">Expand storage</button></div>`);
+      <button class="go" id="exp-go" onclick="confirmExpand()" disabled>Expand storage</button></div>`);
   checkExpandable();
 }
+function setExpGo(on){ const go=document.getElementById("exp-go"); if(!go) return;
+  go.disabled=!on; go.style.opacity=on?"":".4"; go.style.cursor=on?"":"default"; }
 async function checkExpandable(){
-  const el=document.getElementById("exp-sc"), go=document.getElementById("exp-go");
-  let j; try{ j = await (await fetch("/api/storage-expandable")).json(); }catch(e){ el.textContent="storage-class check unavailable"; return; }
+  const el=document.getElementById("exp-sc");
+  let j; try{ j = await (await fetch("/api/storage-expandable")).json(); }
+  catch(e){ el.textContent="storage-class check unavailable"; setExpGo(true); return; }
   const sc = esch(j.storage_class||"?");
   if(j.expandable===false){
     el.className="fnote warn";
     el.innerHTML=`✗ Storage class <b>${sc}</b> does not allow volume expansion — raising the size here would <b>not</b> resize the volume. Migrate/restore to a larger volume instead.`;
-    if(go){ go.disabled=true; go.style.opacity=".4"; go.style.cursor="default"; }
+    setExpGo(false);   // keep it blocked
   } else if(j.expandable===true){
-    el.className="fnote"; el.innerHTML=`✓ Storage class <b>${sc}</b> allows online expansion.`;
+    el.className="fnote"; el.innerHTML=`✓ Storage class <b>${sc}</b> allows online expansion.`; setExpGo(true);
   } else {
     el.className="fnote warn";
     el.innerHTML=`⚠ Couldn't confirm storage class <b>${sc}</b> allows expansion${j.error?" ("+esch(j.error)+")":""} — proceed only if you know it does.`;
+    setExpGo(true);
   }
 }
+// parse a k8s quantity to bytes (binary Ki/Mi/Gi…, decimal K/M/G…, or plain) — null if unparseable
+function qtyBytes(s){
+  const m = String(s||"").trim().match(/^(\d+(?:\.\d+)?)\s*([KMGTPE]i?)?$/);
+  if(!m) return null;
+  const bin={Ki:2**10,Mi:2**20,Gi:2**30,Ti:2**40,Pi:2**50,Ei:2**60};
+  const dec={K:1e3,M:1e6,G:1e9,T:1e12,P:1e15,E:1e18};
+  const u=m[2]||""; const f = bin[u] ?? dec[u] ?? 1;
+  return parseFloat(m[1]) * f;
+}
 function confirmExpand(){
-  const size = document.getElementById("exp-size").value.trim();
-  if(!size || size === (SNAP.storage_size||"")){ document.getElementById("exp-size").focus(); return; }
+  const el=document.getElementById("exp-size"), size=el.value.trim(), cur=SNAP.storage_size||"";
+  if(!size){ el.focus(); return; }
+  const nb=qtyBytes(size), cb=qtyBytes(cur);
+  if(nb!=null && cb!=null && nb<=cb){   // grow-only: reject same-or-smaller
+    const note=document.getElementById("exp-sc");
+    if(note){ note.className="fnote warn"; note.innerHTML=`✗ New size must be <b>larger</b> than the current ${esch(cur)} — storage is grow-only.`; }
+    el.focus(); return;
+  }
   closeSheet();
   post("expand-storage", {size}, "Expand storage → "+size);
 }
@@ -1170,7 +1189,7 @@ async function onCluster(){
 
 // Activity: a meaningful record — operation, status, round-trip duration, detail
 let ACTS = 0;
-function esch(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function esch(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 function logActivity(op, ok, detail, ms){
   const el = document.getElementById("log");
   const empty = el.querySelector(".empty");

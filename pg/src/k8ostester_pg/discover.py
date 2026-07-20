@@ -337,8 +337,9 @@ _HEALTH_Q = (
     " coalesce((select count(*) from pg_stat_activity where state='idle in transaction'),0),"
     " coalesce((select round(100.0*sum(n_dead_tup)/nullif(sum(n_live_tup+n_dead_tup),0),1)"
     "   from pg_stat_user_tables),0),"
-    " coalesce((select round(100.0*sum(blks_hit)/nullif(sum(blks_hit+blks_read),0),2)"
-    "   from pg_stat_database),100)"
+    " coalesce((select case when sum(blks_hit+blks_read) < 100000 then 100"
+    "   else round(100.0*sum(blks_hit)/nullif(sum(blks_hit+blks_read),0),2) end"
+    "   from pg_stat_database),100)"    # low read volume -> report 100 (no false CRIT on cold clusters)
 )
 
 
@@ -348,6 +349,13 @@ def _health(k8s: ClusterClient, namespace: str, primary: str, db: str) -> dict:
     dead-tuple % (bloat) and cache-hit %. Self-contained (direct psql), so the health
     panel works even without a metrics pipeline."""
     raw = _psql(k8s, namespace, primary, _HEALTH_Q, db=db or "postgres")
+    # if the app database name doesn't exist (e.g. a recovery-bootstrapped cluster),
+    # fall back to the postgres maintenance db so the panel still shows the
+    # cluster-wide signals — but drop bloat, which is per-database and meaningless there.
+    fell_back = False
+    if raw is None and (db or "") not in ("", "postgres"):
+        raw = _psql(k8s, namespace, primary, _HEALTH_Q, db="postgres")
+        fell_back = True
     if raw is None:
         return {}
     p = raw.split("|")
@@ -359,8 +367,11 @@ def _health(k8s: ClusterClient, namespace: str, primary: str, db: str) -> dict:
             return cast(p[i])
         except (ValueError, IndexError):
             return default
-    return {"xid_age": _n(0), "longest_txn_s": _n(1), "oldest_conn_s": _n(2),
-            "idle_in_txn": _n(3), "dead_pct": _n(4, float), "cache_hit_pct": _n(5, float)}
+    out = {"xid_age": _n(0), "longest_txn_s": _n(1), "oldest_conn_s": _n(2),
+           "idle_in_txn": _n(3), "dead_pct": _n(4, float), "cache_hit_pct": _n(5, float)}
+    if fell_back:
+        out.pop("dead_pct")
+    return out
 
 
 def heavy(k8s: ClusterClient, namespace: str, name: str = "pg") -> dict:

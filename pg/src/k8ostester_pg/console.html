@@ -161,6 +161,20 @@
   .manifest .ln.chg{animation:chgflash 1.6s ease-out}
   @keyframes chgflash{from{background:rgba(124,174,132,.30)}to{background:transparent}}
   @media(prefers-reduced-motion:reduce){.manifest .ln.chg{animation:none}}
+  /* builder wizard: page-by-page steps, or view all at once */
+  .bwiz{display:flex;align-items:center;justify-content:space-between;gap:var(--s3);
+    margin-bottom:var(--s4);flex-wrap:wrap}
+  .bmode{display:flex;border:1px solid var(--border);border-radius:7px;overflow:hidden}
+  .bmode button{font-family:var(--mono);font-size:11.5px;padding:5px 13px;border:0;cursor:pointer;
+    background:var(--panel2);color:var(--muted)}
+  .bmode button.on{background:var(--panel);color:var(--accent)}
+  .bstepnav{display:flex;align-items:center;gap:var(--s3)}
+  .bstep-lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+    color:var(--muted);min-width:190px;text-align:center}
+  .bstep-btn{font-family:var(--sans);font-size:13px;padding:6px 15px;border-radius:7px;
+    border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer}
+  .bstep-btn:hover:not(:disabled){border-color:var(--accent)}
+  .bstep-btn:disabled{opacity:.4;cursor:default}
   .bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--s3) var(--s4);
     margin-bottom:var(--s4)}
   .bgrid label{display:flex;flex-direction:column;gap:5px;font-family:var(--mono);font-size:11px;
@@ -390,7 +404,18 @@
   </div>
 
   <div class="builder" id="builder" style="display:none">
-    <div class="bform">
+    <div class="bform" id="bform">
+    <div class="bwiz">
+      <div class="bmode" id="b-mode">
+        <button data-mode="steps" class="on" onclick="setBMode('steps')">Steps</button>
+        <button data-mode="all" onclick="setBMode('all')">All</button>
+      </div>
+      <div class="bstepnav" id="b-stepnav">
+        <button class="bstep-btn" id="b-back" onclick="stepBy(-1)">‹ Back</button>
+        <span class="bstep-lbl" id="b-steplbl"></span>
+        <button class="bstep-btn" id="b-next" onclick="stepBy(1)">Next ›</button>
+      </div>
+    </div>
     <div class="bsec">
       <div class="bsec-h"><h4>What's this cluster for?</h4>
         <p class="bsec-desc">Pick a starting point — it sets sensible defaults for everything below, which you can then tune. The manifest updates live as you edit.</p></div>
@@ -608,7 +633,7 @@ function pick(t){
   if(t==="builder"){
     const nsEl = document.getElementById("b-namespace");   // default to the selected namespace
     if(SNAP.namespace && (!nsEl.value || nsEl.value==="default")) nsEl.value = SNAP.namespace;
-    if(!window._bInit){ window._bInit = true; preset("reference"); return; }  // sync fields to the lit card
+    if(!window._bInit){ window._bInit = true; preset("reference"); setBMode(BMODE); return; }  // sync fields to the lit card + wizard
     if(!document.getElementById("b-taglist").children.length) browseBuilderTags();   // once
     scheduleBuilderCheck();
     generateManifest();
@@ -1004,6 +1029,27 @@ function preset(k){
   set("b-goal-lag",p.goals.lag); set("b-goal-conn",p.goals.conn); set("b-goal-archive",p.goals.archive);
   browseBuilderTags(); scheduleBuilderCheck();
   generateManifest();
+}
+
+/* ---- builder view: page-by-page steps, or everything at once ---- */
+let BMODE = "steps", BSTEP = 0;
+function bsecs(){ return [...document.querySelectorAll("#bform > .bsec")]; }
+function setBMode(m){
+  BMODE = m;
+  document.querySelectorAll("#b-mode button").forEach(b=>b.classList.toggle("on", b.dataset.mode===m));
+  document.getElementById("b-stepnav").style.display = m==="steps" ? "flex" : "none";
+  applySteps();
+}
+function stepBy(d){ BSTEP += d; applySteps(); }
+function applySteps(){
+  const secs = bsecs(), n = secs.length;
+  if(BMODE==="all"){ secs.forEach(s=>s.style.display=""); return; }
+  BSTEP = Math.max(0, Math.min(n-1, BSTEP));
+  secs.forEach((s,i)=>s.style.display = i===BSTEP ? "" : "none");
+  const h = secs[BSTEP].querySelector("h4");
+  document.getElementById("b-steplbl").textContent = `Step ${BSTEP+1} of ${n} · ${h ? h.textContent : ""}`;
+  document.getElementById("b-back").disabled = BSTEP===0;
+  document.getElementById("b-next").disabled = BSTEP===n-1;
 }
 
 async function onContext(){ await loadClusters(document.getElementById("ctx-sel").value, null); }

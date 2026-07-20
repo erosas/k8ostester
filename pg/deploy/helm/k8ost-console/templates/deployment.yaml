@@ -61,11 +61,20 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
+          {{- /* built-in basic-auth would 401 an HTTP probe, so check the socket instead */}}
           readinessProbe:
+            {{- if .Values.console.basicAuth.enabled }}
+            tcpSocket: {port: http}
+            {{- else }}
             httpGet: {path: /, port: http}
+            {{- end }}
             initialDelaySeconds: 3
           livenessProbe:
+            {{- if .Values.console.basicAuth.enabled }}
+            tcpSocket: {port: http}
+            {{- else }}
             httpGet: {path: /, port: http}
+            {{- end }}
             initialDelaySeconds: 10
           resources: {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

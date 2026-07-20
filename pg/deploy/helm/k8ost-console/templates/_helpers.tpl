@@ -36,7 +36,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
   verbs: ["get", "list"]
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "watch", "delete"]            # topology + kill-pod fault
+  verbs: ["get", "list", "watch", "delete", "patch"]   # topology + kill-pod; patch = label for the partition fault
 - apiGroups: [""]
   resources: ["pods/exec"]
   verbs: ["get", "create"]                             # psql/df/vacuum via the API exec stream

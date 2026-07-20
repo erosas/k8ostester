@@ -101,14 +101,15 @@ Or run the **published image** — no checkout — against a reachable cluster, 
 your kubeconfig:
 
 ```bash
-docker run --rm -p 8700:8700 -v "$HOME/.kube:/home/k8ost/.kube:ro" \
-  bytestream89/k8os-console --host 0.0.0.0
+docker run --rm -p 8700:8700 --user "$(id -u)" -e HOME=/tmp \
+  -v "$HOME/.kube:/tmp/.kube:ro" bytestream89/k8os-console --host 0.0.0.0
 # → http://127.0.0.1:8700
 ```
 
-(The kubeconfig must point at an API the container can reach. For a local
-kind/docker-desktop cluster the API is on `127.0.0.1`, which the container can't
-see — use `uv run …` above, or an in-cluster install.)
+(`--user "$(id -u)"` runs as you so a `0600` kubeconfig is readable. The kubeconfig
+must point at an API the container can reach — for a local kind/docker-desktop
+cluster the API is on `127.0.0.1`, which the container can't see, so use
+`uv run …` above or an in-cluster install.)
 
 ### 3 · Deploy the console in-cluster (control plane)
 

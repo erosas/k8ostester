@@ -17,12 +17,17 @@ spec:
       serviceAccountName: {{ include "k8ost-console.sa" . }}
       securityContext:
         runAsNonRoot: true
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: console
           # in-cluster the console uses its ServiceAccount (no kubeconfig) and binds
           # 0.0.0.0 automatically; the Service + port-forward are the only way in.
           image: {{ include "k8ost-console.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:                    # satisfies the 'restricted' Pod Security Standard
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
           args:
             - --port
             - {{ .Values.service.port | quote }}

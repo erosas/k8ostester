@@ -28,7 +28,7 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch", "delete"]
+    verbs: ["get", "list", "watch", "delete", "patch"]   # patch = label a pod for the partition fault
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["get", "create"]   # get = websocket-stream exec; create = SPDY exec

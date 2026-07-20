@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Memory usage (GiB)",
+  "description": "Per-instance working-set memory in GiB, from cAdvisor (container_memory_working_set_bytes). Needs kubelet/cAdvisor scraping. The waterline, if set, is your max-memory goal.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "container_memory_working_set_bytes{container=\"postgres\",pod=~\"__CLUSTER__-[0-9]+\"} / 1073741824", "legendFormat": "{{pod}}", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "gbytes", "custom": {"drawStyle": "line", "fillOpacity": 12}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

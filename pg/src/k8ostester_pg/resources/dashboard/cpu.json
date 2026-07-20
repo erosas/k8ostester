@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "CPU usage (cores)",
+  "description": "Per-instance CPU in cores, from cAdvisor (container_cpu_usage_seconds_total, postgres container). Needs a Prometheus scraping the kubelet/cAdvisor — an OTEL collector that only scrapes CNPG won't have it. The waterline, if set, is your max-CPU goal.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "rate(container_cpu_usage_seconds_total{container=\"postgres\",pod=~\"__CLUSTER__-[0-9]+\"}[5m])", "legendFormat": "{{pod}}", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 12}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

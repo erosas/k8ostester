@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Longest transaction (s)",
+  "description": "Duration of the longest-running transaction (cnpg_backends_max_tx_duration_seconds). Long or stuck transactions hold locks and block autovacuum — usually a runaway query or a forgotten BEGIN. The waterline, if set, is your stuck-transaction goal.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "max(cnpg_backends_max_tx_duration_seconds{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "longest txn", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

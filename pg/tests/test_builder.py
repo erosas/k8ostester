@@ -66,9 +66,14 @@ def test_monitoring_and_otel_are_optional_and_render():
     # an OTEL endpoint emits a collector (SA + RBAC + ConfigMap + Deployment)
     kinds = {d["kind"] for d in docs if d}
     assert {"ServiceAccount", "Role", "ConfigMap", "Deployment"} <= kinds
-    cm = next(d for d in docs if d and d["kind"] == "ConfigMap")
+    # the OTEL collector's config ConfigMap (monitoring also emits a custom-queries CM)
+    cm = next(d for d in docs if d and d["kind"] == "ConfigMap" and "config.yaml" in d.get("data", {}))
     assert "otel-collector.obs.svc:4317" in cm["data"]["config.yaml"]
     assert "regex: db" in cm["data"]["config.yaml"]   # scrapes this cluster's pods
+    # monitoring attaches the custom-queries ConfigMap (connection age / idle-in-txn)
+    q = next(d for d in docs if d and d["kind"] == "ConfigMap" and "queries.yaml" in d.get("data", {}))
+    assert q["metadata"]["name"] == "db-queries"
+    assert cluster["spec"]["monitoring"]["customQueriesConfigMap"] == [{"name": "db-queries", "key": "queries.yaml"}]
 
 
 def test_dashboard_panels_adapt_to_the_config():
@@ -96,7 +101,12 @@ def test_dashboard_scrape_label_is_configurable():
     from k8ostester_pg.dashboard import build_dashboard
     d = json.loads(build_dashboard({"name": "pg", "scrape_label": "instance"}))
     assert 'instance=~"pg-[0-9]+"' in d["panels"][0]["targets"][0]["expr"]
-    assert "pod=~" not in json.dumps(d)
+    # CNPG-metric panels honour the scrape label; resource panels keep cAdvisor's own
+    # labels (pod / persistentvolumeclaim), which are not the CNPG scrape label
+    conns = next(p for p in d["panels"] if p["title"].startswith("Active connections"))
+    assert 'cnpg_backends_total{instance=~"pg-[0-9]+"}' in conns["targets"][0]["expr"]
+    cpu = next(p for p in d["panels"] if p["title"].startswith("CPU"))
+    assert 'pod=~"pg-[0-9]+"' in cpu["targets"][0]["expr"]
     # goals/alerts honour the same label (alerts need monitoring on)
     m = build_manifest({"name": "pg", "scrape_label": "instance", "monitoring": True,
                         "goals": {"repl_lag": 30}})
@@ -155,6 +165,13 @@ def test_schedule_requires_backups():
 def test_instances_are_clamped():
     c = next(d for d in yaml.safe_load_all(build_manifest({"instances": 99})) if d)
     assert c["spec"]["instances"] == 9
+
+
+def test_single_instance_omits_synchronous():
+    # quorum sync with only 1 instance is invalid (no standby to wait on) — omit it
+    c = next(d for d in yaml.safe_load_all(
+        build_manifest({"instances": 1, "sync": "quorum"})) if d)
+    assert "synchronous" not in c["spec"].get("postgresql", {})
 
 
 def test_compute_requests_and_optional_limits():

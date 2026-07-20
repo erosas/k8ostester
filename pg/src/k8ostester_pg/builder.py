@@ -45,8 +45,10 @@ def build_manifest(opts: dict) -> str:
 
     # optional spec fragments, in the order they appear under spec
     extra = ""
+    # synchronous replication needs at least one standby to wait on — omit it for a
+    # single instance (CNPG rejects a sync number >= the instance count).
     method_number = _SYNC.get(opts.get("sync") or "quorum")
-    if method_number:
+    if method_number and instances >= 2:
         extra += _tmpl("cluster-sync.tmpl.yaml").substitute(
             method=method_number[0], number=method_number[1])
     if opts.get("backups"):
@@ -58,9 +60,13 @@ def build_manifest(opts: dict) -> str:
             retention=(opts.get("retention") or "7d").strip(),
         )
 
-    # native Prometheus scrape (CNPG exposes metrics; the operator makes a PodMonitor)
+    # native Prometheus scrape (CNPG exposes metrics; the operator makes a PodMonitor).
+    # We also attach a custom-queries ConfigMap so CNPG exposes connection age +
+    # idle-in-transaction (not in the default metric set) — for the ORR dashboards.
+    mon_docs = []
     if opts.get("monitoring"):
-        extra += _tmpl("cluster-monitoring.tmpl.yaml").substitute()
+        extra += _tmpl("cluster-monitoring.tmpl.yaml").substitute(name=name)
+        mon_docs.append(_tmpl("custom-queries.tmpl.yaml").substitute(name=name))
 
     # blue/green application roles for credential rotation: two login roles that
     # both inherit the app owner (so they share the data), each from its own
@@ -75,7 +81,7 @@ def build_manifest(opts: dict) -> str:
             secret_docs.append(_tmpl("role-secret.tmpl.yaml").substitute(
                 secret=secret, role=role, password=pw))
 
-    docs = [*secret_docs, _tmpl("cluster.tmpl.yaml").substitute(
+    docs = [*secret_docs, *mon_docs, _tmpl("cluster.tmpl.yaml").substitute(
         name=name, instances=instances, image=image, storage=storage,
         resources=resources, extra=extra)]
 

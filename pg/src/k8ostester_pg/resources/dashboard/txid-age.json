@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Transaction ID age (wraparound)",
+  "description": "Age of the oldest unfrozen transaction ID (cnpg_pg_database_xid_age). PostgreSQL MUST vacuum before this reaches ~2.1 billion or the database stops accepting writes to protect against wraparound. Set the waterline well below the limit (e.g. 150M) to catch autovacuum falling behind long before it's an incident.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "max(cnpg_pg_database_xid_age{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "oldest xid age", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

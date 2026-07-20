@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Oldest connection age (s)",
+  "description": "Age of the oldest client connection (cnpg_k8ost_conn_oldest_seconds, from the k8ost custom query). Long-lived connections should be recycled periodically — set the pooler's server_lifetime and keep this under your goal. The waterline, if set, is your connection-age goal.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "max(cnpg_k8ost_conn_oldest_seconds{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "oldest connection", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

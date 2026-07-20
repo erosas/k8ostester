@@ -25,6 +25,39 @@ GOALS: dict[str, tuple[str, str, str, str]] = {
         'time() - cnpg_pg_stat_archiver_last_archived_time{{{label}=~"{pods}"}} > {v}',
         "WAL archive delayed over {v}s",
     ),
+    # --- resources (cAdvisor / kubelet metrics; pod & PVC labels, not {label}) ---
+    "cpu": (
+        "cpu", "CpuHigh",
+        'max(rate(container_cpu_usage_seconds_total{{container="postgres",pod=~"{pods}"}}[5m])) > {v}',
+        "an instance using over {v} CPU cores",
+    ),
+    "memory": (
+        "memory", "MemoryHigh",
+        'max(container_memory_working_set_bytes{{container="postgres",pod=~"{pods}"}}) / 1073741824 > {v}',
+        "an instance using over {v}Gi memory",
+    ),
+    "disk": (
+        "disk", "DiskHigh",
+        'max(kubelet_volume_stats_used_bytes{{persistentvolumeclaim=~"{pods}"}}'
+        ' / kubelet_volume_stats_capacity_bytes{{persistentvolumeclaim=~"{pods}"}}) * 100 > {v}',
+        "a volume over {v}% full",
+    ),
+    # --- operational health (CNPG metrics) ---
+    "txid": (
+        "txid-age", "TxidWraparound",
+        'max(cnpg_pg_database_xid_age{{{label}=~"{pods}"}}) > {v}',
+        "transaction ID age over {v} (wraparound risk)",
+    ),
+    "long_txn": (
+        "long-txn", "LongTransaction",
+        'max(cnpg_backends_max_tx_duration_seconds{{{label}=~"{pods}"}}) > {v}',
+        "a transaction running over {v}s",
+    ),
+    "conn_age": (
+        "conn-age", "ConnectionTooOld",
+        'max(cnpg_k8ost_conn_oldest_seconds{{{label}=~"{pods}"}}) > {v}',
+        "a client connection older than {v}s (recycle it)",
+    ),
 }
 
 

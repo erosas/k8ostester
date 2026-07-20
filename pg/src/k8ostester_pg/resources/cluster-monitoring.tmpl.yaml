@@ -1,2 +1,5 @@
   monitoring:
     enablePodMonitor: true
+    customQueriesConfigMap:
+      - name: ${name}-queries
+        key: queries.yaml

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${name}-queries
+data:
+  queries.yaml: |
+    k8ost_conn:
+      query: "SELECT max(extract(epoch from (now()-backend_start)))::float AS oldest_seconds, count(*) FILTER (WHERE state='idle in transaction')::float AS idle_in_txn FROM pg_stat_activity WHERE backend_type='client backend'"
+      metrics:
+        - oldest_seconds:
+            usage: "GAUGE"
+            description: "Age of the oldest client connection in seconds"
+        - idle_in_txn:
+            usage: "GAUGE"
+            description: "Client backends idle in a transaction"

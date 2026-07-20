@@ -553,6 +553,24 @@
         <label>Goal · max WAL archive delay (s)
           <input id="b-goal-archive" type="number" min="1" max="86400" step="1" placeholder="120">
           <span class="fcap">recommended 120</span></label>
+        <label>Goal · max CPU (cores)
+          <input id="b-goal-cpu" type="number" min="0.1" step="0.1" placeholder="e.g. 0.8">
+          <span class="fcap">~80% of the CPU limit · needs cAdvisor</span></label>
+        <label>Goal · max memory (Gi)
+          <input id="b-goal-memory" type="number" min="0.1" step="0.1" placeholder="e.g. 1.6">
+          <span class="fcap">~80% of the memory limit · needs cAdvisor</span></label>
+        <label>Goal · max disk (%)
+          <input id="b-goal-disk" type="number" min="1" max="100" step="1" placeholder="80">
+          <span class="fcap">PVC usage · needs kubelet metrics</span></label>
+        <label>Goal · max transaction-ID age
+          <input id="b-goal-txid" type="number" min="1000000" step="1000000" placeholder="150000000">
+          <span class="fcap">wraparound headroom (limit ~2.1B)</span></label>
+        <label>Goal · longest transaction (s)
+          <input id="b-goal-longtxn" type="number" min="1" step="1" placeholder="300">
+          <span class="fcap">stuck / runaway transaction</span></label>
+        <label>Goal · oldest connection (s)
+          <input id="b-goal-connage" type="number" min="1" step="1" placeholder="3600">
+          <span class="fcap">recycle long-lived connections</span></label>
       </div>
       <div class="fnote" id="b-goals-note">Each goal draws a red <b>waterline</b> on its dashboard panel and a matching Prometheus <b>alert rule</b> — one number drives both. Leave blank to skip.</div>
     </div>
@@ -1001,17 +1019,19 @@ function openFaultPicker(){
 
 /* ---- builder presets ---- */
 const DEFAULT_REPO = "ghcr.io/cloudnative-pg/postgresql";
-// recommended alert thresholds a production preset ships with (blank = no alert)
-const GOALS_PROD = {lag:30, conn:80, archive:120}, GOALS_NONE = {lag:"", conn:"", archive:""};
+// recommended alert thresholds a production preset ships with (blank = no alert).
+// cpu/memory goals are ~80% of that preset's limit, so they're set per preset.
+const GOALS_PROD = {lag:30, conn:80, archive:120, disk:80, txid:150000000, longtxn:300, connage:3600};
+const GOALS_NONE = {lag:"", conn:"", archive:"", disk:"", txid:"", longtxn:"", connage:"", cpu:"", memory:""};
 const PRESETS = {
   reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",cpu:"1",memory:"2Gi",limits:true,sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:GOALS_PROD},
+    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD,cpu:0.8,memory:1.6}},
   readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
-    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:GOALS_PROD},
+    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD,cpu:1.6,memory:3.2}},
   dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",cpu:"100m",memory:"256Mi",limits:false,sync:"async",pooler:false,
     pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *",app_roles:false,goals:GOALS_NONE},
   durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true,goals:GOALS_PROD},
+    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true,goals:{...GOALS_PROD,cpu:1.6,memory:3.2}},
 };
 function preset(k){
   const p=PRESETS[k]; if(!p) return;
@@ -1027,6 +1047,8 @@ function preset(k){
   chk("b-approles",!!p.app_roles);
   chk("b-monitoring",true);   // every preset ships Prometheus monitoring
   set("b-goal-lag",p.goals.lag); set("b-goal-conn",p.goals.conn); set("b-goal-archive",p.goals.archive);
+  set("b-goal-cpu",p.goals.cpu); set("b-goal-memory",p.goals.memory); set("b-goal-disk",p.goals.disk);
+  set("b-goal-txid",p.goals.txid); set("b-goal-longtxn",p.goals.longtxn); set("b-goal-connage",p.goals.connage);
   browseBuilderTags(); scheduleBuilderCheck();
   generateManifest();
 }
@@ -1552,7 +1574,9 @@ function builderOpts(){
     schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
     app_roles:ck("b-approles"),
     monitoring:ck("b-monitoring"), otel_endpoint:v("b-otel"), scrape_label:v("b-scrape-label"),
-    goals:{ repl_lag:v("b-goal-lag"), connections:v("b-goal-conn"), archive_delay:v("b-goal-archive") },
+    goals:{ repl_lag:v("b-goal-lag"), connections:v("b-goal-conn"), archive_delay:v("b-goal-archive"),
+      cpu:v("b-goal-cpu"), memory:v("b-goal-memory"), disk:v("b-goal-disk"),
+      txid:v("b-goal-txid"), long_txn:v("b-goal-longtxn"), conn_age:v("b-goal-connage") },
   };
 }
 function switchOutput(o){

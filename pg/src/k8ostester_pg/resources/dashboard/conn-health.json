@@ -1,0 +1,15 @@
+{
+  "type": "timeseries",
+  "title": "Connection health",
+  "description": "Total client backends, backends waiting on a lock (cnpg_backends_waiting_total), and backends idle in a transaction (k8ost custom query). Waiting climbing means lock contention; idle-in-transaction climbing means the app is leaking open transactions (which also blocks vacuum).",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "sum(cnpg_backends_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "total", "refId": "A"},
+    {"expr": "sum(cnpg_backends_waiting_total{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "waiting (locks)", "refId": "B"},
+    {"expr": "sum(cnpg_k8ost_conn_idle_in_txn{__LABEL__=~\"__CLUSTER__-[0-9]+\"})", "legendFormat": "idle in txn", "refId": "C"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

@@ -35,10 +35,19 @@ use" and "multi-use" fall out of one rule.
 | --- | --- | --- | --- |
 | Take base backup | Operate · routine | always | Ready · backup configured · not busy |
 | Rotate credentials | Operate · routine | always | Ready · two login roles · not busy |
+| Expand storage | Operate · routine | always | Ready · not busy (modal re-checks the storage class allows expansion) |
+| Run maintenance | Operate · routine | always | Ready · not busy — VACUUM (ANALYZE) / ANALYZE / CHECKPOINT |
 | Restore (PITR) | Operate · break-glass | always | ≥1 completed backup · WAL window · not busy |
 | Minor upgrade | Operate · break-glass | always (asks for the image on press) | Ready · not upgrading · not busy |
 | Inject fault (kill / partition a pod) | Operate · break-glass | always | target pod exists · no fault in flight |
 | Deploy a built manifest | Build | a manifest is generated | RBAC allows create (see `console-lab.yaml`) |
+
+Actions **degrade safely on cluster-specific setups** rather than silently
+misbehaving: Backup/Restore gate on a configured object store + WAL window,
+Rotate on two login roles, and Expand storage re-checks the storage class's
+`allowVolumeExpansion` on open (blocking the button if it can't grow, so the
+patch can't become a silent no-op). The fault picker warns that Partition only
+isolates on a CNI that enforces NetworkPolicy.
 
 `enabled` is computed **server-side** from the snapshot (a stale browser can't
 fire a disabled action) and also sent down for rendering. Restore proves the
@@ -65,14 +74,28 @@ drives everything; switching re-selects live. The console mutates clusters, so
 A header selector switches between **Operate** and **Build**:
 
 - **Operate** — the live cluster: the SCADA topology, the conditions strip, the
-  recovery window, and the routine actions (backup, rotate). The destructive
-  **break-glass** actions (PITR restore, minor upgrade, inject a fault) sit below
-  in a cordoned danger zone that stays disabled until you **arm** it — so you
-  can't fire one by reflex or without realizing you're in a dangerous mode.
-- **Build** — the manifest builder + observability, and a one-click **Deploy** of
-  what you built into the selected namespace. No cluster needed to design.
+  recovery window, a **Health & runbooks** panel (below), and the routine actions
+  (backup, rotate, expand storage, run maintenance). The destructive **break-glass**
+  actions (PITR restore, minor upgrade, inject a fault) sit below in a cordoned
+  danger zone that stays disabled until you **arm** it — so you can't fire one by
+  reflex or without realizing you're in a dangerous mode.
+- **Build** — the guided manifest builder + observability, and a one-click **Deploy**
+  of what you built into the selected namespace. No cluster needed to design.
 
 Every mutating action confirms before it runs.
+
+## Health & runbooks
+
+An ORR checklist evaluated live from the snapshot. A self-contained health query
+(one psql on the primary, so it works even without a metrics pipeline) returns
+transaction-ID age (wraparound), longest transaction, oldest connection,
+idle-in-transaction, dead-tuple % (bloat) and cache-hit %. The panel scores those
+plus disk / connection saturation / replication slots / backup freshness against
+built-in thresholds. At-risk signals surface as WARN/CRIT rows with an inline
+remediation (Run VACUUM, Expand storage, Take backup) and a **Runbook** link to
+embedded guidance; healthy checks collapse into one green summary line. The
+longer-form runbooks live in [runbooks.md](runbooks.md), which is also the target
+of each alert's `runbook_url`.
 
 ## Discovered state (one snapshot)
 
@@ -158,11 +181,16 @@ between. A note explains storage is grow-only (online PVC expansion needs
 **Observability** is built from the same form. Turning on a scrape (the
 Prometheus PodMonitor, or an **OTEL endpoint** that also emits a collector)
 unlocks an adaptive **Grafana dashboard** (`dashboard.py`, panels adapt to the
-config) and a **goals** block: a max replication lag / connections / WAL-archive
-delay becomes both a red **waterline** on the matching dashboard panel and a
-**PrometheusRule** alert — one `goals.py` source of truth for both. The output
-switch shows the manifest (YAML) or the dashboard (JSON); **Copy**, **Download**,
-or **Deploy** it.
+config) and a **goals** block. The dashboard covers resources (CPU/memory/disk),
+throughput, and the operational/ORR signals — transaction-ID age, longest/stuck
+transaction, connection health, cache-hit, checkpoints, restarts. Each goal
+(replication lag, connections, WAL-archive delay, CPU, memory, disk, txn-ID age,
+longest txn, connection age) becomes both a red **waterline** on the matching
+panel and a **PrometheusRule** alert carrying a `runbook_url` — one `goals.py`
+source of truth for both. Connection age and idle-in-transaction aren't in CNPG's
+default metrics, so enabling monitoring also attaches a **custom-queries ConfigMap**
+that exposes them. The output switch shows the manifest (YAML) or the dashboard
+(JSON); **Copy**, **Download**, or **Deploy** it.
 
 **Deploy** applies every doc in the generated manifest into the selected
 namespace via the dynamic client, reporting created / skipped / failed. In-cluster
@@ -176,9 +204,10 @@ kubeconfig ─▶ Console (server.py) ─ shared 2s + 20s timers ─▶ snapshot
                  ├─ discover.py  : cluster + pods + psql/df execs → snapshot
                  ├─ control.py   : CNPG actions (precondition + available)  [kernel/control.py: the model]
                  ├─ execute.py   : gate → dispatch (chaos primitives / ops)
-                 ├─ ops.py       : rotate / upgrade / restore
+                 ├─ ops.py       : rotate / upgrade / restore / expand / maintenance
                  ├─ builder.py   : options → manifest (resources/*.tmpl.yaml)
                  ├─ dashboard.py : options → Grafana dashboard JSON
+                 ├─ goals.py     : goals → waterlines + alert rules (+ runbook anchors)
                  └─ registry.py  : image tag discovery + pull checks (upgrades)
 ```
 
@@ -188,8 +217,8 @@ kubeconfig ─▶ Console (server.py) ─ shared 2s + 20s timers ─▶ snapshot
   registry, the stdlib `ThreadingHTTPServer`, and the single-file SPA `console.html`.
 - HTTP surface — GET: `/` (SPA), `/api/stream` (SSE), `/api/contexts`,
   `/api/clusters?context=`, `/api/secret?name=`, `/api/image-tags?image=`,
-  `/api/image-check?image=`. POST: `/api/action`, `/api/select`, `/api/manifest`,
-  `/api/dashboard`, `/api/deploy`, `/api/wal-count`.
+  `/api/image-check?image=`, `/api/storage-expandable`. POST: `/api/action`,
+  `/api/select`, `/api/manifest`, `/api/dashboard`, `/api/deploy`, `/api/wal-count`.
 
 ## Deploy in-cluster (control plane)
 

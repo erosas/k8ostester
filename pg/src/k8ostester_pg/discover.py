@@ -85,6 +85,7 @@ def build_snapshot(
         "replicas": replica_pods,
         "zones": zones,
         "version": pg_version(spec.get("imageName", "")),
+        "storage_size": spec.get("storage", {}).get("size", ""),   # for the expand-storage sheet
         # target may be a full image (…:tag) or a bare version
         "target": (pg_version(target) if ":" in target else target) if target else "",
         "upgrading": "upgrad" in phase.lower(),

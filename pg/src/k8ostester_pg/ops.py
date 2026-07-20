@@ -38,6 +38,22 @@ def minor_upgrade(k8s: ClusterClient, ns: str, target: str, name: str = "pg") ->
     return f"upgrade to {image} started (rolling)"
 
 
+def expand_storage(k8s: ClusterClient, ns: str, size: str, name: str = "pg") -> str:
+    """Grow the data volume by patching ``spec.storage.size``. The operator expands
+    each PVC in place — online, no downtime — IF the storage class allows it
+    (``allowVolumeExpansion: true``). Grow-only: PostgreSQL/PVCs can't shrink."""
+    size = (size or "").strip()
+    if not size:
+        raise RuntimeError("no target size specified")
+    current = _cluster(k8s, ns, name).get("spec", {}).get("storage", {}).get("size", "")
+    if size == current:
+        raise RuntimeError(f"storage is already {size}")
+    k8s.custom.patch_namespaced_custom_object(
+        CNPG_GROUP, CNPG_VERSION, ns, "clusters", name,
+        {"spec": {"storage": {"size": size}}})
+    return f"storage expansion to {size} requested (was {current or '?'})"
+
+
 def rotate_credentials(k8s: ClusterClient, ns: str, name: str = "pg",
                        password: str = "") -> str:
     """Blue/green: refresh the IDLE login role's password and switch the active

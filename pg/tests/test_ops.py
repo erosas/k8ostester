@@ -33,6 +33,23 @@ def test_minor_upgrade_full_ref_switches_the_repo():
     assert patch["spec"]["imageName"] == "my-mirror.io/pg/postgresql:16.6"
 
 
+def test_expand_storage_patches_the_new_size():
+    k8s = MagicMock()
+    k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()   # currently 1Gi
+    ops.expand_storage(k8s, "ns", "5Gi")
+    patch = k8s.custom.patch_namespaced_custom_object.call_args.args[-1]
+    assert patch == {"spec": {"storage": {"size": "5Gi"}}}
+
+
+def test_expand_storage_rejects_a_noop():
+    import pytest
+    k8s = MagicMock()
+    k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()   # already 1Gi
+    with pytest.raises(RuntimeError):
+        ops.expand_storage(k8s, "ns", "1Gi")
+    k8s.custom.patch_namespaced_custom_object.assert_not_called()
+
+
 def test_rotate_alters_idle_role_and_records_active_on_the_cluster():
     k8s = MagicMock()
     # no active-role annotation yet -> defaults to the first role (app_a) as active

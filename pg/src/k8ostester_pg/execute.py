@@ -87,5 +87,7 @@ _HANDLERS = {
     "rotate": lambda k8s, ns, s, p, name: ops.rotate_credentials(
         k8s, ns, name, p.get("password", "")),
     "upgrade": _upgrade,
+    "expand-storage": lambda k8s, ns, s, p, name: ops.expand_storage(
+        k8s, ns, p.get("size", ""), name),
     "restore": lambda k8s, ns, s, p, name: ops.restore(k8s, ns, p.get("target_time", ""), name),
 }

@@ -857,6 +857,24 @@ function openRotate(){
       <button class="go" style="background:var(--accent);border-color:var(--accent)" onclick="confirmRotate()">Rotate → ${esch(idle)}</button></div>`);
 }
 
+function openExpand(){
+  const cur = SNAP.storage_size || "?";
+  openSheet(`<h2>Expand storage</h2>
+    <div class="lede">Grows the data volume in place — <b>online, no downtime</b> — by raising the cluster's storage size. Currently <b>${esch(cur)}</b> per instance.</div>
+    <div class="sec"><h3>New size</h3>
+      <div class="pwrow"><input id="exp-size" class="pwin" spellcheck="false" placeholder="e.g. 20Gi" value="${esch(cur)}"></div>
+      <div class="uwarn" style="display:block">⚠ <b>Grow-only.</b> Volumes and PostgreSQL can't shrink — you can raise this but never lower it, so bump it a little at a time. Online expansion also needs the storage class to allow it (<b>allowVolumeExpansion: true</b>); without that the operator can't resize and a bigger volume means a rebuild/restore.</div>
+    </div>
+    <div class="mbtns"><button data-close>Cancel</button>
+      <button class="go" onclick="confirmExpand()">Expand storage</button></div>`);
+}
+function confirmExpand(){
+  const size = document.getElementById("exp-size").value.trim();
+  if(!size || size === (SNAP.storage_size||"")){ document.getElementById("exp-size").focus(); return; }
+  closeSheet();
+  post("expand-storage", {size}, "Expand storage → "+size);
+}
+
 /* ---- minor upgrade modal: editable repo + tag list + pull check ---- */
 let repoTimer = null, imgTimer = null;
 async function openUpgrade(){
@@ -1159,6 +1177,7 @@ function act(a){
   if(a.id === "rotate"){ openRotate(); return; }    // type-or-generate a password
   if(a.id === "restore"){ openModal(); return; }    // PITR gets its own interface
   if(a.id === "upgrade"){ openUpgrade(); return; }  // pick the target image/version
+  if(a.id === "expand-storage"){ openExpand(); return; }  // grow-only, with a warning
   // every other button confirms before it mutates the cluster
   const msg = a.id === "backup"
     ? "Take a base backup to the object store now?"

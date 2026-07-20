@@ -38,6 +38,10 @@ CNPG_ACTIONS: list[Action] = [
            lambda s: s.get("ready") and s.get("backup_configured") and not s.get("busy")),
     Action("rotate", "Rotate credentials", "ops",
            lambda s: s.get("ready") and s.get("blue_green") and not s.get("busy")),
+    # Grow the data volume (online PVC expansion). Grow-only, so a modal asks for
+    # the new size and explains the storage-class prerequisite.
+    Action("expand-storage", "Expand storage", "ops",
+           lambda s: s.get("ready") and not s.get("busy")),
     # --- chaos: destructive / high-risk / infrequent -----------------------
     # restore (creates a cluster) and minor upgrade (high-risk, rare) live here
     # with the faults — anything past a credential rotation is break-glass.

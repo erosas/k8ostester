@@ -1,9 +1,9 @@
 # k8ost-console Helm chart
 
 Deploys the [k8ost-console](../../../../docs/remote-control.md) — a web control
-plane for CloudNativePG — into a cluster, with the image location, RBAC scope,
-and Build→Deploy grant configurable. There is **no ingress**: you reach it over
-`kubectl port-forward`, which already requires Kubernetes RBAC and is the auth gate.
+plane for CloudNativePG — with the image, RBAC scope, Build→Deploy grant, and
+external exposure configurable. Default is `port-forward` (Kubernetes RBAC is the
+login); optional Ingress / Gateway API routes are below.
 
 ## Install
 
@@ -44,67 +44,32 @@ helm install console pg/deploy/helm/k8ost-console -n db \
 
 `image.tag` defaults to the chart's `appVersion`, so it tracks the chart unless you pin it.
 
-## Exposing it on a DNS name (and auth)
+## Exposing it on a DNS name
 
-By default there's **no external exposure** — you `port-forward`, and Kubernetes
-RBAC is the login. To reach the console on a hostname you go through your **gateway
-controller**, which terminates TLS and routes the hostname to the Service.
-
-**How it fits together.** DNS name → gateway controller (TLS termination + auth) →
-the console's ClusterIP Service (plain HTTP) → the pod. The chart only creates the
-route (the `HTTPRoute` or `Ingress`) that hands your hostname to the Service; the
-gateway controller and its certificate/auth are yours.
-
-**Auth is not optional on a DNS name.** By itself the console has no login, so
-exposed it's a mutating control plane open to anyone who can reach it. Pick one:
-
-### Built-in basic-auth (simplest, controller-agnostic)
-
-The console can check basic-auth **itself**, so it protects every path the same way
-whether you reach it via port-forward, Ingress, or a gateway — no controller-specific
-config. It's a shared credential (interim, not SSO), and TLS must still terminate at
-the edge since the credential rides each request. Off by default ("no auth for now"):
+By default you `port-forward` and Kubernetes RBAC is the login. To put it on a
+hostname, add a route and terminate TLS at your gateway:
 
 ```bash
-helm install console pg/deploy/helm/k8ost-console -n db \
-  --set console.basicAuth.enabled=true \
-  --set console.basicAuth.username=admin \
-  --set console.basicAuth.password=<a-strong-password>
-# combine with ingress.* or gatewayRoute.* below to put it on a DNS name
+# Gateway API
+--set gatewayRoute.enabled=true --set gatewayRoute.host=k8ost.example.com \
+--set 'gatewayRoute.parentRefs[0].name=web' --set 'gatewayRoute.parentRefs[0].namespace=infra'
+
+# or Ingress
+--set ingress.enabled=true --set ingress.className=<class> \
+--set ingress.host=k8ost.example.com --set ingress.tls.secretName=<cert>
 ```
 
-The chart stores the credential in a Secret and passes it as `K8OST_BASIC_AUTH`.
+The console speaks plain HTTP behind the gateway; its SSE stream needs the gateway
+not to buffer.
 
-### Delegate auth to the gateway
+**Auth.** The console has no login of its own, so an exposed Ingress needs one of:
 
-Alternatively enforce auth at the edge — your controller's auth extension, or an OIDC
-forward-auth proxy (per-user SSO). Then the console needs no built-in auth. The chart
-**refuses** to render an Ingress with neither `console.basicAuth` on, an auth
-annotation, nor `ingress.insecureNoAuth=true` (the last is for "behind a private
-network / VPN only", i.e. the network is the gate).
+- built-in basic-auth — `--set console.basicAuth.enabled=true --set console.basicAuth.username=admin --set console.basicAuth.password=<pass>` (works on any path; shared credential, so interim not SSO);
+- your controller's auth annotation, or an OIDC forward-auth proxy for per-user SSO.
 
-### Gateway API (vendor-neutral)
-
-Attach an `HTTPRoute` to an existing `Gateway` that owns the TLS listener and enforces
-auth (via your controller's auth extension / an external-auth policy on the Gateway):
-
-```bash
-helm install console pg/deploy/helm/k8ost-console -n db \
-  --set gatewayRoute.enabled=true --set gatewayRoute.host=k8ost.example.com \
-  --set 'gatewayRoute.parentRefs[0].name=web' --set 'gatewayRoute.parentRefs[0].namespace=infra'
-```
-
-### Ingress (if you run an Ingress controller instead)
-
-```bash
-helm install console pg/deploy/helm/k8ost-console -n db \
-  --set ingress.enabled=true --set ingress.className=<your-class> \
-  --set ingress.host=k8ost.example.com --set ingress.tls.secretName=k8ost-tls \
-  --set 'ingress.annotations.<your-controllers-auth-annotation>=<value>'
-```
-
-TLS terminates at the gateway; the console speaks plain HTTP behind it, and its
-`/api/stream` Server-Sent Events work as long as the gateway doesn't buffer responses.
+The chart won't render an unauthenticated Ingress unless you set `ingress.insecureNoAuth=true`
+(for a private-network-only deployment). TLS is still required — the basic-auth
+credential rides every request.
 
 ## Values
 

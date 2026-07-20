@@ -2,8 +2,8 @@ apiVersion: v2
 name: k8ost-console
 description: The k8ost-console — a web control plane for CloudNativePG clusters, deployable in-cluster.
 type: application
-version: 0.2.0            # chart version
-appVersion: "0.2.0"      # default console image tag
+version: 0.2.1            # chart version
+appVersion: "0.2.1"      # default console image tag
 home: https://github.com/erosas/k8ostester
 sources:
   - https://github.com/erosas/k8ostester

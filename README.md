@@ -115,7 +115,8 @@ cluster the API is on `127.0.0.1`, which the container can't see, so use
 
 The same image runs **in the cluster** as a control plane — it uses its mounted
 **ServiceAccount** (no kubeconfig) and execs into pods over the API stream. RBAC is
-the blast radius; `port-forward` is the auth gate (no ingress).
+the blast radius; `port-forward` is the default auth gate (optional Ingress/Gateway
+exposure below).
 
 **Helm** (recommended — image location, RBAC scope, and Build→Deploy are all values):
 
@@ -124,9 +125,10 @@ helm install console pg/deploy/helm/k8ost-console -n db --create-namespace
 kubectl -n db port-forward svc/console-k8ost-console 8700:8700   # → http://127.0.0.1:8700
 ```
 
-Fleet-wide control: `--set rbac.scope=cluster`. Build→Deploy: `--set rbac.lab=true`.
-Behind a proxy: `--set image.repository=<your-mirror>/k8os-console`. Full values
-in the [chart README](pg/deploy/helm/k8ost-console/README.md).
+Fleet-wide: `--set rbac.scope=cluster`. Build→Deploy: `--set rbac.lab=true`. Proxy
+mirror: `--set image.repository=<mirror>/k8os-console`. Exposing it on a DNS name
+(Gateway API or Ingress, with auth) and the rest of the values are in the
+[chart README](pg/deploy/helm/k8ost-console/README.md).
 
 **Raw manifests** (Helm-free): edit `image:` in `pg/deploy/console.yaml`, then
 `kubectl -n <ns> apply -f pg/deploy/console.yaml` (add `-f pg/deploy/console-lab.yaml`

@@ -97,27 +97,48 @@ uv run --directory pg k8ost-console --context my-ctx --namespace demo --cluster 
 Optional flags: `--grafana <url>` (deep-links to your dashboards), `--target <img>`
 (offer a specific PG image as an upgrade), `--port` / `--host`.
 
-### 3 · Deploy the console in-cluster (control plane)
-
-The same image runs **in the cluster** as a control plane. In a pod it uses its
-mounted **ServiceAccount** (no kubeconfig) and execs into pods over the API
-stream. RBAC is the blast radius; `port-forward` is the auth gate (no ingress).
+Or run the **published image** — no checkout — against a reachable cluster, mounting
+your kubeconfig:
 
 ```bash
-# build from the repo root (the image needs both workspace members)
-docker build -f pg/console.Dockerfile -t <your-repo>/k8os-console:<tag> .
-docker push <your-repo>/k8os-console:<tag>
-
-# set image: in pg/deploy/console.yaml, then apply into the target namespace
-kubectl -n <ns> apply -f pg/deploy/console.yaml
-kubectl -n <ns> apply -f pg/deploy/console-lab.yaml     # optional: enables Build → Deploy
-kubectl -n <ns> port-forward svc/k8ost-console 8700:8700
-# → open http://127.0.0.1:8700
+docker run --rm -p 8700:8700 -v "$HOME/.kube:/home/k8ost/.kube:ro" \
+  bytestream89/k8os-console --host 0.0.0.0
+# → http://127.0.0.1:8700
 ```
 
-For fleet-wide (all-namespace) control, use `pg/deploy/rbac-clusterwide.yaml`
-instead of the namespaced Role. Full walk-through in
-[docs/remote-control.md](docs/remote-control.md).
+(The kubeconfig must point at an API the container can reach. For a local
+kind/docker-desktop cluster the API is on `127.0.0.1`, which the container can't
+see — use `uv run …` above, or an in-cluster install.)
+
+### 3 · Deploy the console in-cluster (control plane)
+
+The same image runs **in the cluster** as a control plane — it uses its mounted
+**ServiceAccount** (no kubeconfig) and execs into pods over the API stream. RBAC is
+the blast radius; `port-forward` is the auth gate (no ingress).
+
+**Helm** (recommended — image location, RBAC scope, and Build→Deploy are all values):
+
+```bash
+helm install console pg/deploy/helm/k8ost-console -n db --create-namespace
+kubectl -n db port-forward svc/console-k8ost-console 8700:8700   # → http://127.0.0.1:8700
+```
+
+Fleet-wide control: `--set rbac.scope=cluster`. Build→Deploy: `--set rbac.lab=true`.
+Behind a proxy: `--set image.repository=<your-mirror>/k8os-console`. Full values
+in the [chart README](pg/deploy/helm/k8ost-console/README.md).
+
+**Raw manifests** (Helm-free): edit `image:` in `pg/deploy/console.yaml`, then
+`kubectl -n <ns> apply -f pg/deploy/console.yaml` (add `-f pg/deploy/console-lab.yaml`
+for Build→Deploy, or use `pg/deploy/rbac-clusterwide.yaml` for fleet-wide).
+
+**Build the image yourself** (or to push into a mirror):
+
+```bash
+docker build -f pg/console.Dockerfile -t <repo>/k8os-console:<tag> .   # from the repo root
+docker push <repo>/k8os-console:<tag>
+```
+
+Full walk-through in [docs/remote-control.md](docs/remote-control.md).
 
 ### Also: the production-readiness testbed
 
@@ -155,11 +176,17 @@ Two published images (multi-arch, on a version tag — see
 | Image | What it is | Override |
 | --- | --- | --- |
 | [`bytestream89/k8os-loadgen`](https://hub.docker.com/r/bytestream89/k8os-loadgen) | the app-perspective load generator (python + psycopg) | the app manifest / `K8OST_LOADGEN_IMAGE` |
-| [`bytestream89/k8os-console`](https://hub.docker.com/r/bytestream89/k8os-console) | the `k8ost-console` control plane (kernel + pg vertical) | `image:` in `pg/deploy/console.yaml` |
+| [`bytestream89/k8os-console`](https://hub.docker.com/r/bytestream89/k8os-console) | the `k8ost-console` control plane (kernel + pg vertical) | Helm `image.repository` / `image:` in `pg/deploy/console.yaml` |
 
 Built on a minimal [Chainguard Wolfi](https://github.com/wolfi-dev) base
-(continuously rebuilt → ~0 CVEs), with an SBOM + provenance. Behind a proxy,
-mirror them and point the manifests at your registry.
+(continuously rebuilt → ~0 CVEs), with an SBOM + provenance.
+
+**Running through a mirror.** Behind an Artifactory/Nexus proxy, mirror the two
+paths above and point at the mirror — nothing else changes:
+
+- **Console (Helm):** `--set image.repository=<mirror>/k8os-console` (+ `imagePullSecrets` if the registry needs auth).
+- **Console (raw manifests):** set `image:` in `pg/deploy/console.yaml`.
+- **Loadgen:** set `K8OST_LOADGEN_IMAGE=<mirror>/k8os-loadgen:<tag>` (or the app manifest's image).
 
 ## Docs
 

@@ -1,0 +1,61 @@
+{{- if eq .Values.rbac.scope "cluster" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "k8ost-console.fullname" . }}
+  labels: {{- include "k8ost-console.labels" . | nindent 4 }}
+rules:
+{{ include "k8ost-console.rules" . | indent 2 }}
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]              # zone labels for topology/placement
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "k8ost-console.fullname" . }}
+  labels: {{- include "k8ost-console.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "k8ost-console.fullname" . }}}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "k8ost-console.sa" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "k8ost-console.fullname" . }}
+  labels: {{- include "k8ost-console.labels" . | nindent 4 }}
+rules:
+{{ include "k8ost-console.rules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "k8ost-console.fullname" . }}
+  labels: {{- include "k8ost-console.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "k8ost-console.fullname" . }}}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "k8ost-console.sa" . }}
+{{- end }}
+{{- if .Values.rbac.lab }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "k8ost-console.fullname" . }}-lab
+  labels: {{- include "k8ost-console.labels" . | nindent 4 }}
+rules:
+{{ include "k8ost-console.labRules" . | indent 2 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "k8ost-console.fullname" . }}-lab
+  labels: {{- include "k8ost-console.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "k8ost-console.fullname" . }}-lab}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "k8ost-console.sa" . }}
+{{- end }}

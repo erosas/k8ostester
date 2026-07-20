@@ -1,0 +1,17 @@
+k8ost-console is installed as {{ include "k8ost-console.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+Image:     {{ include "k8ost-console.image" . }}
+RBAC:      {{ .Values.rbac.scope }}{{ if .Values.rbac.lab }} + lab (Build→Deploy){{ end }}
+
+There is no ingress by design — reach it over a port-forward, which is itself the
+auth gate (it already requires Kubernetes RBAC):
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "k8ost-console.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+Then open http://127.0.0.1:{{ .Values.service.port }}
+
+{{- if eq .Values.rbac.scope "namespaced" }}
+
+Scoped to the '{{ .Release.Namespace }}' namespace. To operate CNPG clusters in
+every namespace, reinstall with --set rbac.scope=cluster.
+{{- end }}

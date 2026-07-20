@@ -1,0 +1,47 @@
+# k8ost-console — values. See pg/deploy/helm/k8ost-console/README.md.
+
+image:
+  # Point this at your own registry / proxy mirror. Behind an Artifactory/Nexus
+  # proxy, mirror the upstream path and set repository to the mirrored path, e.g.
+  #   --set image.repository=registry.internal/mirror/k8os-console
+  repository: bytestream89/k8os-console
+  tag: ""                    # defaults to the chart's appVersion
+  pullPolicy: IfNotPresent
+
+# Pull secrets for a private / authenticated registry (create the secret separately).
+imagePullSecrets: []
+# - name: my-registry-cred
+
+rbac:
+  # namespaced  → a Role in the release namespace (operate CNPG clusters there).
+  # cluster     → a ClusterRole (operate clusters in every namespace + read nodes).
+  scope: namespaced
+  # lab: add the create rights the Builder's "Deploy" needs (clusters, secrets,
+  # deployments, RBAC, monitoring CRs). Leave false for a pure operator console.
+  lab: false
+
+service:
+  # ClusterIP by design — reach the console via `kubectl port-forward`, which is
+  # itself the auth gate (it already requires Kubernetes RBAC). No ingress.
+  type: ClusterIP
+  port: 8700
+
+# Optional pre-selection / wiring (all optional — the UI can pick at runtime).
+console:
+  namespace: ""              # scope the console to one namespace (default: its own)
+  cluster: ""                # pre-select a cluster (with namespace)
+  grafana: ""                # Grafana base URL for the metrics deep-links
+  target: ""                 # a PG image/version to offer as an upgrade
+  extraArgs: []              # any additional k8ost-console flags
+
+serviceAccount:
+  name: ""                   # defaults to the release fullname
+
+resources:
+  requests: {cpu: 50m, memory: 96Mi}
+  limits: {cpu: 500m, memory: 256Mi}
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

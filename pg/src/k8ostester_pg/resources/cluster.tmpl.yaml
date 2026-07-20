@@ -7,8 +7,6 @@ spec:
   imageName: ${image}
   storage:
     size: ${storage}
-  resources:
-    requests: {cpu: 100m, memory: 256Mi}
-${extra}  probes:
+${resources}${extra}  probes:
     readiness: {periodSeconds: 3, failureThreshold: 2}
     liveness: {periodSeconds: 3, timeoutSeconds: 3, failureThreshold: 2}

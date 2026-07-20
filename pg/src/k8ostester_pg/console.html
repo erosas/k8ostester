@@ -148,8 +148,19 @@
   button.act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
   /* cluster builder */
-  .builder{border:1px solid var(--border);border-radius:var(--r);padding:var(--s4);
+  .builder{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,42%);gap:var(--s5);
+    align-items:start;border:1px solid var(--border);border-radius:var(--r);padding:var(--s4);
     background:var(--panel)}
+  .bform{min-width:0}
+  .bout{position:sticky;top:var(--s3);display:flex;flex-direction:column;gap:var(--s2);min-width:0}
+  .bout .manifest{max-height:calc(100vh - 150px)}
+  @media(max-width:920px){.builder{grid-template-columns:1fr}
+    .bout{position:static}.bout .manifest{max-height:460px}}
+  /* live diff: flash the lines that changed on the last edit */
+  .manifest .ln{display:block;min-height:1.1em}
+  .manifest .ln.chg{animation:chgflash 1.6s ease-out}
+  @keyframes chgflash{from{background:rgba(124,174,132,.30)}to{background:transparent}}
+  @media(prefers-reduced-motion:reduce){.manifest .ln.chg{animation:none}}
   .bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--s3) var(--s4);
     margin-bottom:var(--s4)}
   .bgrid label{display:flex;flex-direction:column;gap:5px;font-family:var(--mono);font-size:11px;
@@ -379,6 +390,7 @@
   </div>
 
   <div class="builder" id="builder" style="display:none">
+    <div class="bform">
     <div class="bsec">
       <div class="bsec-h"><h4>What's this cluster for?</h4>
         <p class="bsec-desc">Pick a starting point — it sets sensible defaults for everything below, which you can then tune. The manifest updates live as you edit.</p></div>
@@ -448,6 +460,18 @@
     </div>
 
     <div class="bsec">
+      <div class="bsec-h"><h4>Compute (per instance)</h4>
+        <p class="bsec-desc">CPU and memory each Postgres instance requests. <b>Match limits to requests</b> to give the pod <b>Guaranteed</b> QoS — it won't be evicted under node pressure and gets a predictable slice; leave it off for <b>Burstable</b> pods that can use spare capacity but may be squeezed. Sized per replica, so the cluster's total is this × instances.</p></div>
+      <div class="bgrid">
+        <label>CPU<input id="b-cpu" value="100m" spellcheck="false">
+          <span class="fcap">cores or milli (e.g. 500m, 2)</span></label>
+        <label>Memory<input id="b-memory" value="256Mi" spellcheck="false">
+          <span class="fcap">e.g. 512Mi, 4Gi</span></label>
+        <label class="check"><input id="b-limits" type="checkbox"> Match limits to requests (Guaranteed QoS)</label>
+      </div>
+    </div>
+
+    <div class="bsec">
       <div class="bsec-h"><h4>Connection pooling</h4>
         <p class="bsec-desc">A PgBouncer <b>-rw pooler</b> multiplexes many client connections onto a few Postgres backends, and the app points at the <code>&lt;name&gt;-rw</code> pooler service. <b>Recommended on:</b> as your app's pods scale out they can open more connections than Postgres allows (<code>max_connections</code>) and stall the database — the pooler caps that.</p></div>
       <div class="bgrid">
@@ -507,17 +531,21 @@
       </div>
       <div class="fnote" id="b-goals-note">Each goal draws a red <b>waterline</b> on its dashboard panel and a matching Prometheus <b>alert rule</b> — one number drives both. Leave blank to skip.</div>
     </div>
-    <div class="bpre" id="b-output">
-      <button class="on" data-o="manifest" onclick="switchOutput('manifest')">Manifest (YAML)</button>
-      <button data-o="dashboard" onclick="switchOutput('dashboard')">Grafana dashboard (JSON)</button>
-    </div>
-    <div class="bbar">
-      <span class="bhint" id="b-hint">edit any field — the output updates live</span>
-      <button onclick="copyManifest()">Copy</button>
-      <button onclick="downloadManifest()">Download</button>
-      <button id="b-deploy" class="deploy" onclick="deployManifest()">Deploy ↑</button>
-    </div>
-    <pre class="manifest" id="manifest">…</pre>
+    </div><!-- /.bform -->
+
+    <aside class="bout">
+      <div class="bpre" id="b-output">
+        <button class="on" data-o="manifest" onclick="switchOutput('manifest')">Manifest (YAML)</button>
+        <button data-o="dashboard" onclick="switchOutput('dashboard')">Grafana dashboard (JSON)</button>
+      </div>
+      <div class="bbar">
+        <span class="bhint" id="b-hint">edit any field — changed lines flash</span>
+        <button onclick="copyManifest()">Copy</button>
+        <button onclick="downloadManifest()">Download</button>
+        <button id="b-deploy" class="deploy" onclick="deployManifest()">Deploy ↑</button>
+      </div>
+      <pre class="manifest" id="manifest">…</pre>
+    </aside>
   </div>
 
   <details class="activity" id="activity">
@@ -568,7 +596,7 @@ let TAB = "operate", CAPS = [], SNAP = {}, UNSEL = true, GRAFANA = "", CONTEXTS 
 
 function applyLayout(){
   const isBuild = TAB==="builder";
-  document.getElementById("builder").style.display = isBuild ? "block" : "none";
+  document.getElementById("builder").style.display = isBuild ? "grid" : "none";
   document.getElementById("landing").style.display = (!isBuild && UNSEL) ? "block" : "none";
   document.getElementById("cluster").style.display = (isBuild || UNSEL) ? "none" : "block";
   document.getElementById("meta").style.display = (isBuild || UNSEL) ? "none" : "flex";
@@ -580,6 +608,7 @@ function pick(t){
   if(t==="builder"){
     const nsEl = document.getElementById("b-namespace");   // default to the selected namespace
     if(SNAP.namespace && (!nsEl.value || nsEl.value==="default")) nsEl.value = SNAP.namespace;
+    if(!window._bInit){ window._bInit = true; preset("reference"); return; }  // sync fields to the lit card
     if(!document.getElementById("b-taglist").children.length) browseBuilderTags();   // once
     scheduleBuilderCheck();
     generateManifest();
@@ -950,13 +979,13 @@ const DEFAULT_REPO = "ghcr.io/cloudnative-pg/postgresql";
 // recommended alert thresholds a production preset ships with (blank = no alert)
 const GOALS_PROD = {lag:30, conn:80, archive:120}, GOALS_NONE = {lag:"", conn:"", archive:""};
 const PRESETS = {
-  reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",sync:"quorum",pooler:true,
+  reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",cpu:"1",memory:"2Gi",limits:true,sync:"quorum",pooler:true,
     pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:GOALS_PROD},
-  readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",sync:"quorum",pooler:true,
+  readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
     pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:GOALS_PROD},
-  dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",sync:"async",pooler:false,
+  dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",cpu:"100m",memory:"256Mi",limits:false,sync:"async",pooler:false,
     pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *",app_roles:false,goals:GOALS_NONE},
-  durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",sync:"quorum",pooler:true,
+  durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
     pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true,goals:GOALS_PROD},
 };
 function preset(k){
@@ -966,6 +995,7 @@ function preset(k){
   const chk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=v; };
   set("b-name",p.name); set("b-image-repo",DEFAULT_REPO); set("b-version",p.version);
   set("b-instances",p.instances); set("b-storage",p.storage); set("b-sync",p.sync);
+  set("b-cpu",p.cpu); set("b-memory",p.memory); chk("b-limits",!!p.limits);
   chk("b-pooler",p.pooler); set("b-pooler-instances",p.pooler_instances);
   chk("b-backups",p.backups); set("b-retention",p.retention);
   chk("b-schedule",p.schedule); set("b-schedule-cron",p.schedule_cron);
@@ -1461,14 +1491,15 @@ function renderConditions(s){
 }
 
 /* ---- cluster builder ---- */
-let MANIFEST = "", DASHBOARD = "", OUTPUT = "manifest";
+let MANIFEST = "", DASHBOARD = "", OUTPUT = "manifest", MAN_PREV = [], DASH_PREV = [];
 function builderOpts(){
   const v = id => document.getElementById(id).value;
   const ck = id => document.getElementById(id).checked;
   return {
     name:v("b-name"), namespace:v("b-namespace"), version:v("b-version"),
     image_repo:v("b-image-repo"), instances:+v("b-instances"),
-    storage:v("b-storage"), sync:v("b-sync"),
+    storage:v("b-storage"), cpu:v("b-cpu"), memory:v("b-memory"), limits:ck("b-limits"),
+    sync:v("b-sync"),
     pooler:ck("b-pooler"), pooler_instances:+v("b-pooler-instances"),
     backups:ck("b-backups"), bucket:v("b-bucket"), path:v("b-path"),
     endpoint:v("b-endpoint"), secret:v("b-secret"), retention:v("b-retention"),
@@ -1530,7 +1561,32 @@ async function genOutput(){
     out = j.ok ? (dash ? j.dashboard : j.manifest) : ((dash?"// ":"# ")+"error: "+j.error);
   }catch(e){ out = (dash?"// ":"# ")+"error: "+e; }
   if(dash) DASHBOARD = out; else MANIFEST = out;
-  document.getElementById("manifest").textContent = out;
+  renderManifestPane(out, dash);
+}
+function diffAdded(oldLines, newLines){
+  // LCS over lines → a bool[] flagging each new line absent from the previous render
+  const n=oldLines.length, m=newLines.length;
+  const dp=Array.from({length:n+1},()=>new Int32Array(m+1));
+  for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--)
+    dp[i][j] = oldLines[i]===newLines[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
+  const added=new Array(m).fill(false);
+  let i=0,j=0;
+  while(j<m){
+    if(i<n && oldLines[i]===newLines[j]){ i++; j++; }
+    else if(i<n && dp[i+1][j]>=dp[i][j+1]){ i++; }
+    else { added[j]=true; j++; }
+  }
+  return added;
+}
+function renderManifestPane(text, dash){
+  const lines = text.split("\n");
+  const prev = dash ? DASH_PREV : MAN_PREV;
+  // diff vs the previous render so only the changed lines flash (skip on huge output)
+  const added = (prev.length && lines.length<=1500 && prev.length<=1500)
+    ? diffAdded(prev, lines) : lines.map(()=>false);
+  document.getElementById("manifest").innerHTML =
+    lines.map((l,i)=>`<span class="ln${added[i]?" chg":""}">${esch(l)}</span>`).join("");
+  if(dash) DASH_PREV = lines; else MAN_PREV = lines;
   document.getElementById("b-deploy").style.display = dash ? "none" : "";   // deploy applies YAML
 }
 function manifestSummary(text){

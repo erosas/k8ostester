@@ -157,6 +157,18 @@ def test_instances_are_clamped():
     assert c["spec"]["instances"] == 9
 
 
+def test_compute_requests_and_optional_limits():
+    # default: requests only (Burstable QoS)
+    c = next(d for d in yaml.safe_load_all(build_manifest({})) if d)
+    assert c["spec"]["resources"] == {"requests": {"cpu": "100m", "memory": "256Mi"}}
+    assert "limits" not in c["spec"]["resources"]
+    # limits mirror requests when asked (Guaranteed QoS)
+    c = next(d for d in yaml.safe_load_all(
+        build_manifest({"cpu": "2", "memory": "4Gi", "limits": True})) if d)
+    assert c["spec"]["resources"]["requests"] == {"cpu": 2, "memory": "4Gi"}
+    assert c["spec"]["resources"]["limits"] == {"cpu": 2, "memory": "4Gi"}
+
+
 def test_image_repo_overrides_the_default_registry():
     # default: the official CNPG build at the given version
     c = next(d for d in yaml.safe_load_all(build_manifest({"version": "16.6"})) if d)

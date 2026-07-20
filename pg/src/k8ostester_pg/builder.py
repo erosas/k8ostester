@@ -35,6 +35,14 @@ def build_manifest(opts: dict) -> str:
     storage = (opts.get("storage") or "10Gi").strip()
     instances = clamp(opts.get("instances"), 1, 9, 3)
 
+    # compute per instance. Setting limits == requests gives the pod Guaranteed
+    # QoS (it won't be evicted under node pressure) — the production choice.
+    cpu = (opts.get("cpu") or "100m").strip()
+    memory = (opts.get("memory") or "256Mi").strip()
+    resources = f"  resources:\n    requests: {{cpu: {cpu}, memory: {memory}}}\n"
+    if opts.get("limits"):
+        resources += f"    limits: {{cpu: {cpu}, memory: {memory}}}\n"
+
     # optional spec fragments, in the order they appear under spec
     extra = ""
     method_number = _SYNC.get(opts.get("sync") or "quorum")
@@ -68,7 +76,8 @@ def build_manifest(opts: dict) -> str:
                 secret=secret, role=role, password=pw))
 
     docs = [*secret_docs, _tmpl("cluster.tmpl.yaml").substitute(
-        name=name, instances=instances, image=image, storage=storage, extra=extra)]
+        name=name, instances=instances, image=image, storage=storage,
+        resources=resources, extra=extra)]
 
     if opts.get("pooler"):
         docs.append(_tmpl("pooler.tmpl.yaml").substitute(

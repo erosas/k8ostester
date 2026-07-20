@@ -275,6 +275,9 @@
   .pwin{flex:1;background:var(--panel2);border:1px solid var(--border);color:var(--ink);
     border-radius:6px;padding:9px 11px;font-family:var(--mono);font-size:13px;letter-spacing:.02em}
   .pwin:focus{outline:none;border-color:var(--accent)}
+  .drow{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .drow .dlbl{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);width:96px;flex:none}
   .pwbtn{font-family:var(--mono);font-size:11.5px;padding:0 12px;border:1px solid var(--border);
     border-radius:6px;background:var(--panel2);color:var(--muted);cursor:pointer;white-space:nowrap}
   .pwbtn:hover{border-color:var(--accent);color:var(--ink)}
@@ -300,6 +303,7 @@
   .tagpill:hover{border-color:var(--accent);color:var(--ink)}
   .imgstatus{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap;align-self:center}
   .imgstatus.ok{color:var(--ok)} .imgstatus.bad{color:var(--crit)}
+  .tagnote{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
   .uwarn{display:none;border:1px solid #5a2327;border-left:3px solid var(--crit);background:#241416;
     color:#e7a6a6;border-radius:8px;padding:10px 13px;margin:0 0 14px;
     font-family:var(--mono);font-size:11.5px;line-height:1.65}
@@ -396,13 +400,26 @@
 
     <div class="bsec">
       <div class="bsec-h"><h4>Identity</h4>
-        <p class="bsec-desc">Names the CNPG <b>Cluster</b> and the namespace it deploys into. Version is the PostgreSQL <code>major.minor</code> image tag.</p></div>
+        <p class="bsec-desc">Names the CNPG <b>Cluster</b> and the namespace it deploys into.</p></div>
       <div class="bgrid">
         <label>Cluster name<input id="b-name" value="pg"></label>
         <label>Namespace<input id="b-namespace" value="default">
           <span class="fcap">deploy target</span></label>
-        <label>PostgreSQL version<input id="b-version" value="16.6"></label>
       </div>
+    </div>
+
+    <div class="bsec">
+      <div class="bsec-h"><h4>PostgreSQL image</h4>
+        <p class="bsec-desc">The container image CNPG runs. Defaults to the official CloudNativePG PostgreSQL build — point it at a mirror or your own registry if you need to. Browse the repo's tags to pick a version and confirm it's pullable.</p></div>
+      <div class="bgrid">
+        <label>Image repository<input id="b-image-repo" value="ghcr.io/cloudnative-pg/postgresql" spellcheck="false" oninput="onBuilderRepo()">
+          <span class="fcap">registry path, no tag</span></label>
+        <label>Version (tag)
+          <span class="pwrow" style="margin:0"><input id="b-version" value="16.6" spellcheck="false" oninput="scheduleBuilderCheck()">
+            <span id="b-img-status" class="imgstatus"></span></span>
+          <span class="fcap">or paste a full image reference</span></label>
+      </div>
+      <div class="taglist" id="b-taglist"></div>
     </div>
 
     <div class="bsec">
@@ -478,9 +495,15 @@
           <span class="fcap">'pod' or 'instance'</span></label>
       </div>
       <div class="bgrid" id="b-goals-section">
-        <label>Goal · max replication lag (s)<input id="b-goal-lag" placeholder="e.g. 30"></label>
-        <label>Goal · max connections<input id="b-goal-conn" placeholder="e.g. 150"></label>
-        <label>Goal · max WAL archive delay (s)<input id="b-goal-archive" placeholder="e.g. 120"></label>
+        <label>Goal · max replication lag (s)
+          <input id="b-goal-lag" type="number" min="1" max="3600" step="1" placeholder="30">
+          <span class="fcap">recommended 30</span></label>
+        <label>Goal · max connections
+          <input id="b-goal-conn" type="number" min="1" max="100000" step="1" placeholder="80">
+          <span class="fcap">recommended ~80% of max_connections</span></label>
+        <label>Goal · max WAL archive delay (s)
+          <input id="b-goal-archive" type="number" min="1" max="86400" step="1" placeholder="120">
+          <span class="fcap">recommended 120</span></label>
       </div>
       <div class="fnote" id="b-goals-note">Each goal draws a red <b>waterline</b> on its dashboard panel and a matching Prometheus <b>alert rule</b> — one number drives both. Leave blank to skip.</div>
     </div>
@@ -541,7 +564,7 @@
 </div>
 
 <script>
-let TAB = "operate", CAPS = [], SNAP = {}, UNSEL = true, GRAFANA = "";
+let TAB = "operate", CAPS = [], SNAP = {}, UNSEL = true, GRAFANA = "", CONTEXTS = [];
 
 function applyLayout(){
   const isBuild = TAB==="builder";
@@ -557,6 +580,8 @@ function pick(t){
   if(t==="builder"){
     const nsEl = document.getElementById("b-namespace");   // default to the selected namespace
     if(SNAP.namespace && (!nsEl.value || nsEl.value==="default")) nsEl.value = SNAP.namespace;
+    if(!document.getElementById("b-taglist").children.length) browseBuilderTags();   // once
+    scheduleBuilderCheck();
     generateManifest();
   } else if(!UNSEL) renderActions();
 }
@@ -566,6 +591,7 @@ async function loadContexts(){
   try{
     const j = await (await fetch("/api/contexts")).json();
     GRAFANA = j.grafana || "";
+    CONTEXTS = j.contexts || [];
     const sel = document.getElementById("ctx-sel");
     const want = (j.selected && j.selected.context) || j.current;
     sel.innerHTML = (j.contexts.length ? j.contexts : [j.current||""]).map(c=>
@@ -803,16 +829,9 @@ function onRepo(){
   repoTimer = setTimeout(()=>{ refreshTags(); scheduleCheck(); }, 500);
 }
 async function refreshTags(){
-  const repo = document.getElementById("up-repo").value.trim();
   const box = document.getElementById("up-taglist");
-  box.innerHTML = `<span class="kv">discovering release tags…</span>`;
-  try{
-    const j = await (await fetch("/api/image-tags?image="+encodeURIComponent(repo))).json();
-    const tags = j.tags || [];
-    box.innerHTML = tags.length
-      ? tags.map(t=>`<span class="tagpill" onclick="pickTag('${esch(t)}')">${esch(t)}</span>`).join("")
-      : `<span class="kv">no release tags listed (private repo / no egress) — type a tag</span>`;
-  }catch(e){ box.innerHTML = `<span class="kv">registry unreachable — type a tag</span>`; }
+  box.innerHTML = `<span class="tagnote">discovering release tags…</span>`;
+  renderTags(box, await fetchImageTags(document.getElementById("up-repo").value.trim()), pickTag);
 }
 function pickTag(t){ document.getElementById("up-tag").value = t; scheduleCheck(); updateWarn(); }
 function scheduleCheck(){
@@ -826,11 +845,7 @@ async function checkImage(){
   const st = document.getElementById("up-status");
   if(!repo || !tag){ st.textContent = ""; return; }
   st.textContent = "checking…"; st.className = "imgstatus";
-  try{
-    const j = await (await fetch("/api/image-check?image="+encodeURIComponent(repo+":"+tag))).json();
-    if(j.exists){ st.textContent = "✓ pullable"; st.className = "imgstatus ok"; }
-    else { st.textContent = "✗ not found"; st.className = "imgstatus bad"; }
-  }catch(e){ st.textContent = "? unverified"; st.className = "imgstatus"; }
+  renderImgStatus(st, await fetchImageExists(repo+":"+tag));
 }
 function confirmUpgrade(){
   const repo = document.getElementById("up-repo").value.trim();
@@ -854,6 +869,56 @@ function confirmUpgrade(){
   else if(bad) warn = "\n\nThe image did NOT verify as pullable — double-check the repo/tag.";
   if(!confirm(`Upgrade to ${image} — rolls the cluster (replicas, then a switchover).${warn} Continue?`)) return;
   post("upgrade", {target: image}, "Upgrade → "+image);
+}
+
+/* ---- shared image registry (used by both the upgrade modal and the builder) ---- */
+async function fetchImageTags(repo){   // release tags for a repo, or null if unreachable
+  try{ return (await (await fetch("/api/image-tags?image="+encodeURIComponent(repo))).json()).tags || []; }
+  catch(e){ return null; }
+}
+async function fetchImageExists(image){   // true/false pullable, or null if unverified
+  try{ return (await (await fetch("/api/image-check?image="+encodeURIComponent(image))).json()).exists; }
+  catch(e){ return null; }
+}
+function renderTags(box, tags, onPick){
+  if(tags===null){ box.innerHTML = `<span class="tagnote">registry unreachable — type a tag</span>`; return; }
+  box.innerHTML = tags.length
+    ? tags.map(t=>`<span class="tagpill">${esch(t)}</span>`).join("")
+    : `<span class="tagnote">no release tags listed (private repo / no egress) — type a tag</span>`;
+  box.querySelectorAll(".tagpill").forEach(el=>el.onclick=()=>onPick(el.textContent));
+}
+function renderImgStatus(st, exists){
+  if(exists===null){ st.textContent = "? unverified"; st.className = "imgstatus"; }
+  else if(exists){ st.textContent = "✓ pullable"; st.className = "imgstatus ok"; }
+  else { st.textContent = "✗ not found"; st.className = "imgstatus bad"; }
+}
+
+/* ---- builder image picker (same endpoints as the upgrade modal) ---- */
+let bRepoTimer = null, bImgTimer = null;
+function onBuilderRepo(){
+  clearTimeout(bRepoTimer);
+  document.getElementById("b-taglist").innerHTML = `<span class="tagnote">…</span>`;
+  bRepoTimer = setTimeout(()=>{ browseBuilderTags(); scheduleBuilderCheck(); }, 500);
+}
+async function browseBuilderTags(){
+  const box = document.getElementById("b-taglist");
+  box.innerHTML = `<span class="tagnote">discovering release tags…</span>`;
+  renderTags(box, await fetchImageTags(document.getElementById("b-image-repo").value.trim()), bPickTag);
+}
+function bPickTag(t){ document.getElementById("b-version").value = t; scheduleBuilderCheck(); generateManifest(); }
+function scheduleBuilderCheck(){
+  clearTimeout(bImgTimer);
+  const st = document.getElementById("b-img-status"); st.textContent = "…"; st.className = "imgstatus";
+  bImgTimer = setTimeout(builderCheckImage, 400);
+}
+async function builderCheckImage(){
+  const repo = document.getElementById("b-image-repo").value.trim();
+  const tag = document.getElementById("b-version").value.trim();
+  const st = document.getElementById("b-img-status");
+  if(!repo || !tag){ st.textContent = ""; return; }
+  const image = (tag.includes("/") || tag.includes(":")) ? tag : repo+":"+tag;   // a full ref wins
+  st.textContent = "checking…"; st.className = "imgstatus";
+  renderImgStatus(st, await fetchImageExists(image));
 }
 
 /* ---- unified fault picker (kill / partition, per node) ---- */
@@ -881,28 +946,33 @@ function openFaultPicker(){
 }
 
 /* ---- builder presets ---- */
+const DEFAULT_REPO = "ghcr.io/cloudnative-pg/postgresql";
+// recommended alert thresholds a production preset ships with (blank = no alert)
+const GOALS_PROD = {lag:30, conn:80, archive:120}, GOALS_NONE = {lag:"", conn:"", archive:""};
 const PRESETS = {
   reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true},
+    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:GOALS_PROD},
   readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",sync:"quorum",pooler:true,
-    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true},
+    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:GOALS_PROD},
   dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",sync:"async",pooler:false,
-    pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *",app_roles:false},
+    pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *",app_roles:false,goals:GOALS_NONE},
   durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true},
+    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true,goals:GOALS_PROD},
 };
 function preset(k){
   const p=PRESETS[k]; if(!p) return;
   document.querySelectorAll("#b-goals .goal").forEach(b=>b.classList.toggle("on", b.dataset.goal===k));
   const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
   const chk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=v; };
-  set("b-name",p.name); set("b-version",p.version); set("b-instances",p.instances);
-  set("b-storage",p.storage); set("b-sync",p.sync);
+  set("b-name",p.name); set("b-image-repo",DEFAULT_REPO); set("b-version",p.version);
+  set("b-instances",p.instances); set("b-storage",p.storage); set("b-sync",p.sync);
   chk("b-pooler",p.pooler); set("b-pooler-instances",p.pooler_instances);
   chk("b-backups",p.backups); set("b-retention",p.retention);
   chk("b-schedule",p.schedule); set("b-schedule-cron",p.schedule_cron);
   chk("b-approles",!!p.app_roles);
   chk("b-monitoring",true);   // every preset ships Prometheus monitoring
+  set("b-goal-lag",p.goals.lag); set("b-goal-conn",p.goals.conn); set("b-goal-archive",p.goals.archive);
+  browseBuilderTags(); scheduleBuilderCheck();
   generateManifest();
 }
 
@@ -1396,7 +1466,8 @@ function builderOpts(){
   const v = id => document.getElementById(id).value;
   const ck = id => document.getElementById(id).checked;
   return {
-    name:v("b-name"), namespace:v("b-namespace"), version:v("b-version"), instances:+v("b-instances"),
+    name:v("b-name"), namespace:v("b-namespace"), version:v("b-version"),
+    image_repo:v("b-image-repo"), instances:+v("b-instances"),
     storage:v("b-storage"), sync:v("b-sync"),
     pooler:ck("b-pooler"), pooler_instances:+v("b-pooler-instances"),
     backups:ck("b-backups"), bucket:v("b-bucket"), path:v("b-path"),
@@ -1462,19 +1533,47 @@ async function genOutput(){
   document.getElementById("manifest").textContent = out;
   document.getElementById("b-deploy").style.display = dash ? "none" : "";   // deploy applies YAML
 }
-async function deployManifest(){
+function manifestSummary(text){
+  // list what will be created, kind/name per doc — a plain review, no YAML parser
+  const docs = (text||"").split(/\n---\n/).map(d=>d.trim()).filter(Boolean);
+  const items = docs.map(d=>{
+    const k = (d.match(/^kind:\s*(\S+)/m)||[])[1] || "?";
+    const n = (d.match(/^\s*name:\s*(\S+)/m)||[])[1] || "";
+    return esch(k + (n ? " · " + n : ""));
+  });
+  return items.length ? `<div class="kv">${items.join("<br>")}</div>`
+                      : `<div class="kv">nothing to create — check the manifest</div>`;
+}
+function deployManifest(){    // opens the review sheet; the actual apply is doDeploy()
   const opts = builderOpts();
-  const ns = opts.namespace || "default", ctx = document.getElementById("ctx-sel").value || "current context";
-  if(!confirm(`Deploy cluster "${opts.name}" into namespace "${ns}" (${ctx})?\n\nThis creates real resources in the cluster.`)) return;
+  const cur = document.getElementById("ctx-sel").value;
+  const ctxList = CONTEXTS.length ? CONTEXTS : (cur ? [cur] : [""]);
+  const ctxOpts = ctxList.map(c=>`<option value="${esch(c)}"${c===cur?" selected":""}>${esch(c||"(current context)")}</option>`).join("");
+  openSheet(`<h2>Review &amp; deploy</h2>
+    <div class="lede">Applies the generated manifest into the environment you choose. This creates <b>real resources</b> in that cluster.</div>
+    <div class="drow"><span class="dlbl">Environment</span>
+      <select id="dep-ctx" class="pwin" style="color-scheme:dark">${ctxOpts}</select></div>
+    <div class="drow"><span class="dlbl">Namespace</span>
+      <input id="dep-ns" class="pwin" spellcheck="false" value="${esch(opts.namespace||'default')}"></div>
+    <div class="sec"><h3>Will create</h3>${manifestSummary(MANIFEST)}</div>
+    <pre class="manifest" style="max-height:240px">${esch(MANIFEST)}</pre>
+    <div class="mbtns"><button data-close>Cancel</button>
+      <button class="go" onclick="doDeploy()">Deploy</button></div>`);
+}
+async function doDeploy(){
+  const ctx = document.getElementById("dep-ctx").value;
+  const ns = document.getElementById("dep-ns").value.trim() || "default";
+  const opts = {...builderOpts(), namespace:ns, context:ctx};
+  closeSheet();
   const hint = document.getElementById("b-hint"); hint.textContent = "deploying…";
   try{
     const j = await (await fetch("/api/deploy", {method:"POST",
       headers:{"Content-Type":"application/json"}, body:JSON.stringify(opts)})).json();
     if(!j.ok){ hint.textContent = "deploy failed: "+j.error; logActivity("Deploy "+opts.name, false, j.error, 0); return; }
     const ok = j.failed.length===0;
-    hint.textContent = `deployed to ${j.namespace}: ${j.created.length} created`+
+    hint.textContent = `deployed to ${j.context}/${j.namespace}: ${j.created.length} created`+
       (j.skipped.length?`, ${j.skipped.length} existed`:"")+(j.failed.length?`, ${j.failed.length} failed`:"");
-    logActivity("Deploy "+opts.name, ok,
+    logActivity("Deploy "+opts.name+" → "+j.context, ok,
       [...j.created.map(x=>"+"+x), ...j.skipped, ...j.failed].join("  ·  "), 0);
   }catch(e){ hint.textContent = "deploy error: "+e; }
 }

@@ -4,7 +4,7 @@ metadata:
   name: ${name}
 spec:
   instances: ${instances}
-  imageName: ghcr.io/cloudnative-pg/postgresql:${version}
+  imageName: ${image}
   storage:
     size: ${storage}
   resources:

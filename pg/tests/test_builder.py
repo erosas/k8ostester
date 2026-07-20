@@ -155,3 +155,17 @@ def test_schedule_requires_backups():
 def test_instances_are_clamped():
     c = next(d for d in yaml.safe_load_all(build_manifest({"instances": 99})) if d)
     assert c["spec"]["instances"] == 9
+
+
+def test_image_repo_overrides_the_default_registry():
+    # default: the official CNPG build at the given version
+    c = next(d for d in yaml.safe_load_all(build_manifest({"version": "16.6"})) if d)
+    assert c["spec"]["imageName"] == "ghcr.io/cloudnative-pg/postgresql:16.6"
+    # a custom repo is joined to the bare tag
+    c = next(d for d in yaml.safe_load_all(
+        build_manifest({"version": "17.2", "image_repo": "my.mirror/pg"})) if d)
+    assert c["spec"]["imageName"] == "my.mirror/pg:17.2"
+    # a full reference in the version field is used verbatim (repo ignored)
+    c = next(d for d in yaml.safe_load_all(
+        build_manifest({"version": "reg.io/team/pg:16.6", "image_repo": "ignored"})) if d)
+    assert c["spec"]["imageName"] == "reg.io/team/pg:16.6"

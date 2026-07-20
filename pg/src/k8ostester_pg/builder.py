@@ -28,6 +28,10 @@ def build_manifest(opts: dict) -> str:
     sensible defaults, so a bare ``{}`` still yields a valid single-Cluster spec."""
     name = (opts.get("name") or "pg").strip()
     version = (opts.get("version") or "16.6").strip()
+    repo = (opts.get("image_repo") or "ghcr.io/cloudnative-pg/postgresql").strip()
+    # a bare tag is joined to the repo; a value that already looks like a full
+    # reference (has a registry path or an explicit tag) is used as-is
+    image = version if ("/" in version or ":" in version) else f"{repo}:{version}"
     storage = (opts.get("storage") or "10Gi").strip()
     instances = clamp(opts.get("instances"), 1, 9, 3)
 
@@ -64,7 +68,7 @@ def build_manifest(opts: dict) -> str:
                 secret=secret, role=role, password=pw))
 
     docs = [*secret_docs, _tmpl("cluster.tmpl.yaml").substitute(
-        name=name, instances=instances, version=version, storage=storage, extra=extra)]
+        name=name, instances=instances, image=image, storage=storage, extra=extra)]
 
     if opts.get("pooler"):
         docs.append(_tmpl("pooler.tmpl.yaml").substitute(

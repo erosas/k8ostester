@@ -237,7 +237,10 @@ class Console:
         from kubernetes.dynamic import DynamicClient
         sel = self._sel or {}
         namespace = (opts.get("namespace") or sel.get("namespace") or "default").strip()
-        k8s = self.client(sel.get("context"))
+        # the Deploy sheet may target a different kubeconfig context than the one
+        # currently selected for viewing; fall back to the selection.
+        context = opts.get("context") or sel.get("context")
+        k8s = self.client(context)
         dyn = DynamicClient(k8s._api_client)
         manifest = builder.build_manifest({**opts, "namespace": namespace})
         created, skipped, failed = [], [], []
@@ -261,7 +264,8 @@ class Console:
                     failed.append(f"{ident} — forbidden (needs deploy RBAC)")
                 else:
                     failed.append(f"{ident} — {e.reason}")
-        return {"namespace": namespace, "created": created, "skipped": skipped, "failed": failed}
+        return {"context": context or "current", "namespace": namespace,
+                "created": created, "skipped": skipped, "failed": failed}
 
     def secret(self, name: str) -> dict:
         """Decode a basic-auth secret's username/password — ON DEMAND only (never

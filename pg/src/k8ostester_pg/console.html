@@ -129,6 +129,24 @@
   .cond{border:1px solid var(--border);border-radius:16px;padding:2px 9px;color:var(--muted);cursor:help}
   .cond.ok{color:var(--ok);border-color:#33482f}
   .cond.bad{color:var(--crit);border-color:#5a2327}
+  /* health & runbooks — ORR checklist with inline remediation */
+  .hlist{display:flex;flex-direction:column;gap:6px;margin-bottom:var(--s2)}
+  .hrow{display:flex;align-items:center;gap:var(--s3);border:1px solid var(--border);
+    border-left:2px solid var(--dim);border-radius:7px;padding:8px 12px;font-family:var(--mono);font-size:12px}
+  .hrow.warn{border-left-color:var(--warn)} .hrow.crit{border-left-color:var(--crit)}
+  .hrow.ok{border-left-color:#33482f;color:var(--muted)}
+  .hrow .hstat{width:40px;flex:none;font-size:10px;letter-spacing:.08em}
+  .hrow.ok .hstat{color:var(--ok)} .hrow.warn .hstat{color:var(--warn)} .hrow.crit .hstat{color:var(--crit)}
+  .hrow .hsig{width:180px;flex:none;color:var(--ink)}
+  .hrow.ok .hsig{color:var(--muted)}
+  .hrow .hval{color:var(--muted);font-variant-numeric:tabular-nums}
+  .hrow .hfix{margin-left:auto;display:flex;gap:10px;align-items:center}
+  .hrow .hfix button{font-family:var(--sans);font-size:12px;padding:4px 12px;border-radius:6px;
+    border:1px solid var(--border);background:var(--panel2);color:var(--ink);cursor:pointer;white-space:nowrap}
+  .hrow .hfix button:hover:not(:disabled){border-color:var(--accent)}
+  .hrow .hfix button:disabled{opacity:.4;cursor:default}
+  .hrow .hfix a{color:var(--accent);text-decoration:none;cursor:pointer;white-space:nowrap}
+  .hrow .hfix a:hover{text-decoration:underline}
   /* break-glass danger zone — cordoned, armed to enable */
   .danger{margin-top:var(--s5);border:1px solid #4a2327;border-radius:var(--r);background:#1c1315;padding:var(--s4)}
   .danger-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--s3);
@@ -390,6 +408,9 @@
       <div class="tends"><span id="rstart"></span><span>now</span></div>
       <div class="rfoot" id="rfoot"></div>
     </div>
+
+    <div class="alabel" id="health-label">Health &amp; runbooks</div>
+    <div class="hlist" id="hlist"></div>
 
     <div class="alabel">Routine</div>
     <div class="actions" id="actions"></div>
@@ -1591,7 +1612,84 @@ function render(data){
   renderConditions(SNAP);
   renderTopology(SNAP);
   renderRecovery(SNAP);
+  renderHealth(SNAP);
   renderActions();
+}
+
+/* ---- health & runbooks: ORR checklist evaluated from the live snapshot ---- */
+function fmtBig(n){ n=+n||0; return n>=1e9?(n/1e9).toFixed(1)+"B":n>=1e6?(n/1e6).toFixed(0)+"M":n>=1e3?(n/1e3).toFixed(0)+"k":""+n; }
+function fmtDur(s){ s=+s||0; return s>=86400?(s/86400).toFixed(1)+"d":s>=3600?(s/3600).toFixed(1)+"h":s>=60?(s/60).toFixed(0)+"m":s+"s"; }
+// each check → {sig, status: ok|warn|crit, val, fix?} where fix = {btn?:{label,fn}, doc?}
+function healthChecks(s){
+  const h = s.health || {}, out = [];
+  const add = (sig, status, val, fix) => out.push({sig, status, val, fix});
+  const lvl = (v, warn, crit) => v>=crit ? "crit" : v>=warn ? "warn" : "ok";
+  const disks = Object.values(s.disk||{}).map(d=>d.pct||0);
+  if(disks.length){ const m=Math.max(...disks);
+    add("Disk usage", lvl(m,75,90), m+"% of volume", m>=75?{btn:{label:"Expand storage",fn:()=>openExpand()},doc:"disk"}:null); }
+  if(h.xid_age!=null) add("Txn-ID age (wraparound)", lvl(h.xid_age,1.5e8,4e8), fmtBig(h.xid_age)+" / 2.1B",
+    h.xid_age>=1.5e8?{btn:{label:"Run VACUUM",fn:()=>openMaintenance('vacuum')},doc:"xid"}:null);
+  if(h.dead_pct!=null) add("Bloat (dead tuples)", lvl(h.dead_pct,20,40), h.dead_pct+"% dead",
+    h.dead_pct>=20?{btn:{label:"Run VACUUM",fn:()=>openMaintenance('vacuum')},doc:"bloat"}:null);
+  if(h.longest_txn_s!=null) add("Longest transaction", lvl(h.longest_txn_s,300,1800), fmtDur(h.longest_txn_s),
+    h.longest_txn_s>=300?{doc:"longtxn"}:null);
+  if(h.idle_in_txn!=null) add("Idle in transaction", lvl(h.idle_in_txn,1,5), h.idle_in_txn+" backend(s)",
+    h.idle_in_txn>=1?{doc:"idletxn"}:null);
+  if(h.oldest_conn_s!=null) add("Oldest connection", lvl(h.oldest_conn_s,3600,86400), fmtDur(h.oldest_conn_s),
+    h.oldest_conn_s>=3600?{doc:"connage"}:null);
+  if(h.cache_hit_pct!=null){ const c=h.cache_hit_pct; add("Cache hit ratio", c<95?"crit":c<99?"warn":"ok", c+"%", c<99?{doc:"cachehit"}:null); }
+  const c=s.connections||{}; if(c.max){ const pct=Math.round(100*(c.active||0)/c.max);
+    add("Connection saturation", lvl(pct,70,85), (c.active||0)+"/"+c.max+" ("+pct+"%)", pct>=70?{doc:"connsat"}:null); }
+  const bad=(s.slots||[]).find(sl=>!sl.active && sl.retained_bytes>0);
+  if((s.slots||[]).length) add("Replication slots", bad?"crit":"ok", bad?("inactive: "+bad.name):(s.slots.length+" active"), bad?{doc:"slots"}:null);
+  if(s.backup_configured===false) add("Backups", "warn", "not configured", {doc:"backups"});
+  else if(s.backup_configured){ const n=s.backups_completed||0;
+    add("Backups", n?"ok":"crit", n?n+" completed":"none completed", n?null:{btn:{label:"Take backup",fn:()=>fixCap('backup')},doc:"backups"}); }
+  return out;
+}
+function fixCap(id){ const cap=(CAPS||[]).find(c=>c.id===id); if(cap) act(cap); }
+function renderHealth(s){
+  const wrap=document.getElementById("hlist"), lbl=document.getElementById("health-label");
+  const checks = healthChecks(s);
+  if(UNSEL || !checks.length){ wrap.style.display=lbl.style.display="none"; return; }
+  wrap.style.display="flex"; lbl.style.display="";
+  const rank={crit:0,warn:1,ok:2};
+  const bad = checks.filter(c=>c.status!=="ok").sort((a,b)=>rank[a.status]-rank[b.status]);
+  const ok = checks.filter(c=>c.status==="ok");
+  const fixHtml = f => { if(!f) return ""; let h="";
+    if(f.btn) h+=`<button ${s.busy?"disabled":""} data-fix="${esch(f.doc||'')}">${esch(f.btn.label)}</button>`;
+    if(f.doc) h+=`<a data-rb="${esch(f.doc)}">Runbook</a>`;
+    return h; };
+  const row = c => `<div class="hrow ${c.status}"><span class="hstat">${c.status.toUpperCase()}</span>`+
+    `<span class="hsig">${esch(c.sig)}</span><span class="hval">${esch(c.val)}</span>`+
+    `<span class="hfix">${fixHtml(c.fix)}</span></div>`;
+  let html = bad.map(row).join("");
+  if(ok.length) html += `<div class="hrow ok"><span class="hstat">OK</span>`+
+    `<span class="hval">${ok.length} passing — ${esch(ok.map(c=>c.sig).join(", "))}</span></div>`;
+  wrap.innerHTML = html;
+  // wire the fix buttons + runbook links to their check's action
+  bad.forEach(c=>{ if(!c.fix) return;
+    const btn = c.fix.btn && wrap.querySelector(`button[data-fix="${c.fix.doc||''}"]`);
+    if(btn && c.fix.btn) btn.onclick = c.fix.btn.fn;
+  });
+  wrap.querySelectorAll("a[data-rb]").forEach(a=>a.onclick=()=>openRunbook(a.dataset.rb));
+}
+const RUNBOOKS = {
+  disk: ["Disk filling", "Storage is grow-only. Use <b>Expand storage</b> to raise <code>spec.storage.size</code> (needs <code>allowVolumeExpansion</code> on the storage class). Also check WAL isn't pinned by an inactive replication slot, and that archiving is healthy."],
+  xid: ["Transaction-ID wraparound", "Age is climbing toward the ~2.1B limit, past which Postgres stops accepting writes. Autovacuum should freeze old rows; if it's behind, run <b>VACUUM (ANALYZE)</b> on the app database. Persistent growth means autovacuum is being blocked — look for a long transaction, an idle-in-transaction backend, or an unused replication slot holding an old xmin."],
+  bloat: ["Table bloat", "Dead tuples are a large share of the table. Run <b>VACUUM (ANALYZE)</b> to reclaim space and refresh stats. If a specific table is severely bloated, a per-table <code>VACUUM FULL</code> during a window rewrites it (exclusive lock — not offered here). Tune autovacuum to be more aggressive on hot tables."],
+  longtxn: ["Long-running transaction", "A transaction has been open a long time — it holds locks and pins the xmin horizon, blocking vacuum. Find it in <code>pg_stat_activity</code> (by <code>xact_start</code>) and cancel it if it's a runaway (<code>pg_cancel_backend</code>), or fix the app that left it open."],
+  idletxn: ["Idle in transaction", "Backends are sitting in <b>idle in transaction</b> — the app opened a transaction and didn't commit/rollback. These block vacuum and hold locks. Fix the app to commit promptly; set <code>idle_in_transaction_session_timeout</code> as a backstop."],
+  connage: ["Old connections", "The oldest client connection is long-lived. Long-lived connections accumulate memory and miss config changes. Recycle them: set the pooler's <code>server_lifetime</code> (PgBouncer) so connections are retired periodically, or have the app pool rotate them."],
+  cachehit: ["Low cache hit ratio", "Reads are missing the buffer cache and hitting disk. If sustained, the working set may exceed <code>shared_buffers</code> — raise instance memory and <code>shared_buffers</code>, or add an index so queries touch fewer pages."],
+  connsat: ["Connection saturation", "Active backends are near <code>max_connections</code>. Put a <b>pooler</b> in front (PgBouncer, transaction mode) so many clients share few backends, rather than raising <code>max_connections</code> (each backend costs memory)."],
+  slots: ["Inactive replication slot", "A replication slot is inactive but still retaining WAL — this pins WAL on the primary and fills the disk, and holds back vacuum. If the consumer is gone for good, drop the slot (<code>pg_drop_replication_slot</code>); if it's a replica, bring it back."],
+  backups: ["Backups", "No completed backup means no point-in-time recovery — a bad delete or corrupt page is unrecoverable. Configure a barman object store and take a base backup; schedule regular base backups and verify a restore periodically."],
+};
+function openRunbook(anchor){
+  const rb = RUNBOOKS[anchor]; if(!rb) return;
+  openSheet(`<h2>${esch(rb[0])}</h2><div class="lede">${rb[1]}</div>`+
+    `<div class="mbtns"><button data-close>Close</button></div>`);
 }
 
 function renderConditions(s){

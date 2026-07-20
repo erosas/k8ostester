@@ -257,13 +257,17 @@ def wal_seg_index(name: str) -> int | None:
 
 
 def _psql(k8s: ClusterClient, namespace: str, pod: str, query: str,
-          sep: str | None = "|") -> str | None:
+          sep: str | None = "|", db: str = "") -> str | None:
     """Run ``query`` on a pod's ``postgres`` container via the API exec stream and
     return the tuples-only (``-tA``) stdout, stripped — or None if the exec fails.
-    ``sep`` sets the field separator (``-F``); None gives single-column output."""
+    ``sep`` sets the field separator (``-F``); None gives single-column output.
+    ``db`` connects to a specific database (default: the ``postgres`` maintenance db)."""
     if not pod:
         return None
-    argv = ["psql", "-U", "postgres", "-tA"]
+    argv = ["psql", "-U", "postgres"]
+    if db:
+        argv += ["-d", db]
+    argv += ["-tA"]
     if sep is not None:
         argv += ["-F", sep]
     argv += ["-c", query]
@@ -323,13 +327,50 @@ def _data_size(k8s: ClusterClient, namespace: str, primary: str) -> int | None:
         return None
 
 
+_HEALTH_Q = (
+    "select"
+    " (select max(age(datfrozenxid)) from pg_database),"
+    " coalesce((select max(extract(epoch from now()-xact_start))::int from pg_stat_activity"
+    "   where xact_start is not null and backend_type='client backend'),0),"
+    " coalesce((select max(extract(epoch from now()-backend_start))::int from pg_stat_activity"
+    "   where backend_type='client backend'),0),"
+    " coalesce((select count(*) from pg_stat_activity where state='idle in transaction'),0),"
+    " coalesce((select round(100.0*sum(n_dead_tup)/nullif(sum(n_live_tup+n_dead_tup),0),1)"
+    "   from pg_stat_user_tables),0),"
+    " coalesce((select round(100.0*sum(blks_hit)/nullif(sum(blks_hit+blks_read),0),2)"
+    "   from pg_stat_database),100)"
+)
+
+
+def _health(k8s: ClusterClient, namespace: str, primary: str, db: str) -> dict:
+    """One query for the ORR health signals not in the topology view — transaction-ID
+    age (wraparound headroom), longest transaction, oldest connection, idle-in-txn,
+    dead-tuple % (bloat) and cache-hit %. Self-contained (direct psql), so the health
+    panel works even without a metrics pipeline."""
+    raw = _psql(k8s, namespace, primary, _HEALTH_Q, db=db or "postgres")
+    if raw is None:
+        return {}
+    p = raw.split("|")
+    if len(p) < 6:
+        return {}
+
+    def _n(i, cast=int, default=0):
+        try:
+            return cast(p[i])
+        except (ValueError, IndexError):
+            return default
+    return {"xid_age": _n(0), "longest_txn_s": _n(1), "oldest_conn_s": _n(2),
+            "idle_in_txn": _n(3), "dead_pct": _n(4, float), "cache_hit_pct": _n(5, float)}
+
+
 def heavy(k8s: ClusterClient, namespace: str, name: str = "pg") -> dict:
     """The slow-changing, expensive metrics — disk headroom, connection
-    saturation, replication slots, data size. Run on a slower cadence than the
-    2s topology refresh (see server.Console) so it doesn't hammer the primary."""
+    saturation, replication slots, data size, ORR health signals. Run on a slower
+    cadence than the 2s topology refresh (see server.Console)."""
     cluster = k8s.custom.get_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, namespace, "clusters", name)
     primary = cluster.get("status", {}).get("currentPrimary", "")
+    db = cluster.get("spec", {}).get("bootstrap", {}).get("initdb", {}).get("database", "app")
     instances = _instances(k8s, namespace, name)
     try:
         poolers = [p["metadata"]["name"] for p in k8s.custom.list_namespaced_custom_object(
@@ -342,6 +383,7 @@ def heavy(k8s: ClusterClient, namespace: str, name: str = "pg") -> dict:
         "connections": _connections(k8s, namespace, primary),
         "slots": _slots(k8s, namespace, primary),
         "services": _services(k8s, namespace, name, poolers),
+        "health": _health(k8s, namespace, primary, db),
     }
 
 

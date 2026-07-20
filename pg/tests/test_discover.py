@@ -182,3 +182,17 @@ def test_parse_replication_maps_standby_to_sync_and_lag():
     assert r["pg-2"] == {"sync_state": "quorum", "lag_bytes": 0}
     assert r["pg-3"] == {"sync_state": "async", "lag_bytes": 8192}
     assert _parse_replication("") == {}
+
+
+def test_health_parses_the_orr_signal_row():
+    from unittest.mock import MagicMock
+
+    from k8ostester_pg.discover import _health
+    k8s = MagicMock()
+    k8s.exec_pod.return_value = "200000000|450|7200|3|35.5|94.2\n"
+    h = _health(k8s, "ns", "pg-1", "app")
+    assert h == {"xid_age": 200000000, "longest_txn_s": 450, "oldest_conn_s": 7200,
+                 "idle_in_txn": 3, "dead_pct": 35.5, "cache_hit_pct": 94.2}
+    # a failed exec -> empty, so the panel simply omits those checks
+    k8s.exec_pod.side_effect = Exception("boom")
+    assert _health(k8s, "ns", "pg-1", "app") == {}

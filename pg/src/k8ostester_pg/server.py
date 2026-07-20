@@ -294,6 +294,22 @@ class Console:
         return {"username": dec("username"), "password": dec("password")}
 
 
+def _basic_auth_ok(auth_header: str, want: str) -> bool:
+    """True if the request satisfies basic-auth. ``want`` is 'user:pass' (empty =
+    no auth required → always True). Constant-time compare to avoid a timing oracle."""
+    import base64
+    import hmac
+    if not want:
+        return True
+    if auth_header.startswith("Basic "):
+        try:
+            got = base64.b64decode(auth_header[6:]).decode()
+        except Exception:
+            got = ""
+        return hmac.compare_digest(got, want)
+    return False
+
+
 def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
@@ -309,7 +325,24 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
         def _json(self, obj: dict) -> None:
             self._send(200, "application/json", json.dumps(obj).encode())
 
+        def _auth_ok(self) -> bool:
+            """Optional built-in basic-auth. Off unless K8OST_BASIC_AUTH ('user:pass')
+            is set — for exposing the console on a DNS name without relying on a
+            gateway's auth. When unset, everything is allowed (the default: a
+            port-forward is the auth gate). TLS must terminate at the edge — the
+            credential rides every request."""
+            import os
+            if _basic_auth_ok(self.headers.get("Authorization", ""), os.environ.get("K8OST_BASIC_AUTH", "")):
+                return True
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="k8ost-console"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
         def do_GET(self):
+            if not self._auth_ok():
+                return
             if self.path == "/":
                 self._send(200, "text/html; charset=utf-8", SPA.encode())
             elif self.path == "/api/contexts":
@@ -363,6 +396,8 @@ def _handler(console: Console) -> type[BaseHTTPRequestHandler]:
                 self._send(404, "text/plain", b"not found")
 
         def do_POST(self):
+            if not self._auth_ok():
+                return
             if self.path not in ("/api/action", "/api/manifest", "/api/dashboard",
                                  "/api/deploy", "/api/wal-count", "/api/select"):
                 self._send(404, "text/plain", b"not found")

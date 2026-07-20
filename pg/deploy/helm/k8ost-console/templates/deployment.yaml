@@ -50,6 +50,14 @@ spec:
             {{- with .Values.console.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- if .Values.console.basicAuth.enabled }}
+          env:
+            - name: K8OST_BASIC_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "k8ost-console.fullname" . }}-auth
+                  key: auth
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

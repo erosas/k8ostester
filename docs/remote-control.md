@@ -260,12 +260,14 @@ API `HTTPRoute` (`gatewayRoute.*`, the vendor-neutral option) or an `Ingress`
 (`ingress.*`). TLS and the certificate live on the gateway; the console speaks plain
 HTTP behind it, and its SSE stream works as long as the gateway doesn't buffer.
 
-**Auth is the gateway's job.** The console has **no login of its own**, so a DNS name
-is a mutating control plane open to anyone who can reach it. Enforce authentication on
-the gateway controller — its auth/external-auth extension, or an authenticating proxy
-(e.g. an OIDC forward-auth proxy) in front. The chart **refuses to render an
-unauthenticated Ingress** unless you explicitly set `ingress.insecureNoAuth=true`. See
-the [chart README](../pg/deploy/helm/k8ost-console/README.md#exposing-it-on-a-dns-name-and-auth).
+**Auth.** By itself the console has **no login**, so on a DNS name it's a mutating
+control plane open to anyone who can reach it. Two options: turn on the console's
+**built-in basic-auth** (`console.basicAuth.*` — controller-agnostic, a shared
+credential, interim), or enforce auth at the **gateway** (its auth extension, or an
+OIDC forward-auth proxy for per-user SSO). The chart **refuses to render an
+unauthenticated Ingress** unless one of those is set (or `ingress.insecureNoAuth=true`
+for a private-network-only deployment). See the
+[chart README](../pg/deploy/helm/k8ost-console/README.md#exposing-it-on-a-dns-name-and-auth).
 
 Still open on the exposure track: RBAC-aware action gating (grey out what the SA can't
 do) and typed confirmations for the most destructive break-glass ops.

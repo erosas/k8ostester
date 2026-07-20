@@ -64,6 +64,14 @@ console:
   grafana: ""                # Grafana base URL for the metrics deep-links
   target: ""                 # a PG image/version to offer as an upgrade
   extraArgs: []              # any additional k8ost-console flags
+  # Built-in basic-auth — the console checks it itself, so it works behind
+  # port-forward, an Ingress, OR a gateway (controller-agnostic). Off by default:
+  # "no auth for now" is the default, flip enabled=true when you want it. It's a
+  # shared credential (interim, not SSO), and TLS must terminate at the edge.
+  basicAuth:
+    enabled: false
+    username: ""
+    password: ""
 
 serviceAccount:
   name: ""                   # defaults to the release fullname

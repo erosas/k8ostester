@@ -57,6 +57,21 @@ def test_console_deploy_applies_each_manifest_doc(_cc, _ctx):
     assert res.create.call_args.kwargs["namespace"] == "lab"
 
 
+def test_basic_auth_gate():
+    import base64
+
+    from k8ostester_pg.server import _basic_auth_ok
+    # no credential configured -> everything allowed (the default)
+    assert _basic_auth_ok("", "") is True
+    assert _basic_auth_ok("anything", "") is True
+    ok = "Basic " + base64.b64encode(b"admin:s3cret").decode()
+    assert _basic_auth_ok(ok, "admin:s3cret") is True
+    assert _basic_auth_ok("Basic " + base64.b64encode(b"admin:wrong").decode(), "admin:s3cret") is False
+    assert _basic_auth_ok("", "admin:s3cret") is False          # missing header
+    assert _basic_auth_ok("Bearer xyz", "admin:s3cret") is False  # wrong scheme
+    assert _basic_auth_ok("Basic !!notbase64", "admin:s3cret") is False
+
+
 @patch("k8ostester_pg.server.config.list_kube_config_contexts", return_value=([], None))
 @patch("k8ostester_pg.server.ClusterClient")
 def test_console_is_unselected_until_a_cluster_is_chosen(_cc, _ctx):

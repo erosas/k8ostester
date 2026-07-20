@@ -55,10 +55,33 @@ the console's ClusterIP Service (plain HTTP) → the pod. The chart only creates
 route (the `HTTPRoute` or `Ingress`) that hands your hostname to the Service; the
 gateway controller and its certificate/auth are yours.
 
-**Auth is not optional.** The console has **no login of its own** — on a DNS name
-it's a mutating control plane open to anyone who can reach it. Authentication is the
-gateway controller's job; enforce it there. The chart **refuses** to render an
-Ingress with no auth annotation unless you set `ingress.insecureNoAuth=true` (don't).
+**Auth is not optional on a DNS name.** By itself the console has no login, so
+exposed it's a mutating control plane open to anyone who can reach it. Pick one:
+
+### Built-in basic-auth (simplest, controller-agnostic)
+
+The console can check basic-auth **itself**, so it protects every path the same way
+whether you reach it via port-forward, Ingress, or a gateway — no controller-specific
+config. It's a shared credential (interim, not SSO), and TLS must still terminate at
+the edge since the credential rides each request. Off by default ("no auth for now"):
+
+```bash
+helm install console pg/deploy/helm/k8ost-console -n db \
+  --set console.basicAuth.enabled=true \
+  --set console.basicAuth.username=admin \
+  --set console.basicAuth.password=<a-strong-password>
+# combine with ingress.* or gatewayRoute.* below to put it on a DNS name
+```
+
+The chart stores the credential in a Secret and passes it as `K8OST_BASIC_AUTH`.
+
+### Delegate auth to the gateway
+
+Alternatively enforce auth at the edge — your controller's auth extension, or an OIDC
+forward-auth proxy (per-user SSO). Then the console needs no built-in auth. The chart
+**refuses** to render an Ingress with neither `console.basicAuth` on, an auth
+annotation, nor `ingress.insecureNoAuth=true` (the last is for "behind a private
+network / VPN only", i.e. the network is the gate).
 
 ### Gateway API (vendor-neutral)
 
@@ -100,6 +123,8 @@ TLS terminates at the gateway; the console speaks plain HTTP behind it, and its
 | `console.grafana` | `""` | Grafana base URL for metric deep-links |
 | `console.target` | `""` | a PG image/version to offer as an upgrade |
 | `console.extraArgs` | `[]` | extra `k8ost-console` flags |
+| `console.basicAuth.enabled` | `false` | built-in basic-auth (controller-agnostic) |
+| `console.basicAuth.username` / `.password` | `""` | the shared credential (stored in a Secret) |
 | `resources` | 50m/96Mi → 500m/256Mi | |
 | `gatewayRoute.enabled` | `false` | expose via a Gateway API `HTTPRoute` |
 | `gatewayRoute.parentRefs` | `[]` | the `Gateway`(s) to attach to |

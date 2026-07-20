@@ -61,6 +61,14 @@ GOALS: dict[str, tuple[str, str, str, str]] = {
 }
 
 
+# goal key -> docs/runbooks.md anchor, so each alert can carry a runbook_url
+RUNBOOK_ANCHOR = {
+    "repl_lag": "repl-lag", "connections": "connsat", "archive_delay": "archive",
+    "cpu": "cpu", "memory": "memory", "disk": "disk", "txid": "xid",
+    "long_txn": "longtxn", "conn_age": "connage",
+}
+
+
 def num(x: object) -> float | int | None:
     """Parse a goal value; None (skip) if blank/invalid. Ints stay ints."""
     try:

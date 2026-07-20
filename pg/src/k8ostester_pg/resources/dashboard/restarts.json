@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Postgres restarts (1h window)",
+  "description": "Restarts per instance over the last hour, from changes in cnpg_pg_postmaster_start_time — crashes, OOM kills, or failovers. Steady zero is what you want; a spike lines up with an incident and is worth correlating against memory and the CNPG events.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "changes(cnpg_pg_postmaster_start_time{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[1h])", "legendFormat": "{{__LABEL__}}", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

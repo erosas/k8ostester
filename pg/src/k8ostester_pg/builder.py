@@ -12,7 +12,10 @@ from __future__ import annotations
 from importlib import resources
 from string import Template
 
-from k8ostester_pg.goals import GOALS, clamp, num
+from k8ostester_pg.goals import GOALS, RUNBOOK_ANCHOR, clamp, num
+
+# alerts link back to the runbook doc; override the base for your own fork/host
+RUNBOOK_BASE = "https://github.com/erosas/k8ostester/blob/main/docs/runbooks.md"
 
 # sync policy choice -> (CNPG method, number). "async" omits the block entirely.
 _SYNC = {"quorum": ("any", 1), "priority": ("first", 1)}
@@ -117,7 +120,9 @@ def _alert_rules(name: str, goals: dict, label: str = "pod") -> str:
         v = num(goals.get(key))
         if v is None:
             continue
+        anchor = RUNBOOK_ANCHOR.get(key, "")
         frags.append(_tmpl("prometheus-rule.tmpl.yaml").substitute(
             alert=alert, expr=expr_t.format(pods=pods, v=v, label=label),
-            summary=summary_t.format(v=v), name=name))
+            summary=summary_t.format(v=v), name=name,
+            runbook=f"{RUNBOOK_BASE}#{anchor}" if anchor else RUNBOOK_BASE))
     return "".join(frags)

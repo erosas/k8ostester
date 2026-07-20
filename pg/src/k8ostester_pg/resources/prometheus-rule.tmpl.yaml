@@ -2,4 +2,4 @@
           expr: '${expr}'
           for: 2m
           labels: {severity: warning, cluster: ${name}}
-          annotations: {summary: "${summary}"}
+          annotations: {summary: "${summary}", runbook_url: "${runbook}"}

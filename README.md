@@ -167,6 +167,7 @@ mirror them and point the manifests at your registry.
 - **[docs/architecture-restructure.md](docs/architecture-restructure.md)** — the kernel + verticals design record
 - **[docs/productionization.md](docs/productionization.md)** — the testbed golden path
 - **[docs/remote-control.md](docs/remote-control.md)** — the `k8ost-console` control plane
+- **[docs/runbooks.md](docs/runbooks.md)** — remediation runbooks for the operational signals (linked from alerts + the console)
 
 ## Develop
 

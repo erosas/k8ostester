@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Cache hit ratio (%)",
+  "description": "Share of reads served from the buffer cache vs disk (cnpg_pg_stat_database_blks_hit / (hit + read)). A healthy OLTP database sits well above 99%; a sustained dip means the working set no longer fits shared_buffers — raise instance memory (and shared_buffers) or add an index so queries touch fewer pages.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "100 * sum(rate(cnpg_pg_stat_database_blks_hit{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[5m])) / clamp_min(sum(rate(cnpg_pg_stat_database_blks_hit{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[5m])) + sum(rate(cnpg_pg_stat_database_blks_read{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[5m])), 1)", "legendFormat": "cache hit %", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "percent", "min": 90, "max": 100, "custom": {"drawStyle": "line", "fillOpacity": 10}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

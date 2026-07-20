@@ -1,0 +1,14 @@
+{
+  "type": "timeseries",
+  "title": "Checkpoints (per hour)",
+  "description": "Scheduled vs requested checkpoints (cnpg_pg_stat_bgwriter_checkpoints_timed / _req). Frequent 'requested' checkpoints mean writes are outpacing max_wal_size and forcing early flushes — raise max_wal_size to smooth I/O spikes and cut WAL churn.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "sum(rate(cnpg_pg_stat_bgwriter_checkpoints_timed{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[15m])) * 3600", "legendFormat": "scheduled", "refId": "A"},
+    {"expr": "sum(rate(cnpg_pg_stat_bgwriter_checkpoints_req{__LABEL__=~\"__CLUSTER__-[0-9]+\"}[15m])) * 3600", "legendFormat": "requested (pressure)", "refId": "B"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

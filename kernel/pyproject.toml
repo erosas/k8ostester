@@ -1,6 +1,6 @@
 [project]
 name = "k8ostester-kernel"
-version = "0.2.1"
+version = "0.2.2"
 description = "Shared primitives for k8ostester verticals: k8s access, chaos primitives, the metrics console, and the SLO-query verdict"
 requires-python = ">=3.14"
 dependencies = [

@@ -20,6 +20,11 @@ Two things ship here:
   build/deploy new clusters. Runs on your laptop against a kubeconfig, or
   in-cluster as a control plane.
 
+![Live failover in the console: primary killed → replica promoted → healthy 3/3](docs/tour/failover.gif)
+
+*The console operating a live cluster through a failover. See the full
+[visual tour](docs/tour.md).*
+
 ## How it's built
 
 A small [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) —
@@ -158,6 +163,7 @@ mirror them and point the manifests at your registry.
 
 ## Docs
 
+- **[docs/tour.md](docs/tour.md)** — a visual tour of the console (screenshots + live failover)
 - **[docs/architecture-restructure.md](docs/architecture-restructure.md)** — the kernel + verticals design record
 - **[docs/productionization.md](docs/productionization.md)** — the testbed golden path
 - **[docs/remote-control.md](docs/remote-control.md)** — the `k8ost-console` control plane

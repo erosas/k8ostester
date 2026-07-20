@@ -245,12 +245,27 @@ kubectl -n <ns> port-forward svc/k8ost-console 8700:8700 # port-forward IS the a
 - **Build → Deploy is opt-in.** `pg/deploy/console.yaml` grants only operate/read;
   applying the additive `pg/deploy/console-lab.yaml` adds the create rights the
   Builder's Deploy needs. Leave it off for a pure operator console.
-- **No ingress.** The Service is ClusterIP; the only way in is `port-forward`,
-  which already requires Kubernetes RBAC — so k8s authn/authz is the login.
+- **Port-forward by default.** The Service is ClusterIP; the default way in is
+  `port-forward`, which already requires Kubernetes RBAC — so k8s authn/authz is
+  the login.
 - **Audit** comes largely from the cluster's API audit log (every mutation is
   attributed to the ServiceAccount) plus the console's own Activity record.
 
-Exposing it via Ingress/LoadBalancer instead of port-forward means adding auth
-(token/OIDC) + TLS — the remaining "harden for network exposure" track, along
-with RBAC-aware gating (grey out actions the SA can't perform) and typed
-confirmations for the most destructive break-glass ops.
+## Exposing it on a DNS name
+
+To reach it on a hostname you go through your **gateway controller**: DNS name →
+gateway (TLS termination + auth) → the ClusterIP Service (plain HTTP) → the pod. The
+Helm chart creates just the route that hands your hostname to the Service — a Gateway
+API `HTTPRoute` (`gatewayRoute.*`, the vendor-neutral option) or an `Ingress`
+(`ingress.*`). TLS and the certificate live on the gateway; the console speaks plain
+HTTP behind it, and its SSE stream works as long as the gateway doesn't buffer.
+
+**Auth is the gateway's job.** The console has **no login of its own**, so a DNS name
+is a mutating control plane open to anyone who can reach it. Enforce authentication on
+the gateway controller — its auth/external-auth extension, or an authenticating proxy
+(e.g. an OIDC forward-auth proxy) in front. The chart **refuses to render an
+unauthenticated Ingress** unless you explicitly set `ingress.insecureNoAuth=true`. See
+the [chart README](../pg/deploy/helm/k8ost-console/README.md#exposing-it-on-a-dns-name-and-auth).
+
+Still open on the exposure track: RBAC-aware action gating (grey out what the SA can't
+do) and typed confirmations for the most destructive break-glass ops.

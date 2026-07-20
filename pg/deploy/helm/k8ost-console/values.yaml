@@ -21,10 +21,41 @@ rbac:
   lab: false
 
 service:
-  # ClusterIP by design — reach the console via `kubectl port-forward`, which is
-  # itself the auth gate (it already requires Kubernetes RBAC). No ingress.
+  # ClusterIP by design — by default you reach the console via `kubectl port-forward`,
+  # which is itself the auth gate (it already requires Kubernetes RBAC).
   type: ClusterIP
   port: 8700
+
+# --- External exposure (DNS name + TLS at the gateway controller) -------------
+# ⚠ THE CONSOLE HAS NO LOGIN OF ITS OWN. Putting it on a DNS name exposes a
+# MUTATING control plane (backup, rotate, break-glass, deploy) to anyone who can
+# reach that name. Authentication is your gateway controller's job — enforce it
+# there (an OIDC/forward-auth extension, or an authenticating proxy in front).
+# Both options below are OFF by default, and neither adds auth for you.
+#
+# TLS terminates at the gateway; the console speaks plain HTTP behind it. The
+# gateway must not buffer responses — its /api/stream is Server-Sent Events.
+
+# Gateway API (the vendor-neutral way): attach an HTTPRoute to an existing Gateway
+# that owns the TLS listener. Auth is enforced on the Gateway/route by your platform.
+gatewayRoute:
+  enabled: false
+  parentRefs: []             # the Gateway(s) to attach to, e.g.:
+  #   - name: web
+  #     namespace: infra
+  host: ""                   # the DNS name
+
+# Ingress (if you run an Ingress controller instead of the Gateway API):
+ingress:
+  enabled: false
+  className: ""              # your ingress class
+  host: ""                   # the DNS name, e.g. k8ost.example.com (required when enabled)
+  annotations: {}            # where you attach your controller's auth (e.g. an OIDC forwardAuth)
+  tls:
+    enabled: true
+    secretName: ""           # cert secret (e.g. from cert-manager); "" uses the controller default cert
+  # Last resort: expose with NO auth on purpose (don't). Must be set to bypass the guard.
+  insecureNoAuth: false
 
 # Optional pre-selection / wiring (all optional — the UI can pick at runtime).
 console:

@@ -3,15 +3,29 @@ k8ost-console is installed as {{ include "k8ost-console.fullname" . }} in namesp
 Image:     {{ include "k8ost-console.image" . }}
 RBAC:      {{ .Values.rbac.scope }}{{ if .Values.rbac.lab }} + lab (Build→Deploy){{ end }}
 
-There is no ingress by design — reach it over a port-forward, which is itself the
-auth gate (it already requires Kubernetes RBAC):
+{{- if .Values.gatewayRoute.enabled }}
+
+Exposed via Gateway API (HTTPRoute) at host: {{ .Values.gatewayRoute.host }}
+  ⚠ Enforce auth on the Gateway — the console has no login of its own.
+{{- else if .Values.ingress.enabled }}
+
+Exposed via Ingress at: https://{{ .Values.ingress.host }}
+{{- if .Values.ingress.insecureNoAuth }}
+  Auth: NONE. ⚠ An unauthenticated mutating control plane on a public name. Fix this.
+{{- else }}
+  Auth: enforced by your controller ({{ range $k, $v := .Values.ingress.annotations }}{{ $k }} {{ end }})
+{{- end }}
+{{- else }}
+
+No external exposure. Reach it over a port-forward, which is itself the auth gate
+(it already requires Kubernetes RBAC):
 
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "k8ost-console.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
 
 Then open http://127.0.0.1:{{ .Values.service.port }}
-
+{{- end }}
 {{- if eq .Values.rbac.scope "namespaced" }}
 
-Scoped to the '{{ .Release.Namespace }}' namespace. To operate CNPG clusters in
-every namespace, reinstall with --set rbac.scope=cluster.
+Scoped to the '{{ .Release.Namespace }}' namespace. For all-namespace control,
+reinstall with --set rbac.scope=cluster.
 {{- end }}

@@ -44,6 +44,45 @@ helm install console pg/deploy/helm/k8ost-console -n db \
 
 `image.tag` defaults to the chart's `appVersion`, so it tracks the chart unless you pin it.
 
+## Exposing it on a DNS name (and auth)
+
+By default there's **no external exposure** — you `port-forward`, and Kubernetes
+RBAC is the login. To reach the console on a hostname you go through your **gateway
+controller**, which terminates TLS and routes the hostname to the Service.
+
+**How it fits together.** DNS name → gateway controller (TLS termination + auth) →
+the console's ClusterIP Service (plain HTTP) → the pod. The chart only creates the
+route (the `HTTPRoute` or `Ingress`) that hands your hostname to the Service; the
+gateway controller and its certificate/auth are yours.
+
+**Auth is not optional.** The console has **no login of its own** — on a DNS name
+it's a mutating control plane open to anyone who can reach it. Authentication is the
+gateway controller's job; enforce it there. The chart **refuses** to render an
+Ingress with no auth annotation unless you set `ingress.insecureNoAuth=true` (don't).
+
+### Gateway API (vendor-neutral)
+
+Attach an `HTTPRoute` to an existing `Gateway` that owns the TLS listener and enforces
+auth (via your controller's auth extension / an external-auth policy on the Gateway):
+
+```bash
+helm install console pg/deploy/helm/k8ost-console -n db \
+  --set gatewayRoute.enabled=true --set gatewayRoute.host=k8ost.example.com \
+  --set 'gatewayRoute.parentRefs[0].name=web' --set 'gatewayRoute.parentRefs[0].namespace=infra'
+```
+
+### Ingress (if you run an Ingress controller instead)
+
+```bash
+helm install console pg/deploy/helm/k8ost-console -n db \
+  --set ingress.enabled=true --set ingress.className=<your-class> \
+  --set ingress.host=k8ost.example.com --set ingress.tls.secretName=k8ost-tls \
+  --set 'ingress.annotations.<your-controllers-auth-annotation>=<value>'
+```
+
+TLS terminates at the gateway; the console speaks plain HTTP behind it, and its
+`/api/stream` Server-Sent Events work as long as the gateway doesn't buffer responses.
+
 ## Values
 
 | Key | Default | What |
@@ -62,6 +101,15 @@ helm install console pg/deploy/helm/k8ost-console -n db \
 | `console.target` | `""` | a PG image/version to offer as an upgrade |
 | `console.extraArgs` | `[]` | extra `k8ost-console` flags |
 | `resources` | 50m/96Mi → 500m/256Mi | |
+| `gatewayRoute.enabled` | `false` | expose via a Gateway API `HTTPRoute` |
+| `gatewayRoute.parentRefs` | `[]` | the `Gateway`(s) to attach to |
+| `gatewayRoute.host` | `""` | the DNS name |
+| `ingress.enabled` | `false` | expose via an Ingress on `ingress.host` |
+| `ingress.className` | `""` | your ingress class |
+| `ingress.host` | `""` | the DNS name (required when enabled) |
+| `ingress.tls.secretName` | `""` | cert secret; `""` = the controller default cert |
+| `ingress.annotations` | `{}` | where you attach your controller's auth |
+| `ingress.insecureNoAuth` | `false` | escape hatch to expose with no auth (don't) |
 
 ## Uninstall
 

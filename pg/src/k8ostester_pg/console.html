@@ -1788,6 +1788,7 @@ function updateSyncNote(){
   };
   let msg = notes[mode] || "";
   if(mode !== "async" && n < 2) msg += " Needs ≥2 instances so there's a standby to wait on.";
+  else if(mode !== "async" && n === 2) msg += " With only one standby, losing it blocks writes — use ≥3 instances for a quorum that survives a replica loss.";
   const el = document.getElementById("b-sync-note");
   el.className = "fnote" + (mode === "async" ? " warn" : "");
   el.innerHTML = msg;

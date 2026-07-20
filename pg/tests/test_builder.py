@@ -174,6 +174,16 @@ def test_single_instance_omits_synchronous():
     assert "synchronous" not in c["spec"].get("postgresql", {})
 
 
+def test_single_instance_disables_pdb():
+    # CNPG's default PDB (minAvailable 1) blocks node drains forever with no standby;
+    # a single-instance cluster must set enablePDB:false so the node can be cordoned.
+    c = next(d for d in yaml.safe_load_all(build_manifest({"instances": 1})) if d)
+    assert c["spec"]["enablePDB"] is False
+    # multi-instance leaves CNPG's default PDBs in place (they allow replica disruptions)
+    c = next(d for d in yaml.safe_load_all(build_manifest({"instances": 3})) if d)
+    assert "enablePDB" not in c["spec"]
+
+
 def test_compute_requests_and_optional_limits():
     # default: requests only (Burstable QoS)
     c = next(d for d in yaml.safe_load_all(build_manifest({})) if d)

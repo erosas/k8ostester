@@ -54,6 +54,11 @@ def build_manifest(opts: dict) -> str:
     if method_number and instances >= 2:
         extra += _tmpl("cluster-sync.tmpl.yaml").substitute(
             method=method_number[0], number=method_number[1])
+    # a single-instance cluster must disable the PodDisruptionBudget: CNPG's default
+    # PDB (minAvailable 1) allows zero disruptions when there's no standby, so a node
+    # drain blocks forever — the node can never be cordoned without deleting the pod.
+    if instances < 2:
+        extra += "  enablePDB: false\n"
     if opts.get("backups"):
         extra += _tmpl("cluster-backup.tmpl.yaml").substitute(
             bucket=(opts.get("bucket") or "backups").strip(),

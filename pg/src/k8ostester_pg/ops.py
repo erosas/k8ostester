@@ -38,6 +38,31 @@ def minor_upgrade(k8s: ClusterClient, ns: str, target: str, name: str = "pg") ->
     return f"upgrade to {image} started (rolling)"
 
 
+# whitelisted maintenance commands — no free-form SQL from the console
+_MAINTENANCE = {
+    "vacuum": "VACUUM (ANALYZE)",   # reclaim dead tuples + refresh planner stats
+    "analyze": "ANALYZE",           # refresh planner stats only
+    "checkpoint": "CHECKPOINT",     # flush dirty buffers to disk now
+}
+
+
+def maintenance(k8s: ClusterClient, ns: str, op: str, name: str = "pg") -> str:
+    """Run a whitelisted maintenance command on the primary. VACUUM/ANALYZE target
+    the application database; CHECKPOINT is cluster-wide. Regular VACUUM does not
+    take an exclusive lock (unlike VACUUM FULL, which we deliberately don't offer)."""
+    sql = _MAINTENANCE.get(op)
+    if not sql:
+        raise RuntimeError(f"unknown maintenance op: {op}")
+    cl = _cluster(k8s, ns, name)
+    primary = cl.get("status", {}).get("currentPrimary", "")
+    if not primary:
+        raise RuntimeError("no primary")
+    db = cl.get("spec", {}).get("bootstrap", {}).get("initdb", {}).get("database", "app")
+    argv = ["psql", "-U", "postgres", "-d", db, "-c", sql]
+    k8s.exec_pod(ns, primary, argv, container="postgres")
+    return f"{sql} completed on {primary} ({db})"
+
+
 def expand_storage(k8s: ClusterClient, ns: str, size: str, name: str = "pg") -> str:
     """Grow the data volume by patching ``spec.storage.size``. The operator expands
     each PVC in place — online, no downtime — IF the storage class allows it

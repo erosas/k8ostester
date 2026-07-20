@@ -89,5 +89,7 @@ _HANDLERS = {
     "upgrade": _upgrade,
     "expand-storage": lambda k8s, ns, s, p, name: ops.expand_storage(
         k8s, ns, p.get("size", ""), name),
+    "maintenance": lambda k8s, ns, s, p, name: ops.maintenance(
+        k8s, ns, p.get("op", ""), name),
     "restore": lambda k8s, ns, s, p, name: ops.restore(k8s, ns, p.get("target_time", ""), name),
 }

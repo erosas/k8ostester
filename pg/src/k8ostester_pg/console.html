@@ -875,6 +875,31 @@ function confirmExpand(){
   post("expand-storage", {size}, "Expand storage → "+size);
 }
 
+const MAINT_LABEL = {vacuum:"VACUUM (ANALYZE)", analyze:"ANALYZE", checkpoint:"CHECKPOINT"};
+function openMaintenance(pick){
+  const sel = v => pick===v || (!pick && v==="vacuum") ? " on" : "";
+  const ck = v => pick===v || (!pick && v==="vacuum") ? " checked" : "";
+  openSheet(`<h2>Run maintenance</h2>
+    <div class="lede">Routine PostgreSQL maintenance on the primary. Each is safe to run online — regular VACUUM does not take an exclusive lock (VACUUM FULL does, so it's deliberately not offered here).</div>
+    <label class="opt${sel("vacuum")}"><input type="radio" name="mtn" value="vacuum"${ck("vacuum")}>
+      <div><div class="ol">VACUUM (ANALYZE)</div>
+        <div class="os">Reclaim dead tuples and refresh planner stats on the app database. Reach for it when the health panel flags bloat / rising dead tuples, or transaction-ID age climbing toward wraparound.</div></div></label>
+    <label class="opt${sel("analyze")}"><input type="radio" name="mtn" value="analyze"${ck("analyze")}>
+      <div><div class="ol">ANALYZE</div>
+        <div class="os">Refresh planner statistics only, no cleanup — after a big bulk load or when the planner starts choosing bad plans.</div></div></label>
+    <label class="opt${sel("checkpoint")}"><input type="radio" name="mtn" value="checkpoint"${ck("checkpoint")}>
+      <div><div class="ol">CHECKPOINT</div>
+        <div class="os">Flush dirty buffers to disk now. Rarely needed by hand — before a maintenance window, or to shorten crash-recovery time.</div></div></label>
+    <div class="mbtns"><button data-close>Cancel</button>
+      <button class="go" onclick="confirmMaintenance()">Run</button></div>`);
+}
+function confirmMaintenance(){
+  const op = (document.querySelector('input[name="mtn"]:checked')||{}).value;
+  if(!op) return;
+  closeSheet();
+  post("maintenance", {op}, MAINT_LABEL[op] || op);
+}
+
 /* ---- minor upgrade modal: editable repo + tag list + pull check ---- */
 let repoTimer = null, imgTimer = null;
 async function openUpgrade(){
@@ -1178,6 +1203,7 @@ function act(a){
   if(a.id === "restore"){ openModal(); return; }    // PITR gets its own interface
   if(a.id === "upgrade"){ openUpgrade(); return; }  // pick the target image/version
   if(a.id === "expand-storage"){ openExpand(); return; }  // grow-only, with a warning
+  if(a.id === "maintenance"){ openMaintenance(); return; }  // vacuum / analyze / checkpoint runbook
   // every other button confirms before it mutates the cluster
   const msg = a.id === "backup"
     ? "Take a base backup to the object store now?"
@@ -1494,6 +1520,8 @@ function updateSlider(snapName){
   renderPitInfo();
 }
 document.addEventListener("change", e=>{ if(e.target.name==="rmode") syncModeUI(); });
+document.addEventListener("change", e=>{ if(e.target.name==="mtn")
+  document.querySelectorAll("#mbox .opt").forEach(o=>o.classList.toggle("on", o.contains(e.target))); });
 document.addEventListener("input", e=>{ if(e.target.id==="slider") onSlide(); });
 
 function confirmRestore(){

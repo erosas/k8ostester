@@ -42,6 +42,10 @@ CNPG_ACTIONS: list[Action] = [
     # the new size and explains the storage-class prerequisite.
     Action("expand-storage", "Expand storage", "ops",
            lambda s: s.get("ready") and not s.get("busy")),
+    # Routine maintenance (VACUUM / ANALYZE / CHECKPOINT) — a runbook modal picks
+    # which and explains when to reach for it. Regular VACUUM takes no exclusive lock.
+    Action("maintenance", "Run maintenance", "ops",
+           lambda s: s.get("ready") and not s.get("busy")),
     # --- chaos: destructive / high-risk / infrequent -----------------------
     # restore (creates a cluster) and minor upgrade (high-risk, rare) live here
     # with the faults — anything past a credential rotation is break-glass.

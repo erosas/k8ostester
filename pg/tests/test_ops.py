@@ -41,6 +41,25 @@ def test_expand_storage_patches_the_new_size():
     assert patch == {"spec": {"storage": {"size": "5Gi"}}}
 
 
+def test_maintenance_runs_whitelisted_sql_on_the_primary_app_db():
+    k8s = MagicMock()
+    cl = cluster_obj()
+    cl["spec"]["bootstrap"] = {"initdb": {"database": "orders"}}
+    k8s.custom.get_namespaced_custom_object.return_value = cl
+    ops.maintenance(k8s, "ns", "vacuum", "pg")
+    argv = k8s.exec_pod.call_args.args[2]
+    assert argv == ["psql", "-U", "postgres", "-d", "orders", "-c", "VACUUM (ANALYZE)"]
+    assert k8s.exec_pod.call_args.args[1] == "pg-1"   # the current primary
+
+
+def test_maintenance_rejects_unknown_ops():
+    import pytest
+    k8s = MagicMock()
+    with pytest.raises(RuntimeError):
+        ops.maintenance(k8s, "ns", "drop-everything", "pg")
+    k8s.exec_pod.assert_not_called()
+
+
 def test_expand_storage_rejects_a_noop():
     import pytest
     k8s = MagicMock()

@@ -1,0 +1,9 @@
+# Accepted base-image CVEs — no fix is available yet in the pinned free Chainguard
+# wolfi-base we build on (its apk index doesn't carry the patched package). Dependabot
+# re-digests the base daily and these drop automatically once a patched base ships.
+# Low exploitability for our images (they never extract untrusted archives).
+# Each entry has an expiry so it re-surfaces for review if it lingers.
+
+# python-3.14 tarfile.extractall() filter bypass — fixed in python-3.14.6-r3, which the
+# pinned wolfi-base does not yet serve. Our images don't extract untrusted tars.
+CVE-2026-11940 exp:2026-09-01

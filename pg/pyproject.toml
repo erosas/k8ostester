@@ -1,6 +1,6 @@
 [project]
 name = "k8ostester-pg"
-version = "0.1.0"
+version = "0.2.0"
 description = "PostgreSQL/CloudNativePG vertical: the k8ost-console control plane, the production-readiness testbed, SLO checks, and linear experiment scripts"
 requires-python = ">=3.14"
 dependencies = [

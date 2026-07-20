@@ -18,9 +18,14 @@ updates:
       python:
         patterns: ["*"]
 
-  # Loadgen image base (cgr.dev/chainguard/wolfi-base): re-digest daily so
-  # Chainguard's continuous rebuilds land fast.
+  # Image bases (cgr.dev/chainguard/wolfi-base): re-digest daily so Chainguard's
+  # continuous rebuilds — and their CVE fixes — land fast. Both the loadgen and
+  # the console image build on the pinned wolfi-base.
   - package-ecosystem: docker
-    directory: /pg/loadgen
+    directory: /pg/loadgen                         # pg/loadgen/loadgen.Dockerfile
+    schedule:
+      interval: daily
+  - package-ecosystem: docker
+    directory: /pg                                 # pg/console.Dockerfile
     schedule:
       interval: daily

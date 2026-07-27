@@ -60,8 +60,13 @@ def build_snapshot(
     backups: list[dict],
     partitioned: bool,
     target: str = "",
+    object_store_cr: dict | None = None,
 ) -> dict:
-    """Pure transform: CNPG objects -> the flat snapshot the actions read."""
+    """Pure transform: CNPG objects -> the flat snapshot the actions read.
+
+    ``object_store_cr`` is the Barman Cloud plugin's ObjectStore CR when the cluster
+    backs up through the plugin (the modern path); None for in-tree or no backups.
+    """
     spec = cluster.get("spec", {})
     status = cluster.get("status", {})
     instances = spec.get("instances", 0)
@@ -89,10 +94,10 @@ def build_snapshot(
         # target may be a full image (…:tag) or a bare version
         "target": (pg_version(target) if ":" in target else target) if target else "",
         "upgrading": "upgrad" in phase.lower(),
-        "backup_configured": "backup" in spec,
+        "backup_configured": bool(_backup_plugin(spec)),   # via the Barman Cloud plugin
         "backups_completed": completed,
         "backups": _backup_view(backups),   # name/phase/times/WAL, newest first
-        "retention": spec.get("backup", {}).get("retentionPolicy", ""),
+        "retention": _retention(object_store_cr),
         # the PITR window: WAL is archived from the earliest recoverable point to now
         "recoverability_point": status.get("firstRecoverabilityPoint", ""),
         "pitr_window": completed > 0,   # a completed base backup opens the window
@@ -102,7 +107,7 @@ def build_snapshot(
         "credentials": _credentials(cluster, login),  # active role from the cluster itself
         "archiving": _condition(conditions, "ContinuousArchiving"),  # WAL archive health
         "sync_policy": _sync_policy(spec),     # quorum/priority synchronous config
-        "object_store": _object_store(spec),   # where backups/WAL go (part of the system)
+        "object_store": _object_store(spec, object_store_cr),   # where backups/WAL go
         "fault_in_flight": partitioned,
         "busy": bool(reason),           # exclusivity: a mutating op is in progress
         "busy_reason": reason,
@@ -138,9 +143,8 @@ def _condition(conditions: dict, name: str) -> dict:
 
 
 def _sync_policy(spec: dict) -> dict:
-    """The synchronous-replication policy CNPG is enforcing: quorum (ANY n) or
-    priority (FIRST n), or async if none. Read from spec.postgresql.synchronous
-    (current CNPG) with a fallback to the older min/maxSyncReplicas."""
+    """The synchronous-replication policy CNPG is enforcing, from
+    spec.postgresql.synchronous: quorum (ANY n) or priority (FIRST n), or async."""
     syn = spec.get("postgresql", {}).get("synchronous")
     if syn:
         method = syn.get("method", "")          # "any" -> quorum, "first" -> priority
@@ -148,27 +152,43 @@ def _sync_policy(spec: dict) -> dict:
         mode = {"any": "quorum", "first": "priority"}.get(method, method or "sync")
         return {"mode": mode, "method": method, "number": number,
                 "label": f"{mode} · {method} {number}".strip()}
-    mx = int(spec.get("maxSyncReplicas", 0) or 0)
-    if mx:
-        mn = int(spec.get("minSyncReplicas", 0) or 0)
-        return {"mode": "quorum", "method": "any", "number": mx,
-                "label": f"quorum · sync {mn}–{mx}"}
     return {"mode": "async", "method": "", "number": 0, "label": "async (no sync standby)"}
 
 
-def _object_store(spec: dict) -> dict:
-    """The backup/WAL destination — bucket, path, endpoint — from barmanObjectStore."""
-    store = spec.get("backup", {}).get("barmanObjectStore", {})
-    dest = store.get("destinationPath", "")
+# the CloudNativePG Barman Cloud plugin — the modern, out-of-tree backup path.
+# The cluster references it in spec.plugins; the destination lives in an ObjectStore CR.
+BARMAN_PLUGIN = "barman-cloud.cloudnative-pg.io"
+OBJECTSTORE_GROUP = "barmancloud.cnpg.io"
+OBJECTSTORE_VERSION = "v1"
+
+
+def _backup_plugin(spec: dict) -> dict:
+    """The barman-cloud plugin entry in spec.plugins, or {} — its presence is what
+    makes a cluster backed-up (this framework is plugin-only; no in-tree stanza)."""
+    for p in spec.get("plugins", []):
+        if p.get("name") == BARMAN_PLUGIN and p.get("enabled", True):
+            return p
+    return {}
+
+
+def _retention(store_cr: dict | None) -> str:
+    """Backup retention policy, from the plugin's ObjectStore CR."""
+    return (store_cr or {}).get("spec", {}).get("retentionPolicy", "")
+
+
+def _object_store(spec: dict, store_cr: dict | None = None) -> dict:
+    """The backup/WAL destination — bucket, path, endpoint — from the Barman Cloud
+    plugin's ObjectStore CR. Unconfigured if the cluster has no plugin."""
+    if not _backup_plugin(spec):
+        return {"configured": False, "endpoint": "", "bucket": "", "path": ""}
+    cfg = (store_cr or {}).get("spec", {}).get("configuration", {})
+    dest = cfg.get("destinationPath", "")
     bucket = path = ""
     if dest.startswith("s3://"):
         bucket, _, path = dest[5:].partition("/")
-    return {
-        "configured": bool(store),
-        "endpoint": store.get("endpointURL", ""),
-        "bucket": bucket,
-        "path": path,
-    }
+    # configured is True even if the CR is unreadable (RBAC/absent) — the intent exists
+    return {"configured": True, "endpoint": cfg.get("endpointURL", ""),
+            "bucket": bucket, "path": path}
 
 
 def _backup_view(backups: list[dict]) -> list[dict]:
@@ -214,7 +234,8 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
     backups = k8s.custom.list_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, namespace, "backups").get("items", [])
     partitioned = _partition_active(k8s, namespace)
-    snap = build_snapshot(cluster, replica_pods, zones, backups, partitioned, target)
+    store_cr = _object_store_cr(k8s, namespace, cluster.get("spec", {}))
+    snap = build_snapshot(cluster, replica_pods, zones, backups, partitioned, target, store_cr)
     # topology for the SCADA view (not needed by the capability preconditions)
     snap["namespace"] = namespace
     snap["cluster"] = name
@@ -240,6 +261,21 @@ def snapshot(k8s: ClusterClient, namespace: str, name: str = "pg",
         snap["busy"] = True
         snap["busy_reason"] = snap["busy_reason"] or "restore in progress"
     return snap
+
+
+def _object_store_cr(k8s: ClusterClient, namespace: str, spec: dict) -> dict | None:
+    """Fetch the Barman Cloud plugin's ObjectStore CR referenced by the cluster, or
+    None — when there's no plugin, no reference, or the CR can't be read (RBAC/absent)."""
+    plugin = _backup_plugin(spec)
+    store = plugin.get("parameters", {}).get("barmanObjectName", "") if plugin else ""
+    if not store:
+        return None
+    from kubernetes.client import ApiException
+    try:
+        return k8s.custom.get_namespaced_custom_object(
+            OBJECTSTORE_GROUP, OBJECTSTORE_VERSION, namespace, "objectstores", store)
+    except ApiException:
+        return None
 
 
 _WAL_SEG_BYTES = 16 * 1024 * 1024   # default WAL segment size

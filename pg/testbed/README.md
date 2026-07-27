@@ -25,14 +25,16 @@ What each step proves:
 | backup | a Barman base backup completes to the object store |
 | rotate-credentials | **blue/green** switch between two valid roles — near-zero downtime, no failed auth |
 | minor-upgrade | an `imageName` bump rolls the cluster and the PG version actually moves |
-| restore-pitr | a second cluster restored to a chosen point holds rows up to (not past) it |
+| restore-latest | a second cluster recovered to the **latest** archived WAL catches up to the origin's head |
+| restore-pitr | a third cluster restored to a **chosen point** lands at that point (holds the target, stops there) |
 | verify | cluster healthy + app serving at the end |
 
 ## Run it
 
 Needs `kubectl` + `helm` on PATH and a kube context that can install an operator
 (kind, docker-desktop, or a remote cluster where you may install CNPG). The
-testbed **self-provisions everything** — operator, object store, cluster, app.
+testbed **self-provisions everything** — operator, the Barman Cloud plugin (and its
+cert-manager prerequisite), object store, cluster, app.
 
 ```bash
 cd pg/testbed

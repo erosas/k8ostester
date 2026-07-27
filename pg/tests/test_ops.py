@@ -9,7 +9,8 @@ def cluster_obj(**meta):
         "metadata": {"annotations": meta.get("annotations", {})},
         "spec": {"imageName": "ghcr.io/cloudnative-pg/postgresql:16.4",
                  "storage": {"size": "1Gi"},
-                 "backup": {"barmanObjectStore": {"destinationPath": "s3://backups/x"}},
+                 "plugins": [{"name": "barman-cloud.cloudnative-pg.io", "isWALArchiver": True,
+                              "parameters": {"barmanObjectName": "pg-store"}}],
                  "managed": {"roles": [
                      {"name": "app_a", "login": True, "passwordSecret": {"name": "app-cred-a"}},
                      {"name": "app_b", "login": True, "passwordSecret": {"name": "app-cred-b"}}]}},
@@ -148,12 +149,24 @@ def test_rotate_switches_back_when_app_b_is_active():
     assert k8s.core.patch_namespaced_secret.call_args.args[0] == "app-cred-a"
 
 
-def test_restore_creates_a_uniquely_named_recovery_cluster():
+def test_restore_to_latest_recovers_via_the_plugin():
     k8s = MagicMock()
     k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
     ops.restore(k8s, "ns")
     body = k8s.custom.create_namespaced_custom_object.call_args.args[-1]
     assert body["kind"] == "Cluster" and body["metadata"]["name"].startswith("pg-restore-")
-    # recover to latest (no recoveryTarget) from the source's object store
+    # recover to latest (no recoveryTarget) through the Barman Cloud plugin
     assert body["spec"]["bootstrap"]["recovery"] == {"source": "origin"}
-    assert body["spec"]["externalClusters"][0]["barmanObjectStore"]["serverName"] == "pg"
+    ext = body["spec"]["externalClusters"][0]
+    assert "barmanObjectStore" not in ext
+    assert ext["plugin"]["parameters"] == {"barmanObjectName": "pg-store", "serverName": "pg"}
+
+
+def test_restore_pitr_threads_the_target_time():
+    k8s = MagicMock()
+    k8s.custom.get_namespaced_custom_object.return_value = cluster_obj()
+    ops.restore(k8s, "ns", target_time="2026-01-01T00:00:00Z")
+    body = k8s.custom.create_namespaced_custom_object.call_args.args[-1]
+    ext = body["spec"]["externalClusters"][0]
+    assert ext["plugin"]["name"] == "barman-cloud.cloudnative-pg.io"
+    assert body["spec"]["bootstrap"]["recovery"]["recoveryTarget"] == {"targetTime": "2026-01-01T00:00:00Z"}

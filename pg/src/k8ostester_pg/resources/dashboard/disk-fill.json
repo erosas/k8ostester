@@ -1,0 +1,13 @@
+{
+  "type": "timeseries",
+  "title": "Projected time to disk-full (hours)",
+  "description": "Hours until each data volume fills, linearly extrapolating the last 6h of growth: (capacity - used) / growth-rate. Flat or shrinking usage reads as a very large number (not urgent). The waterline, if set, is your disk fill-window goal — red BELOW it means act now. Needs kubelet metrics.",
+  "datasource": {"type": "prometheus", "uid": "${datasource}"},
+  "targets": [
+    {"expr": "(kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~\"__CLUSTER__-[0-9]+\"} - kubelet_volume_stats_used_bytes{persistentvolumeclaim=~\"__CLUSTER__-[0-9]+\"}) / clamp_min(deriv(kubelet_volume_stats_used_bytes{persistentvolumeclaim=~\"__CLUSTER__-[0-9]+\"}[6h]), 1) / 3600", "legendFormat": "{{persistentvolumeclaim}}", "refId": "A"}
+  ],
+  "fieldConfig": {
+    "defaults": {"unit": "h", "min": 0, "custom": {"drawStyle": "line", "fillOpacity": 8}, "color": {"mode": "palette-classic"}},
+    "overrides": []
+  }
+}

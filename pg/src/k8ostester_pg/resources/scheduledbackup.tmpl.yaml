@@ -5,5 +5,6 @@ metadata:
 spec:
   schedule: "${schedule}"
   backupOwnerReference: self
-  method: barmanObjectStore
+  method: plugin
+  pluginConfiguration: {name: barman-cloud.cloudnative-pg.io}
   cluster: {name: ${name}}

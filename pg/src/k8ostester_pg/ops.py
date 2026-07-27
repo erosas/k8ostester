@@ -12,9 +12,11 @@ from k8ostester_kernel.k8s import ClusterClient
 
 from k8ostester_pg.discover import (
     ACTIVE_ROLE_ANN,
+    BARMAN_PLUGIN,
     CNPG_GROUP,
     CNPG_VERSION,
     ROTATED_AT_ANN,
+    _backup_plugin,
 )
 
 
@@ -176,10 +178,15 @@ def restore(k8s: ClusterClient, ns: str, target_time: str = "", name: str = "pg"
     it, recover to the latest point. Uniquely-named so repeated restores don't
     clash."""
     src = _cluster(k8s, ns, name)
-    store = {**src["spec"]["backup"]["barmanObjectStore"], "serverName": name}
+    spec = src["spec"]
     recovery: dict = {"source": "origin"}
     if target_time:
         recovery["recoveryTarget"] = {"targetTime": target_time}
+    # recover through the Barman Cloud plugin: reference the source's ObjectStore, with
+    # serverName pinned so the restored cluster reads the right WAL history.
+    store = _backup_plugin(spec).get("parameters", {}).get("barmanObjectName", "")
+    external = {"name": "origin", "plugin": {"name": BARMAN_PLUGIN,
+                "parameters": {"barmanObjectName": store, "serverName": name}}}
     restore_name = f"{name}-restore-{_stamp()}"
     k8s.custom.create_namespaced_custom_object(
         CNPG_GROUP, CNPG_VERSION, ns, "clusters", {
@@ -188,10 +195,10 @@ def restore(k8s: ClusterClient, ns: str, target_time: str = "", name: str = "pg"
             "metadata": {"name": restore_name},
             "spec": {
                 "instances": 1,
-                "imageName": src["spec"]["imageName"],
-                "storage": src["spec"]["storage"],
+                "imageName": spec["imageName"],
+                "storage": spec["storage"],
                 "bootstrap": {"recovery": recovery},
-                "externalClusters": [{"name": "origin", "barmanObjectStore": store}],
+                "externalClusters": [external],
             },
         })
     when = f"to {target_time}" if target_time else "to latest"

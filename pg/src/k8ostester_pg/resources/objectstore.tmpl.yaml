@@ -1,0 +1,10 @@
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: ${store}
+spec:
+  retentionPolicy: ${retention}
+  configuration:
+    destinationPath: s3://${bucket}/${path}
+${endpoint_line}${s3credentials}    wal:
+      compression: gzip

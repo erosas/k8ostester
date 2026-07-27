@@ -42,6 +42,16 @@ GOALS: dict[str, tuple[str, str, str, str]] = {
         ' / kubelet_volume_stats_capacity_bytes{{persistentvolumeclaim=~"{pods}"}}) * 100 > {v}',
         "a volume over {v}% full",
     ),
+    # rate-of-change / urgency: linear-extrapolate recent growth to a time-to-exhaustion.
+    # A level ("80% full") says nothing about urgency; this says "full within {v}h".
+    # (Disk only — its growth is monotonic; memory working-set sawtooths under GC, so a
+    # linear projection there is unreliable and would false-alarm.)
+    "disk_fill": (
+        "disk-fill", "DiskFillingSoon",
+        'predict_linear(kubelet_volume_stats_used_bytes{{persistentvolumeclaim=~"{pods}"}}[6h], {v}*3600)'
+        ' > kubelet_volume_stats_capacity_bytes{{persistentvolumeclaim=~"{pods}"}}',
+        "a volume is projected to fill within {v}h at its recent growth rate",
+    ),
     # --- operational health (CNPG metrics) ---
     "txid": (
         "txid-age", "TxidWraparound",
@@ -64,9 +74,13 @@ GOALS: dict[str, tuple[str, str, str, str]] = {
 # goal key -> docs/runbooks.md anchor, so each alert can carry a runbook_url
 RUNBOOK_ANCHOR = {
     "repl_lag": "repl-lag", "connections": "connsat", "archive_delay": "archive",
-    "cpu": "cpu", "memory": "memory", "disk": "disk", "txid": "xid",
-    "long_txn": "longtxn", "conn_age": "connage",
+    "cpu": "cpu", "memory": "memory", "disk": "disk", "disk_fill": "disk",
+    "txid": "xid", "long_txn": "longtxn", "conn_age": "connage",
 }
+
+# goals where a LOW value is the bad one — "hours until exhaustion", so the dashboard
+# waterline colours red *below* the line (opposite of a level threshold).
+INVERTED_GOALS = {"disk_fill"}
 
 
 def num(x: object) -> float | int | None:
@@ -76,6 +90,40 @@ def num(x: object) -> float | int | None:
     except (TypeError, ValueError):
         return None
     return int(v) if v == int(v) else v
+
+
+def cpu_cores(s: object) -> float:
+    """A k8s CPU quantity ('100m', '2') as cores."""
+    t = str(s).strip()
+    return float(t[:-1]) / 1000 if t.endswith("m") else float(t or 0)
+
+
+_MEM_GI = {"Ki": 1 / 1048576, "Mi": 1 / 1024, "Gi": 1.0, "Ti": 1024.0}
+
+
+def mem_gi(s: object) -> float:
+    """A k8s memory quantity ('256Mi', '2Gi') as GiB."""
+    t = str(s).strip()
+    for unit, factor in _MEM_GI.items():
+        if t.endswith(unit):
+            return float(t[:-2] or 0) * factor
+    return float(t or 0) / 1073741824   # bare bytes
+
+
+def goal_threshold(key: str, value: object, opts: dict) -> float | int | None:
+    """The absolute threshold an alert/waterline uses, from the UI value. CPU and
+    memory are entered as a **percent of the configured limit**; transaction-ID age
+    in **millions** of xids; everything else is already absolute (seconds / count / %)."""
+    v = num(value)
+    if v is None:
+        return None
+    if key == "cpu":
+        return round(v / 100 * cpu_cores(opts.get("cpu") or "100m"), 3)
+    if key == "memory":
+        return round(v / 100 * mem_gi(opts.get("memory") or "256Mi"), 3)
+    if key == "txid":
+        return int(v * 1_000_000)
+    return v
 
 
 def clamp(value: object, lo: int, hi: int, default: int) -> int:

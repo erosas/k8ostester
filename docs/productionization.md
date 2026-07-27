@@ -57,9 +57,11 @@ event to `events.jsonl`. Readable as prose:
                   ASSERT the app's error rate stays under SLO and recovers
 5. minor-upgrade  bump the PG minor image                  → event: upgrade
                   ASSERT rolling restart completes, app rides it, version moves
-6. restore-pitr   restore a 2nd cluster to a chosen point   → event: restore
-                  ASSERT it holds exactly the rows expected at that point
-7. verify         integrity across the whole run → PASS/FAIL, write report
+6. restore-latest restore a 2nd cluster to the latest WAL   → event: restore-latest
+                  ASSERT it catches up to the origin's head (recovery to now works)
+7. restore-pitr   restore a 3rd cluster to a chosen point   → event: restore
+                  ASSERT it lands at that point (holds the target, stops there)
+8. verify         integrity across the whole run → PASS/FAIL, write report
 ```
 
 Result is a single verdict ("this config is operable") plus the event timeline
@@ -84,7 +86,7 @@ credential, new connects start failing. Assertion: error rate stays under SLO
 and returns to baseline within N seconds. This is the whole point of the step.
 
 ### Minor version upgrade (step 5)
-Bump `.spec.imageName` to the new minor (e.g. `16.3 → 16.4`). The operator does
+Bump `.spec.imageName` to the new minor (e.g. `17.9 → 17.10`, standard-trixie). The operator does
 a rolling update — replicas first, then a switchover. Low-risk, always
 available. Record the observed version (`SELECT version()` / pod image) so the
 console's **PG-version-over-time** panel has a real transition to draw.

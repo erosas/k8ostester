@@ -9,7 +9,8 @@ def cluster(**status):
         "spec": {
             "instances": 3,
             "imageName": "ghcr.io/cloudnative-pg/postgresql:16.4",
-            "backup": {"barmanObjectStore": {}},
+            "plugins": [{"name": "barman-cloud.cloudnative-pg.io", "isWALArchiver": True,
+                         "parameters": {"barmanObjectName": "pg-store"}}],
             "managed": {"roles": [
                 {"name": "app_a", "login": True, "passwordSecret": {"name": "app-cred-a"}},
                 {"name": "app_b", "login": True, "passwordSecret": {"name": "app-cred-b"}}]},
@@ -53,9 +54,8 @@ def test_backup_view_carries_phase_times_and_wal():
 
 
 def test_retention_policy_surfaced():
-    c = cluster()
-    c["spec"]["backup"]["retentionPolicy"] = "7d"
-    assert build_snapshot(c, [], [], [], False)["retention"] == "7d"
+    store_cr = {"spec": {"retentionPolicy": "7d"}}
+    assert build_snapshot(cluster(), [], [], [], False, object_store_cr=store_cr)["retention"] == "7d"
 
 
 def test_busy_locks_ops_but_not_chaos():
@@ -109,17 +109,33 @@ def test_sync_policy_reads_quorum_priority_and_async():
         "mode": "quorum", "method": "any", "number": 1, "label": "quorum · any 1"}
     assert _sync_policy({"postgresql": {"synchronous": {"method": "first", "number": 1}}})["mode"] \
         == "priority"
-    assert _sync_policy({"maxSyncReplicas": 2, "minSyncReplicas": 1})["mode"] == "quorum"
+    # the deprecated min/maxSyncReplicas API is not read — only spec.postgresql.synchronous
+    assert _sync_policy({"maxSyncReplicas": 2, "minSyncReplicas": 1})["mode"] == "async"
     assert _sync_policy({})["mode"] == "async"
 
 
-def test_object_store_parses_bucket_path_and_endpoint():
+def test_object_store_reads_the_barman_plugin_objectstore_cr():
     from k8ostester_pg.discover import _object_store
-    os = _object_store({"backup": {"barmanObjectStore": {
-        "destinationPath": "s3://pgbackups/pg", "endpointURL": "http://seaweedfs:8333"}}})
-    assert os == {"configured": True, "endpoint": "http://seaweedfs:8333",
-                  "bucket": "pgbackups", "path": "pg"}
-    assert _object_store({})["configured"] is False   # no backup stanza → not configured
+    spec = {"plugins": [{"name": "barman-cloud.cloudnative-pg.io", "isWALArchiver": True,
+                         "parameters": {"barmanObjectName": "pg-store"}}]}
+    store_cr = {"spec": {"retentionPolicy": "30d", "configuration": {
+        "destinationPath": "s3://pgbackups/pg", "endpointURL": "http://seaweedfs:8333"}}}
+    assert _object_store(spec, store_cr) == {"configured": True,
+        "endpoint": "http://seaweedfs:8333", "bucket": "pgbackups", "path": "pg"}
+    # plugin configured but the CR is unreadable → still "configured" (intent exists), no details
+    blind = _object_store(spec, None)
+    assert blind["configured"] is True and blind["bucket"] == ""
+    # no plugin → not configured (this framework has no in-tree backup path)
+    assert _object_store({})["configured"] is False
+
+
+def test_backup_configured_and_retention_from_the_plugin_path():
+    spec = {"instances": 1, "plugins": [
+        {"name": "barman-cloud.cloudnative-pg.io", "parameters": {"barmanObjectName": "pg-store"}}]}
+    c = {"spec": spec, "status": {"readyInstances": 1, "currentPrimary": "pg-1"}}
+    store_cr = {"spec": {"retentionPolicy": "14d", "configuration": {}}}
+    s = build_snapshot(c, [], [], [], False, object_store_cr=store_cr)
+    assert s["backup_configured"] is True and s["retention"] == "14d"
 
 
 def test_wal_seg_index_is_lsn_ordered_and_timeline_independent():

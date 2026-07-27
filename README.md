@@ -198,6 +198,7 @@ paths above and point at the mirror — nothing else changes:
 - **[docs/productionization.md](docs/productionization.md)** — the testbed golden path
 - **[docs/remote-control.md](docs/remote-control.md)** — the `k8ost-console` control plane
 - **[docs/runbooks.md](docs/runbooks.md)** — remediation runbooks for the operational signals (linked from alerts + the console)
+- **[docs/gotchas.md](docs/gotchas.md)** — non-obvious CNPG / Kubernetes traps we hit and how each is handled
 
 ## Develop
 

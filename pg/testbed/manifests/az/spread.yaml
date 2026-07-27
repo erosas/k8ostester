@@ -14,6 +14,11 @@
 # (CNPG also has a native `postgresql.syncReplicaElectionConstraint` with zone
 # anti-affinity — an alternative that pins the sync election directly. We use
 # placement instead: simpler, no sync-API coupling, and it also spreads reads.)
+#
+# The labelSelector MUST include cnpg.io/podRole: instance. The pooler pods also
+# carry cnpg.io/cluster: pg, so a cluster-only selector spreads instances+poolers
+# together (7 pods) and happily lands 2 instances in one zone while balancing the
+# total — the invariant fails. Scoping to instances spreads the 3 that matter.
 spec:
   topologySpreadConstraints:
     - maxSkew: 1
@@ -22,3 +27,4 @@ spec:
       labelSelector:
         matchLabels:
           cnpg.io/cluster: pg
+          cnpg.io/podRole: instance

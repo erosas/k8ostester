@@ -35,8 +35,14 @@ EVENTS = Path(__file__).parent / "events.jsonl"
 
 CNPG_REPO = "https://cloudnative-pg.github.io/charts"
 CNPG_CHART_VERSION = "0.28.3"          # CloudNativePG operator 1.29.x
-PG_IMAGE_FROM = "ghcr.io/cloudnative-pg/postgresql:16.4"
-PG_IMAGE_TO = "ghcr.io/cloudnative-pg/postgresql:16.6"   # minor upgrade target
+# standard-trixie operand images (no bundled barman-cloud; backups use the plugin).
+# Two consecutive patches so the upgrade step is a deterministic bump.
+PG_IMAGE_FROM = "ghcr.io/cloudnative-pg/postgresql:17.9-standard-trixie"
+PG_IMAGE_TO = "ghcr.io/cloudnative-pg/postgresql:17.10-standard-trixie"   # minor upgrade target
+# the Barman Cloud plugin (backups) needs cert-manager for its sidecar TLS
+CERT_MANAGER_MANIFEST = "https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml"
+BARMAN_PLUGIN_MANIFEST = "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.13.0/manifest.yaml"
+BARMAN_PLUGIN = "barman-cloud.cloudnative-pg.io"
 
 CONTEXT: list[str] = []                # filled from --context
 AZ = False                             # --az: spread across zones + verify cross-AZ sync
@@ -154,10 +160,13 @@ def annotate(text: str, tags: list[str]) -> None:
         pass  # annotations are a convenience, not a gate
 
 
-def app_metrics() -> dict[str, float]:
-    """Scrape the dummy app's /metrics from inside a pod (image has python)."""
-    pod = kns("get", "pod", "-l", "app=dummy-app",
-              "-o", "jsonpath={.items[0].metadata.name}")
+def app_metrics(pod: str | None = None) -> dict[str, float]:
+    """Scrape the dummy app's /metrics from inside a pod (image has python).
+    Defaults to the first app pod; pass ``pod`` to scrape a specific one (so a
+    counter delta is read from the SAME pod, not two different replicas)."""
+    if pod is None:
+        pod = kns("get", "pod", "-l", "app=dummy-app",
+                  "-o", "jsonpath={.items[0].metadata.name}")
     raw = kns("exec", pod, "--", "python", "-c",
               "import urllib.request as u;"
               "print(u.urlopen('http://localhost:8000/metrics').read().decode())")
@@ -188,6 +197,16 @@ def provision() -> None:
          "-n", "cnpg-system", "--create-namespace",
          "--version", CNPG_CHART_VERSION, "--wait")
     event("provision", "provision", "ok", "cnpg operator installed")
+
+    # Barman Cloud plugin (out-of-tree backups) + its cert-manager prerequisite.
+    # cert-manager must be Ready before the plugin, so its Certificates get issued.
+    kubectl("apply", "-f", CERT_MANAGER_MANIFEST)
+    kubectl("-n", "cert-manager", "rollout", "status",
+            "deploy/cert-manager-webhook", "--timeout=180s")
+    kubectl("apply", "-f", BARMAN_PLUGIN_MANIFEST)
+    kubectl("-n", "cnpg-system", "rollout", "status",
+            "deploy/barman-cloud", "--timeout=180s")
+    event("provision", "provision", "ok", "barman-cloud plugin installed")
 
     kubectl("create", "namespace", NS, check=False)   # idempotent
     kns("apply", "-f", str(MANIFESTS / "01-seaweedfs.yaml"))
@@ -241,7 +260,8 @@ def step_backup() -> bool:
     kns("apply", "-f", "-", input=(
         "apiVersion: postgresql.cnpg.io/v1\nkind: Backup\n"
         f"metadata:\n  name: {name}\n"
-        "spec:\n  cluster:\n    name: pg\n  method: barmanObjectStore\n"))
+        "spec:\n  cluster:\n    name: pg\n  method: plugin\n"
+        f"  pluginConfiguration:\n    name: {BARMAN_PLUGIN}\n"))
     ok = poll("backup completed",
               lambda: kns("get", "backup", name,
                           "-o", "jsonpath={.status.phase}") == "completed",
@@ -284,7 +304,6 @@ def step_rotate_credentials() -> bool:
     kns("patch", "secret", f"app-cred-{idle}", "--type", "merge",
         "-p", json.dumps({"stringData": {"password": new_pw}}))
     wait_cred(f"app_{idle}", new_pw)   # confirm it authenticates end-to-end
-    before = app_ok_ops(app_metrics())
     # 2) flip the selector to the idle role and roll the app onto it.
     #    Two layers stay in sync: the app-active ConfigMap is THIS app's selector
     #    (testbed-specific wiring), and the cluster annotation is the canonical
@@ -297,9 +316,16 @@ def step_rotate_credentials() -> bool:
         f"k8ostester.io/rotatedAt={datetime.now(UTC).strftime('%Y%m%d%H%M%S')}")
     kns("rollout", "restart", "deploy/app")
     kns("rollout", "status", "deploy/app", "--timeout=180s")
-    # 3) assert the app recovered on the new role
-    time.sleep(15)
-    m = app_metrics()
+    # 3) assert the app recovered on the new role — it's actively completing ok ops
+    #    NOW, measured as a positive delta on ONE current pod over a short window (its
+    #    DB probe up too). Comparing the cumulative counter across the restart is wrong:
+    #    the rollout replaces the pods, so the counter resets to 0 on the new ones.
+    time.sleep(10)                                     # let a new pod warm up and serve
+    pod = kns("get", "pod", "-l", "app=dummy-app",
+              "-o", "jsonpath={.items[0].metadata.name}")
+    before = app_ok_ops(app_metrics(pod))
+    time.sleep(8)
+    m = app_metrics(pod)
     recovered = app_ok_ops(m) > before and int(m.get("app_up", 0)) == 1
     event("rotate", "rotate", "ok" if recovered else "fail",
           f"blue/green app_{active} → app_{idle} "
@@ -318,7 +344,9 @@ def step_minor_upgrade() -> bool:
     # EVERY instance is on the new image (not just any) and all are ready — else
     # we'd read the not-yet-upgraded primary's version.
     def all_upgraded() -> bool:
-        imgs = kns("get", "pods", "-l", "cnpg.io/cluster=pg",
+        # scope to INSTANCE pods only — the poolers also carry cnpg.io/cluster=pg but
+        # run pgbouncer, so they'd never match PG_IMAGE_TO and the poll would hang.
+        imgs = kns("get", "pods", "-l", "cnpg.io/cluster=pg,cnpg.io/podRole=instance",
                    "-o", "jsonpath={.items[*].spec.containers[0].image}").split()
         ready = kns("get", "cluster", "pg", "-o", "jsonpath={.status.readyInstances}")
         return bool(imgs) and all(i == PG_IMAGE_TO for i in imgs) and ready == "3"
@@ -331,6 +359,51 @@ def step_minor_upgrade() -> bool:
     return ok
 
 
+def step_restore_latest() -> bool:
+    print("→ restore-latest: restore a second cluster to the latest archived point")
+    # freeze a floor: the origin's position now, with its WAL archived — a recover-to-
+    # latest must replay at LEAST up to here (proving it caught up, not a stale point).
+    floor_id = int(psql("select coalesce(max(id),0) from app_writes").strip())
+    psql("select pg_switch_wal()", db="postgres")
+    psql("checkpoint", db="postgres")
+    time.sleep(15)
+    image = kns("get", "cluster", "pg", "-o", "jsonpath={.spec.imageName}")
+
+    kns("delete", "cluster", "pg-restore-latest", "--ignore-not-found")
+    kns("apply", "-f", "-", input=f"""apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-restore-latest
+spec:
+  instances: 1
+  imageName: {image}
+  storage: {{size: 1Gi}}
+  bootstrap:
+    recovery:
+      source: origin          # no recoveryTarget → recover to the latest archived WAL
+  externalClusters:
+    - name: origin
+      plugin:
+        name: {BARMAN_PLUGIN}
+        parameters:
+          barmanObjectName: pg-store
+          serverName: pg
+""")
+    poll("restore-latest cluster healthy",
+         lambda: kns("get", "cluster", "pg-restore-latest",
+                     "-o", "jsonpath={.status.readyInstances}") == "1",
+         timeout=900)
+    got = psql("select coalesce(max(id),0), count(*) from app_writes",
+               pod="pg-restore-latest-1")
+    restored_id, count = [c.strip() for c in got.split("|")]
+    # recover-to-latest must include everything archived up to our floor (and may hold
+    # more — the origin kept writing while the WAL it archived got replayed).
+    ok = int(count) > 0 and int(restored_id) >= floor_id
+    event("restore-latest", "restore", "ok" if ok else "fail",
+          f"latest: restored max id {restored_id} (>= floor {floor_id}), {count} rows")
+    return ok
+
+
 def step_restore_pitr() -> bool:
     print("→ restore-pitr: restore a second cluster to a chosen point")
     # capture the target point: max id + the DB's own clock
@@ -340,6 +413,10 @@ def step_restore_pitr() -> bool:
     psql("select pg_switch_wal()", db="postgres")
     psql("checkpoint", db="postgres")
     time.sleep(15)
+    # how far the origin has moved PAST the target during the settle window — a correct
+    # PITR must land within [target_id, pre_id], i.e. at the chosen point, NOT replayed
+    # to the origin's later head (which keeps racing ahead under the continuous writer).
+    pre_id = psql("select coalesce(max(id),0) from app_writes").strip()
     image = kns("get", "cluster", "pg", "-o", "jsonpath={.spec.imageName}")
 
     kns("delete", "cluster", "pg-restore", "--ignore-not-found")
@@ -358,13 +435,11 @@ spec:
         targetTime: "{target_time}"
   externalClusters:
     - name: origin
-      barmanObjectStore:
-        destinationPath: s3://backups/testbed
-        endpointURL: http://seaweedfs.k8os-testbed.svc:8333
-        serverName: pg
-        s3Credentials:
-          accessKeyId: {{name: seaweed-s3, key: ACCESS_KEY}}
-          secretAccessKey: {{name: seaweed-s3, key: SECRET_KEY}}
+      plugin:
+        name: {BARMAN_PLUGIN}
+        parameters:
+          barmanObjectName: pg-store
+          serverName: pg
 """)
     poll("restore cluster healthy",
          lambda: kns("get", "cluster", "pg-restore",
@@ -373,11 +448,15 @@ spec:
     got = psql("select coalesce(max(id),0), count(*) from app_writes",
                pod="pg-restore-1")
     restored_id, count = [c.strip() for c in got.split("|")]
-    # PITR is correct if the restore holds rows up to (not past) the target
-    ok = int(restored_id) <= int(target_id) and int(count) > 0
+    # PITR is correct if the restore landed AT the chosen point: it holds the target
+    # rows and stopped there (≤ the origin's position when we started the restore), not
+    # replayed to the origin's ever-advancing head. Exact-boundary equality with
+    # target_id is racy — the app commits continuously around the captured instant, so
+    # a handful of rows committed in that same moment are legitimately recovered.
+    ok = int(count) > 0 and int(target_id) <= int(restored_id) <= int(pre_id)
     event("restore", "restore", "ok" if ok else "fail",
           f"PITR → {target_time}: restored max id {restored_id} "
-          f"(target {target_id}), {count} rows")
+          f"(target {target_id}, origin at restore {pre_id}), {count} rows")
     return ok
 
 
@@ -433,7 +512,8 @@ def run(keep: bool) -> int:
             "backup": step_backup(),
             "rotate": step_rotate_credentials(),
             "upgrade": step_minor_upgrade(),
-            "restore": step_restore_pitr(),
+            "restore-latest": step_restore_latest(),
+            "restore-pitr": step_restore_pitr(),
             "verify": verify(),
         }
         if AZ:

@@ -133,8 +133,10 @@ form, not just number:
   amber with the WAL held.
 - **Node placement** — each instance's k8s node + zone (reason about a zone loss).
 - **WAL archiving health** — the object-store node shows LIVE / `N behind` /
-  STALLED (driven by the archive lag + the ContinuousArchiving condition) and the
-  last-archive age. The missing half of the recovery story.
+  STALLED / pending. LIVE needs positive proof (the ContinuousArchiving condition
+  is True, or WAL has actually been archived); a configured-but-unproven store reads
+  `pending`, not LIVE, so a broken object store never looks healthy. The missing half
+  of the recovery story.
 - **Backup policy + freshness** — the ScheduledBackup cron (humanized) + retention,
   and "last backup Xh ago" flagged due / OVERDUE vs the schedule's period.
 
@@ -176,7 +178,13 @@ agree.)
 Generates a Cluster (+ optional Pooler + ScheduledBackup + app-role Secrets) from
 form choices, assembled from `resources/*.tmpl.yaml` with `${VAR}` substitution —
 no manifest strings in Python. **Presets** fill the form for common cases
-(Reference HA / Read-heavy / Dev-minimal / Durable). **App roles for rotation**
+(Reference HA+DR / Multi-AZ zone-resilient / Read-heavy / Dev-minimal / Durable).
+A live **resilience profile** card under the presets derives what the current
+config actually provides — availability, RTO, RPO, PITR window, placement — and
+points each property at the harness that proves it (kill-primary/drain-zone for
+HA, the testbed golden path for DR). Multi-AZ adds `topologySpreadConstraints`
+(one instance per `topology.kubernetes.io/zone`) so a whole AZ can be lost.
+**App roles for rotation**
 emits two login roles (`app_a`/`app_b`) that inherit the `app` owner, each from
 its own Secret (CHANGE-ME placeholders) — the prerequisite Rotate switches
 between. A note explains storage is grow-only (online PVC expansion needs

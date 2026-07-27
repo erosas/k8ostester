@@ -145,7 +145,8 @@ corrupt page is unrecoverable.
 
 - **Diagnose** — the Backups health row and the Recovery window. Check the object
   store is reachable and archiving is healthy ([WAL archive delay](#archive)).
-- **Fix** — configure a barman object store and **Take base backup** (Operate). Add a
+- **Fix** — configure an object store via the Barman Cloud plugin (an ObjectStore CR
+  the cluster references in `spec.plugins`) and **Take base backup** (Operate). Add a
   ScheduledBackup for regular base backups.
 - **Prevent** — schedule base backups, alert on freshness, and **test a restore**
   periodically — an untested backup isn't a backup.

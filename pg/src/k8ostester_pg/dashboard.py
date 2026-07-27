@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from importlib import resources
 
-from k8ostester_pg.goals import GOALS, clamp, num
+from k8ostester_pg.goals import GOALS, INVERTED_GOALS, clamp, goal_threshold
 
 _PANEL_GOAL = {panel: key for key, (panel, *_rest) in GOALS.items()}   # panel key -> goal key
 
@@ -22,11 +22,13 @@ def _text(name: str) -> str:
     return resources.files("k8ostester_pg").joinpath("resources", name).read_text()
 
 
-def _waterline(panel: dict, value: float) -> None:
-    """Draw the goal as a red threshold line on a timeseries panel."""
+def _waterline(panel: dict, value: float, invert: bool = False) -> None:
+    """Draw the goal as a red threshold line on a timeseries panel. ``invert`` flips
+    the colouring for 'hours until exhaustion' goals, where LOW is the bad side."""
     d = panel.setdefault("fieldConfig", {}).setdefault("defaults", {})
-    d["thresholds"] = {"mode": "absolute",
-                       "steps": [{"color": "green", "value": None}, {"color": "red", "value": value}]}
+    steps = ([{"color": "red", "value": None}, {"color": "green", "value": value}] if invert
+             else [{"color": "green", "value": None}, {"color": "red", "value": value}])
+    d["thresholds"] = {"mode": "absolute", "steps": steps}
     d.setdefault("custom", {})["thresholdsStyle"] = {"mode": "line"}
 
 
@@ -39,7 +41,7 @@ def build_dashboard(opts: dict) -> str:
     label = (opts.get("scrape_label") or "pod").strip()
 
     # panels, in order — some only make sense for certain configs
-    order = ["up", "flags", "restarts", "cpu", "memory", "disk",
+    order = ["up", "flags", "restarts", "cpu", "memory", "disk", "disk-fill",
              "connections", "connections-by-role", "conn-health",
              "activity", "cache-hit", "checkpoints",
              "long-txn", "conn-age", "txid-age", "db-size", "wal"]
@@ -50,13 +52,15 @@ def build_dashboard(opts: dict) -> str:
 
     panels = []
     for i, key in enumerate(order):
-        raw = _text(f"dashboard/{key}.json").replace("__LABEL__", label).replace("__CLUSTER__", name)
+        raw = (_text(f"dashboard/{key}.json").replace("__LABEL__", label)
+               .replace("__CLUSTER__", name))
         panel = json.loads(raw)
         panel["id"] = i + 1
         panel["gridPos"] = {"h": 8, "w": 12, "x": (i % 2) * 12, "y": (i // 2) * 8}
-        goal_val = num(goals.get(_PANEL_GOAL.get(key)))   # a goal for this panel?
+        gk = _PANEL_GOAL.get(key)                          # a goal for this panel?
+        goal_val = goal_threshold(gk, goals.get(gk), opts) if gk else None
         if goal_val is not None:
-            _waterline(panel, goal_val)
+            _waterline(panel, goal_val, invert=gk in INVERTED_GOALS)
         panels.append(panel)
 
     dash = json.loads(_text("dashboard.tmpl.json").replace("__TITLE__", f"{name} — CloudNativePG"))

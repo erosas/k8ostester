@@ -219,7 +219,7 @@ class ClusterClient:
         resp = self.core.read_namespaced_pod_log(
             pod, namespace, container=container, _preload_content=False
         )
-        return resp.data.decode()
+        return resp.data.decode(errors="replace")   # tolerate non-UTF8 bytes (never raise)
 
     # -- readiness -----------------------------------------------------------
 

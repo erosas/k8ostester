@@ -17,7 +17,7 @@
 # Built on Chainguard's Wolfi (glibc, so psycopg[binary] wheels install
 # directly): a minimal, continuously-rebuilt base with ~0 OS-package CVEs.
 # Digest-pinned (Dependabot bumps it); runs as a non-root user.
-FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+FROM cgr.dev/chainguard/wolfi-base@sha256:003627df3c1e1bba0c4116afcddb314aca9594ee2328c7e876a8081a6c988b2e
 RUN apk add --no-cache python-3.14 py3.14-pip \
     && pip install --break-system-packages --no-cache-dir 'psycopg[binary]==3.2.*' \
     && adduser -D -u 10001 loadgen

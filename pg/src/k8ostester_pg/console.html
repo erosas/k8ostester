@@ -94,6 +94,28 @@
   .badge.sync{color:var(--ok);border-color:#33482f;background:#182016}
   .badge.async{color:var(--muted);border-color:var(--border);background:var(--panel)}
   .badge.potential{color:var(--warn);border-color:#4a3a1a}
+  /* resilience "stat card" under the preset picker */
+  .statcard{margin-top:var(--s3);border:1px solid var(--border);border-radius:10px;
+    background:linear-gradient(180deg,var(--panel2),var(--panel));overflow:hidden}
+  .statcard .sc-h{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:9px 14px;border-bottom:1px solid var(--border);background:var(--panel2)}
+  .statcard .sc-title{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--muted)}
+  .statcard .sc-profile{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;
+    padding:2px 9px;border-radius:6px;border:1px solid transparent}
+  .statcard .sc-profile.ok{color:var(--ok);border-color:#33482f;background:#182016}
+  .statcard .sc-profile.warn{color:var(--warn);border-color:#4a3a1a;background:#211a0f}
+  .statcard .sc-profile.crit{color:var(--crit);border-color:#3a1a1e;background:#211011}
+  .statcard .sc-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)}
+  .statcard .sc-stat{background:var(--panel);padding:8px 14px;display:flex;flex-direction:column;gap:3px}
+  .statcard .sc-k{font-family:var(--mono);font-size:9px;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--dim)}
+  .statcard .sc-v{font-size:12.5px;color:var(--ink)}
+  .statcard .sc-v.ok{color:var(--ok)} .statcard .sc-v.warn{color:var(--warn)}
+  .statcard .sc-v.crit{color:var(--crit)}
+  .statcard .sc-foot{padding:8px 14px;border-top:1px solid var(--border);
+    font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  @media(max-width:560px){ .statcard .sc-grid{grid-template-columns:1fr} }
 
   /* recovery overview */
   .recovery{border:1px solid var(--border);border-radius:var(--r);padding:var(--s4);margin-bottom:var(--s5);
@@ -207,6 +229,12 @@
     font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--muted)}
   .bnote b{color:var(--ink)}
   .fcap{text-transform:none;letter-spacing:0;color:var(--dim);font-size:10px}
+  .bgrid .pwrow .unit{align-self:center;font-family:var(--mono);font-size:11px;color:var(--muted);
+    text-transform:none;letter-spacing:0;white-space:nowrap}
+  .bgrid .pwrow input{flex:1;min-width:0}
+  .hlchk{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+    color:var(--muted);white-space:nowrap;margin-right:auto}
+  .hlchk input{width:14px;height:14px;accent-color:var(--accent)}
   .bbar{display:flex;align-items:center;gap:var(--s3);margin:var(--s1) 0 var(--s3)}
   .bbar .bhint{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-right:auto}
   .bbar button{font-family:var(--sans);font-size:13px;padding:8px 16px;border-radius:8px;
@@ -442,18 +470,22 @@
         <p class="bsec-desc">Pick a starting point — it sets sensible defaults for everything below, which you can then tune. The manifest updates live as you edit.</p></div>
       <div class="goals" id="b-goals">
         <button class="goal on" data-goal="reference" onclick="preset('reference')">
-          <span class="gt">Reference HA</span>
-          <span class="gd">The production default — 3 nodes, quorum sync (zero data loss), pooler, backups, and rotation roles.</span></button>
+          <span class="gt">Reference · HA + DR</span>
+          <span class="gd">The production default — 3 nodes, quorum sync (zero data loss), pooler, PITR backups, rotation roles.</span></button>
+        <button class="goal" data-goal="multiaz" onclick="preset('multiaz')">
+          <span class="gt">Multi-AZ · zone-resilient</span>
+          <span class="gd">Reference, plus one-per-zone hard spread — survives a whole AZ loss, and the sync replica is always cross-AZ. Needs zone-labelled nodes.</span></button>
         <button class="goal" data-goal="readheavy" onclick="preset('readheavy')">
-          <span class="gt">Read-heavy</span>
-          <span class="gd">More replicas (5) to spread reads and pooler capacity; same durability as Reference.</span></button>
+          <span class="gt">Read-heavy · HA + DR</span>
+          <span class="gd">More replicas (5) to spread reads and pooler capacity; same HA + durability as Reference.</span></button>
         <button class="goal" data-goal="dev" onclick="preset('dev')">
           <span class="gt">Dev / minimal</span>
           <span class="gd">Single node, no sync, no backups — smallest footprint for throwaway testing. Not for real data.</span></button>
         <button class="goal" data-goal="durable" onclick="preset('durable')">
-          <span class="gt">Durable / archival</span>
-          <span class="gd">Reference HA with larger storage, 30-day retention, and more frequent base backups.</span></button>
+          <span class="gt">Durable · HA + max DR</span>
+          <span class="gd">Reference with larger storage, 30-day retention, and more frequent base backups.</span></button>
       </div>
+      <div id="b-statcard" class="statcard"></div>
     </div>
 
     <div class="bsec">
@@ -468,14 +500,33 @@
 
     <div class="bsec">
       <div class="bsec-h"><h4>PostgreSQL image</h4>
-        <p class="bsec-desc">The container image CNPG runs. Defaults to the official CloudNativePG PostgreSQL build — point it at a mirror or your own registry if you need to. Browse the repo's tags to pick a version and confirm it's pullable.</p></div>
+        <p class="bsec-desc">The container image CNPG runs. Compose the official CloudNativePG tag from the dropdowns, or paste any full reference in the tag field. Point the repository at a mirror if you go through a proxy. Browse the repo's tags to confirm it's pullable.</p></div>
+      <div class="bgrid">
+        <label>PostgreSQL version
+          <select id="b-pgmajor" onchange="composeImageTag()">
+            <option value="18">18 (latest)</option>
+            <option value="17" selected>17</option>
+            <option value="16">16</option>
+          </select></label>
+        <label>Flavor
+          <select id="b-flavor" onchange="composeImageTag()">
+            <option value="standard" selected>standard — + pgvector, pgaudit, JIT</option>
+            <option value="minimal">minimal — Postgres only</option>
+          </select>
+          <span class="fcap">both use the Barman plugin for backups</span></label>
+        <label>Base image
+          <select id="b-distro" onchange="composeImageTag()">
+            <option value="trixie" selected>trixie — Debian 13 (current)</option>
+            <option value="bookworm">bookworm — Debian 12</option>
+          </select></label>
+      </div>
       <div class="bgrid">
         <label>Image repository<input id="b-image-repo" value="ghcr.io/cloudnative-pg/postgresql" spellcheck="false" oninput="onBuilderRepo()">
-          <span class="fcap">registry path, no tag</span></label>
-        <label>Version (tag)
-          <span class="pwrow" style="margin:0"><input id="b-version" value="16.6" spellcheck="false" oninput="scheduleBuilderCheck()">
+          <span class="fcap">registry path, no tag — set to your mirror</span></label>
+        <label>Resolved tag
+          <span class="pwrow" style="margin:0"><input id="b-version" value="17-standard-trixie" spellcheck="false" oninput="scheduleBuilderCheck()">
             <span id="b-img-status" class="imgstatus"></span></span>
-          <span class="fcap">or paste a full image reference</span></label>
+          <span class="fcap">set by the dropdowns · edit for a pinned patch or full custom ref</span></label>
       </div>
       <div class="taglist" id="b-taglist"></div>
     </div>
@@ -492,6 +543,8 @@
             <option value="priority">priority · first 1 (named sync + async)</option>
             <option value="async">async (no synchronous standby)</option>
           </select></label>
+        <label class="check"><input id="b-zonespread" type="checkbox"> Spread across zones (multi-AZ)
+          <span class="fcap">one instance per <code>topology.kubernetes.io/zone</code> — survives an AZ loss; needs zone-labelled nodes</span></label>
       </div>
       <div class="fnote" id="b-sync-note"></div>
     </div>
@@ -529,19 +582,43 @@
 
     <div class="bsec">
       <div class="bsec-h"><h4>Backups &amp; recovery</h4>
-        <p class="bsec-desc">Continuous WAL archiving + scheduled base backups to object storage. This is what makes <b>point-in-time recovery</b> possible — without it, Restore (PITR) stays disabled and there's no way back from a bad delete or a corrupt page. Leave off only for throwaway clusters.</p></div>
+        <p class="bsec-desc">Continuous WAL archiving + scheduled base backups to object storage. This is what makes <b>point-in-time recovery</b> possible — without it, Restore (PITR) stays disabled and there's no way back from a bad delete or a corrupt page. Leave off only for throwaway clusters. Uses the <b>CloudNativePG Barman Cloud plugin</b> (an <code>ObjectStore</code> the cluster references) — the <a href="https://github.com/cloudnative-pg/plugin-barman-cloud" target="_blank" rel="noopener">plugin</a> must be installed in the cluster.</p></div>
       <div class="bgrid">
         <label class="check"><input id="b-backups" type="checkbox" checked> Enable backups + WAL archiving</label>
       </div>
       <div class="bgrid" id="b-backup-fields">
         <label>Bucket<input id="b-bucket" value="backups"></label>
         <label>Path<input id="b-path" value="pg"></label>
-        <label>S3 endpoint<input id="b-endpoint" value="http://seaweedfs:8333"></label>
-        <label>Credentials secret<input id="b-secret" value="seaweed-s3"></label>
+        <label>S3 endpoint<input id="b-endpoint" value="http://seaweedfs:8333">
+          <span class="fcap">clear for AWS S3's default endpoint</span></label>
+        <label>Credentials
+          <select id="b-credmode" onchange="generateManifest()">
+            <option value="secret" selected>Access key — from a Secret</option>
+            <option value="iam">IAM role — node / IRSA (no stored keys)</option>
+          </select>
+          <span class="fcap">on AWS/EKS use the node or service-account role; no keys stored</span></label>
+        <label id="b-secret-wrap">Credentials secret<input id="b-secret" value="seaweed-s3">
+          <span class="fcap">keys <code>ACCESS_KEY</code> / <code>SECRET_KEY</code></span></label>
         <label>Retention<input id="b-retention" value="7d"></label>
         <label class="check"><input id="b-schedule" type="checkbox" checked> Scheduled base backups</label>
-        <label id="b-schedule-cron-wrap">Schedule (6-field cron)
-          <input id="b-schedule-cron" value="0 0 2 * * *"></label>
+        <label id="b-schedule-preset-wrap">Common schedule
+          <select id="b-schedule-preset" onchange="applyCronPreset()">
+            <option value="0 0 2 * * *">Daily · 02:00</option>
+            <option value="0 0 1 * * 0">Weekly · Sun 01:00</option>
+            <option value="0 0 */6 * * *">Every 6 hours</option>
+            <option value="0 0 */12 * * *">Every 12 hours</option>
+            <option value="0 0 * * * *">Hourly</option>
+            <option value="">Custom…</option>
+          </select></label>
+        <label id="b-schedule-cron-wrap">Schedule (6-field cron · leading field = seconds)
+          <input id="b-schedule-cron" value="0 0 2 * * *" oninput="onCronEdit()">
+          <span class="fcap" id="b-cron-human">→ daily 02:00</span></label>
+        <label>Barman plugin image<input id="b-barman-image" value="ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0" spellcheck="false">
+          <span class="fcap">sidecar that ships WAL/backups — set to your mirror (used in the install snippet below)</span></label>
+        <label>cert-manager manifest<input id="b-certmanager" value="https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml" spellcheck="false">
+          <span class="fcap">plugin prerequisite — point at your own copy if air-gapped</span></label>
+        <label>Barman plugin manifest<input id="b-plugin-manifest" value="https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.13.0/manifest.yaml" spellcheck="false">
+          <span class="fcap">the plugin install — mirror or pin a version here</span></label>
       </div>
     </div>
 
@@ -555,42 +632,45 @@
 
     <div class="bsec">
       <div class="bsec-h"><h4>Observability</h4>
-        <p class="bsec-desc">How metrics leave the cluster. A <b>Prometheus PodMonitor</b> lets a Prometheus Operator scrape CNPG's metrics; an <b>OTEL endpoint</b> additionally ships them to your collector. With a scrape configured you also get an adaptive Grafana dashboard and the goals below.</p></div>
+        <p class="bsec-desc">How metrics leave the cluster — two <b>independent</b> paths, use either or both. A <b>PodMonitor</b> is scraped by a Prometheus-Operator-compatible stack (Prometheus, or VictoriaMetrics — its operator converts PodMonitors); an <b>OTEL endpoint</b> pushes metrics to a collector. Either one enables the adaptive dashboard + goals below.</p></div>
       <div class="bgrid">
         <label class="check"><input id="b-monitoring" type="checkbox" checked> Prometheus PodMonitor
-          <span class="fcap">scrape via the Prometheus Operator</span></label>
+          <span class="fcap">scrape via a Prometheus-Operator-compatible stack</span></label>
         <label>OTEL endpoint (optional)<input id="b-otel" placeholder="otel-collector.obs.svc:4317">
-          <span class="fcap">also deploys an OTEL collector</span></label>
+          <span class="fcap">push OTLP to a collector — deploys one too</span></label>
         <label id="b-scrape-wrap">Metrics pod label<input id="b-scrape-label" value="pod">
-          <span class="fcap">'pod' or 'instance'</span></label>
+          <span class="fcap">leave <code>pod</code> — how the PodMonitor labels each target; only change if your scrape relabels it to <code>instance</code></span></label>
       </div>
       <div class="bgrid" id="b-goals-section">
-        <label>Goal · max replication lag (s)
-          <input id="b-goal-lag" type="number" min="1" max="3600" step="1" placeholder="30">
-          <span class="fcap">recommended 30</span></label>
-        <label>Goal · max connections
-          <input id="b-goal-conn" type="number" min="1" max="100000" step="1" placeholder="80">
-          <span class="fcap">recommended ~80% of max_connections</span></label>
-        <label>Goal · max WAL archive delay (s)
-          <input id="b-goal-archive" type="number" min="1" max="86400" step="1" placeholder="120">
-          <span class="fcap">recommended 120</span></label>
-        <label>Goal · max CPU (cores)
-          <input id="b-goal-cpu" type="number" min="0.1" step="0.1" placeholder="e.g. 0.8">
-          <span class="fcap">~80% of the CPU limit · needs cAdvisor</span></label>
-        <label>Goal · max memory (Gi)
-          <input id="b-goal-memory" type="number" min="0.1" step="0.1" placeholder="e.g. 1.6">
-          <span class="fcap">~80% of the memory limit · needs cAdvisor</span></label>
-        <label>Goal · max disk (%)
-          <input id="b-goal-disk" type="number" min="1" max="100" step="1" placeholder="80">
+        <label>Max replication lag
+          <span class="pwrow" style="margin:0"><input id="b-goal-lag" type="number" min="1" max="3600" step="1" placeholder="30"><span class="unit">seconds</span></span>
+          <span class="fcap">replica behind the primary · recommended 30</span></label>
+        <label>Max active connections
+          <span class="pwrow" style="margin:0"><input id="b-goal-conn" type="number" min="1" max="100000" step="1" placeholder="80"><span class="unit">connections</span></span>
+          <span class="fcap">a count · set ~80% of max_connections</span></label>
+        <label>Max WAL archive delay
+          <span class="pwrow" style="margin:0"><input id="b-goal-archive" type="number" min="1" max="86400" step="1" placeholder="120"><span class="unit">seconds</span></span>
+          <span class="fcap">since last WAL archived · recommended 120</span></label>
+        <label>Max CPU
+          <span class="pwrow" style="margin:0"><input id="b-goal-cpu" type="number" min="1" max="100" step="1" placeholder="80"><span class="unit">% of limit</span></span>
+          <span class="fcap">percent of the per-instance CPU limit · needs cAdvisor</span></label>
+        <label>Max memory
+          <span class="pwrow" style="margin:0"><input id="b-goal-memory" type="number" min="1" max="100" step="1" placeholder="80"><span class="unit">% of limit</span></span>
+          <span class="fcap">percent of the per-instance memory limit · needs cAdvisor</span></label>
+        <label>Max disk
+          <span class="pwrow" style="margin:0"><input id="b-goal-disk" type="number" min="1" max="100" step="1" placeholder="80"><span class="unit">% full</span></span>
           <span class="fcap">PVC usage · needs kubelet metrics</span></label>
-        <label>Goal · max transaction-ID age
-          <input id="b-goal-txid" type="number" min="1000000" step="1000000" placeholder="150000000">
-          <span class="fcap">wraparound headroom (limit ~2.1B)</span></label>
-        <label>Goal · longest transaction (s)
-          <input id="b-goal-longtxn" type="number" min="1" step="1" placeholder="300">
+        <label>Disk fills within
+          <span class="pwrow" style="margin:0"><input id="b-goal-diskfill" type="number" min="1" max="720" step="1" placeholder="24"><span class="unit">hours</span></span>
+          <span class="fcap">rate-of-change: alert if projected to fill within this window — the urgency signal</span></label>
+        <label>Max transaction-ID age
+          <span class="pwrow" style="margin:0"><input id="b-goal-txid" type="number" min="1" max="2000" step="10" placeholder="150"><span class="unit">million xids</span></span>
+          <span class="fcap">wraparound risk · emergency ~2100M, alert well before</span></label>
+        <label>Longest transaction
+          <span class="pwrow" style="margin:0"><input id="b-goal-longtxn" type="number" min="1" step="1" placeholder="300"><span class="unit">seconds</span></span>
           <span class="fcap">stuck / runaway transaction</span></label>
-        <label>Goal · oldest connection (s)
-          <input id="b-goal-connage" type="number" min="1" step="1" placeholder="3600">
+        <label>Oldest connection
+          <span class="pwrow" style="margin:0"><input id="b-goal-connage" type="number" min="1" step="1" placeholder="3600"><span class="unit">seconds</span></span>
           <span class="fcap">recycle long-lived connections</span></label>
       </div>
       <div class="fnote" id="b-goals-note">Each goal draws a red <b>waterline</b> on its dashboard panel and a matching Prometheus <b>alert rule</b> — one number drives both. Leave blank to skip.</div>
@@ -603,7 +683,8 @@
         <button data-o="dashboard" onclick="switchOutput('dashboard')">Grafana dashboard (JSON)</button>
       </div>
       <div class="bbar">
-        <span class="bhint" id="b-hint">edit any field — changed lines flash</span>
+        <label class="hlchk"><input id="b-hl" type="checkbox" checked onchange="reRenderPane()"> Highlight changes</label>
+        <span class="bhint" id="b-hint">edit any field — changed lines highlight &amp; scroll into view</span>
         <button onclick="copyManifest()">Copy</button>
         <button onclick="downloadManifest()">Download</button>
         <button id="b-deploy" class="deploy" onclick="deployManifest()">Deploy ↑</button>
@@ -1077,7 +1158,21 @@ async function browseBuilderTags(){
   box.innerHTML = `<span class="tagnote">discovering release tags…</span>`;
   renderTags(box, await fetchImageTags(document.getElementById("b-image-repo").value.trim()), bPickTag);
 }
-function bPickTag(t){ document.getElementById("b-version").value = t; scheduleBuilderCheck(); generateManifest(); }
+function bPickTag(t){ document.getElementById("b-version").value = t; syncFlavorSelects(t); scheduleBuilderCheck(); generateManifest(); }
+// dropdowns → the resolved <major>-<flavor>-<distro> tag (the official CNPG scheme)
+function composeImageTag(){
+  const g = id => document.getElementById(id).value;
+  document.getElementById("b-version").value = `${g("b-pgmajor")}-${g("b-flavor")}-${g("b-distro")}`;
+  scheduleBuilderCheck(); generateManifest();
+}
+// keep the dropdowns in step with a tag set elsewhere (preset / browse / hand-edit),
+// when it matches the official scheme; a full custom ref just leaves them as-is
+function syncFlavorSelects(tag){
+  const m = /^(\d+)-(standard|minimal|system)-(trixie|bookworm)$/.exec((tag||"").trim());
+  if(!m) return;
+  const set = (id,v)=>{ const el=document.getElementById(id); if(el && [...el.options].some(o=>o.value===v)) el.value=v; };
+  set("b-pgmajor",m[1]); set("b-flavor",m[2]); set("b-distro",m[3]);
+}
 function scheduleBuilderCheck(){
   clearTimeout(bImgTimer);
   const st = document.getElementById("b-img-status"); st.textContent = "…"; st.className = "imgstatus";
@@ -1122,18 +1217,21 @@ function openFaultPicker(){
 /* ---- builder presets ---- */
 const DEFAULT_REPO = "ghcr.io/cloudnative-pg/postgresql";
 // recommended alert thresholds a production preset ships with (blank = no alert).
-// cpu/memory goals are ~80% of that preset's limit, so they're set per preset.
-const GOALS_PROD = {lag:30, conn:80, archive:120, disk:80, txid:150000000, longtxn:300, connage:3600};
-const GOALS_NONE = {lag:"", conn:"", archive:"", disk:"", txid:"", longtxn:"", connage:"", cpu:"", memory:""};
+// production goal defaults — CPU/memory as % of the per-instance limit, txid in
+// millions of xids, the rest absolute (seconds / count / % full).
+const GOALS_PROD = {lag:30, conn:80, archive:120, cpu:80, memory:80, disk:80, diskfill:24, txid:150, longtxn:300, connage:3600};
+const GOALS_NONE = {lag:"", conn:"", archive:"", disk:"", diskfill:"", txid:"", longtxn:"", connage:"", cpu:"", memory:""};
 const PRESETS = {
-  reference:{name:"pg",version:"16.6",instances:3,storage:"10Gi",cpu:"1",memory:"2Gi",limits:true,sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD,cpu:0.8,memory:1.6}},
-  readheavy:{name:"pg",version:"16.6",instances:5,storage:"20Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
-    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD,cpu:1.6,memory:3.2}},
-  dev:{name:"dev",version:"16.6",instances:1,storage:"5Gi",cpu:"100m",memory:"256Mi",limits:false,sync:"async",pooler:false,
+  reference:{name:"pg",version:"17-standard-trixie",instances:3,storage:"10Gi",cpu:"1",memory:"2Gi",limits:true,sync:"quorum",pooler:true,
+    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD}},
+  multiaz:{name:"pg",version:"17-standard-trixie",instances:3,storage:"10Gi",cpu:"1",memory:"2Gi",limits:true,sync:"quorum",zone_spread:true,pooler:true,
+    pooler_instances:2,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD}},
+  readheavy:{name:"pg",version:"17-standard-trixie",instances:5,storage:"20Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
+    pooler_instances:3,backups:true,retention:"7d",schedule:true,schedule_cron:"0 0 2 * * *",app_roles:true,goals:{...GOALS_PROD}},
+  dev:{name:"dev",version:"17-standard-trixie",instances:1,storage:"5Gi",cpu:"100m",memory:"256Mi",limits:false,sync:"async",pooler:false,
     pooler_instances:2,backups:false,retention:"7d",schedule:false,schedule_cron:"0 0 2 * * *",app_roles:false,goals:GOALS_NONE},
-  durable:{name:"pg",version:"16.6",instances:3,storage:"50Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
-    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true,goals:{...GOALS_PROD,cpu:1.6,memory:3.2}},
+  durable:{name:"pg",version:"17-standard-trixie",instances:3,storage:"50Gi",cpu:"2",memory:"4Gi",limits:true,sync:"quorum",pooler:true,
+    pooler_instances:2,backups:true,retention:"30d",schedule:true,schedule_cron:"0 0 */6 * * *",app_roles:true,goals:{...GOALS_PROD}},
 };
 function preset(k){
   const p=PRESETS[k]; if(!p) return;
@@ -1141,7 +1239,9 @@ function preset(k){
   const set=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
   const chk=(id,v)=>{ const el=document.getElementById(id); if(el) el.checked=v; };
   set("b-name",p.name); set("b-image-repo",DEFAULT_REPO); set("b-version",p.version);
+  syncFlavorSelects(p.version);
   set("b-instances",p.instances); set("b-storage",p.storage); set("b-sync",p.sync);
+  chk("b-zonespread",!!p.zone_spread);
   set("b-cpu",p.cpu); set("b-memory",p.memory); chk("b-limits",!!p.limits);
   chk("b-pooler",p.pooler); set("b-pooler-instances",p.pooler_instances);
   chk("b-backups",p.backups); set("b-retention",p.retention);
@@ -1150,6 +1250,7 @@ function preset(k){
   chk("b-monitoring",true);   // every preset ships Prometheus monitoring
   set("b-goal-lag",p.goals.lag); set("b-goal-conn",p.goals.conn); set("b-goal-archive",p.goals.archive);
   set("b-goal-cpu",p.goals.cpu); set("b-goal-memory",p.goals.memory); set("b-goal-disk",p.goals.disk);
+  set("b-goal-diskfill",p.goals.diskfill);
   set("b-goal-txid",p.goals.txid); set("b-goal-longtxn",p.goals.longtxn); set("b-goal-connage",p.goals.connage);
   browseBuilderTags(); scheduleBuilderCheck();
   generateManifest();
@@ -1227,12 +1328,20 @@ function fmtStamp(s){
 function humanCron(c){
   if(!c) return "manual";
   const p = c.trim().split(/\s+/);
-  const f = p.length===6 ? p : ["0", ...p];
+  if(p.length!==5 && p.length!==6) return c;   // not a cron we recognise
+  const f = p.length===6 ? p : ["0", ...p];    // 6-field: leading seconds
   const [, min, hr, dom, mon, dow] = f;
   const hhmm = `${String(hr).padStart(2,"0")}:${String(min).padStart(2,"0")}`;
   const nums = x => /^\d+$/.test(x);
-  if(dom==="*"&&mon==="*"&&dow==="*"&&nums(hr)&&nums(min)) return `daily ${hhmm}`;
-  if(dom==="*"&&mon==="*"&&nums(dow)&&nums(hr))
+  const daily = dom==="*"&&mon==="*"&&dow==="*";
+  let m;
+  // intervals: */N in the hour or minute field
+  if(daily && (m=/^\*\/(\d+)$/.exec(hr)) && min==="0") return `every ${m[1]} hour${m[1]==="1"?"":"s"}`;
+  if(daily && hr==="*" && (m=/^\*\/(\d+)$/.exec(min))) return `every ${m[1]} min`;
+  if(daily && hr==="*" && min==="0") return "hourly (on the hour)";
+  if(daily && hr==="*" && nums(min)) return `hourly at :${String(min).padStart(2,"0")}`;
+  if(daily && nums(hr) && nums(min)) return `daily ${hhmm}`;
+  if(dom==="*"&&mon==="*"&&nums(dow)&&nums(hr)&&nums(min))
     return `${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][+dow]||dow} ${hhmm}`;
   return c;   // fall back to the raw expression
 }
@@ -1409,10 +1518,16 @@ function renderTopology(s){
     // archive health: is WAL archiving keeping up? (CNPG condition + lag segments)
     const arch = s.archiving||{}, lag = (aw.lag_segments!=null) ? aw.lag_segments : null;
     const lastAge = aw.last_time ? ago(+aw.last_time*1000) : "";
+    const archived = (aw.archived!=null) ? aw.archived : null;
     let aBadge, aState;
-    if(arch.ok === false){ aBadge = `<span class="badge" style="color:var(--crit);border-color:#3a1a1e">STALLED</span>`; aState = "STALLED"; }
+    // STALLED: the operator's ContinuousArchiving condition failed, or archiving has
+    // never succeeded yet is erroring (archive_command failing — e.g. no working barman)
+    if(arch.ok === false || (archived===0 && aw.failed>0)){ aBadge = `<span class="badge" style="color:var(--crit);border-color:#3a1a1e">STALLED</span>`; aState = "STALLED"; }
     else if(lag!=null && lag>2){ aBadge = `<span class="badge potential">${lag} behind</span>`; aState = lag+" behind"; }
-    else { aBadge = `<span class="badge sync">LIVE</span>`; aState = "live"; }
+    // LIVE only with positive proof: the operator condition is True, or WALs have
+    // actually been archived. Absent both, don't claim it works — show pending.
+    else if(arch.ok === true || (archived!=null && archived>0)){ aBadge = `<span class="badge sync">LIVE</span>`; aState = "live"; }
+    else { aBadge = `<span class="badge potential">pending</span>`; aState = "pending — no archive confirmed yet"; }
     const segs = (aw.archived!=null) ? aw.archived+" WAL segs" : "WAL archive";
     const stip = `object store\ns3://${os.bucket}/${os.path||""}\n@ ${os.endpoint||"?"}\n`+
       `archiving: ${aState}${arch.message?` (${arch.message})`:""}\n`+
@@ -1620,13 +1735,18 @@ function setConn(state){   // live | stale | reconnecting — tracks DATA health
   txt.textContent = state==="reconnecting" ? "reconnecting…" : state;
   txt.style.color = state==="stale" ? "var(--warn)" : "";
 }
+let ERR_STREAK = 0;   // consecutive failed polls — debounce so a single blip doesn't flash
 function render(data){
   const err = document.getElementById("err");
-  if(data.unselected){ UNSEL = true; err.style.display="none"; setConn("live");
+  if(data.unselected){ ERR_STREAK = 0; UNSEL = true; err.style.display="none"; setConn("live");
     document.getElementById("title").textContent = "CNPG clusters"; applyLayout(); return; }
-  if(data.warming){ setConn("live"); return; }   // selection warming up; next tick has the snapshot
-  if(data.error){   // socket's up but discovery is failing — the snapshot is stale
+  if(data.warming){ ERR_STREAK = 0; setConn("live"); return; }   // selection warming up; next tick has the snapshot
+  if(data.error){
+    // discovery hiccups (a pod mid-reconcile, an API blip) self-heal on the next ~2s
+    // tick — hold the last-known view for one miss and only surface after 2 in a row.
+    if(++ERR_STREAK < 2) return;
     err.style.display="block"; err.textContent = "discovery: "+data.error; setConn("stale"); return; }
+  ERR_STREAK = 0;
   err.style.display="none"; setConn("live");
   UNSEL = false;
   SNAP = data.snapshot; CAPS = data.capabilities;
@@ -1683,6 +1803,14 @@ function healthChecks(s){
   if(s.backup_configured===false) add("Backups", "warn", "not configured", {doc:"backups"});
   else if(s.backup_configured){ const n=s.backups_completed||0;
     add("Backups", n?"ok":"crit", n?n+" completed":"none completed", n?null:{btn:{label:"Take backup",fn:()=>fixCap('backup')},doc:"backups"}); }
+  // WAL archiving — same positive-proof rule as the topology badge: don't call it
+  // healthy without evidence, so a configured-but-broken object store shows here too
+  if(s.backup_configured){ const aw=s.archived_wal||{}, arch=s.archiving||{},
+      lag=(aw.lag_segments!=null)?aw.lag_segments:null, archived=(aw.archived!=null)?aw.archived:null;
+    if(arch.ok===false || (archived===0 && aw.failed>0)) add("WAL archiving","crit","stalled",{doc:"archive"});
+    else if(lag!=null && lag>2) add("WAL archiving","warn",lag+" segments behind",{doc:"archive"});
+    else if(arch.ok===true || (archived!=null && archived>0)) add("WAL archiving","ok","live");
+    else add("WAL archiving","warn","pending — not confirmed",{doc:"archive"}); }
   return out;
 }
 function fixCap(id){ const cap=(CAPS||[]).find(c=>c.id===id); if(cap) act(cap); }
@@ -1750,15 +1878,19 @@ function builderOpts(){
     name:v("b-name"), namespace:v("b-namespace"), version:v("b-version"),
     image_repo:v("b-image-repo"), instances:+v("b-instances"),
     storage:v("b-storage"), cpu:v("b-cpu"), memory:v("b-memory"), limits:ck("b-limits"),
-    sync:v("b-sync"),
+    sync:v("b-sync"), zone_spread:ck("b-zonespread"),
     pooler:ck("b-pooler"), pooler_instances:+v("b-pooler-instances"),
     backups:ck("b-backups"), bucket:v("b-bucket"), path:v("b-path"),
     endpoint:v("b-endpoint"), secret:v("b-secret"), retention:v("b-retention"),
+    credentials:v("b-credmode"),
+    barman_image:v("b-barman-image"),
+    cert_manager_manifest:v("b-certmanager"), plugin_manifest:v("b-plugin-manifest"),
     schedule:ck("b-schedule"), schedule_cron:v("b-schedule-cron"),
     app_roles:ck("b-approles"),
     monitoring:ck("b-monitoring"), otel_endpoint:v("b-otel"), scrape_label:v("b-scrape-label"),
     goals:{ repl_lag:v("b-goal-lag"), connections:v("b-goal-conn"), archive_delay:v("b-goal-archive"),
       cpu:v("b-goal-cpu"), memory:v("b-goal-memory"), disk:v("b-goal-disk"),
+      disk_fill:v("b-goal-diskfill"),
       txid:v("b-goal-txid"), long_txn:v("b-goal-longtxn"), conn_age:v("b-goal-connage") },
   };
 }
@@ -1768,13 +1900,14 @@ function switchOutput(o){
   genOutput();
 }
 function updateObsVisibility(){
-  // the dashboard / goals / scrape-label only make sense with a metrics pipeline
-  const hasMetrics = document.getElementById("b-monitoring").checked
-    || document.getElementById("b-otel").value.trim() !== "";
+  // dashboard + goals need SOME metrics pipeline (PodMonitor or OTEL)…
+  const podmon = document.getElementById("b-monitoring").checked;
+  const hasMetrics = podmon || document.getElementById("b-otel").value.trim() !== "";
   document.querySelector('#b-output button[data-o="dashboard"]').style.display = hasMetrics ? "" : "none";
   document.getElementById("b-goals-section").style.display = hasMetrics ? "grid" : "none";
   document.getElementById("b-goals-note").style.display = hasMetrics ? "" : "none";
-  document.getElementById("b-scrape-wrap").style.display = hasMetrics ? "flex" : "none";
+  // …but the pod label is Prometheus-scrape-specific — only meaningful with a PodMonitor
+  document.getElementById("b-scrape-wrap").style.display = podmon ? "flex" : "none";
   if(!hasMetrics && OUTPUT === "dashboard") switchOutput("manifest");   // fall back
 }
 function updateSyncNote(){
@@ -1798,11 +1931,79 @@ async function generateManifest(){    // called on any form change + on entering
     document.getElementById("b-pooler").checked ? "flex" : "none";
   document.getElementById("b-backup-fields").style.display =
     document.getElementById("b-backups").checked ? "grid" : "none";
-  document.getElementById("b-schedule-cron-wrap").style.display =
-    document.getElementById("b-schedule").checked ? "flex" : "none";
+  const sched = document.getElementById("b-schedule").checked;
+  document.getElementById("b-schedule-cron-wrap").style.display = sched ? "flex" : "none";
+  document.getElementById("b-schedule-preset-wrap").style.display = sched ? "flex" : "none";
+  // IAM-role auth stores no keys, so hide the Secret field in that mode
+  document.getElementById("b-secret-wrap").style.display =
+    document.getElementById("b-credmode").value === "iam" ? "none" : "flex";
+  updateCronHuman();
   updateObsVisibility();
   updateSyncNote();
+  renderResilienceCard(builderOpts());
   await genOutput();
+}
+// cron: a preset picker + a live plain-English legend over the manual editor
+function updateCronHuman(){
+  const el = document.getElementById("b-cron-human");
+  if(el) el.textContent = "→ " + humanCron(document.getElementById("b-schedule-cron").value);
+}
+function applyCronPreset(){
+  const p = document.getElementById("b-schedule-preset").value;
+  if(p){ document.getElementById("b-schedule-cron").value = p; generateManifest(); }
+}
+function onCronEdit(){
+  // hand-edited: if it no longer matches a preset, flip the picker to Custom
+  const cron = document.getElementById("b-schedule-cron").value.trim();
+  const sel = document.getElementById("b-schedule-preset");
+  if(![...sel.options].some(o=>o.value===cron)) sel.value = "";
+  updateCronHuman();
+}
+
+/* ---- resilience "stat card": what this config actually provides (derived live) ---- */
+function resilienceStats(o){
+  const n = Math.max(1, +o.instances || 1), rep = n - 1;
+  const zeroRPO = (o.sync === "quorum" || o.sync === "priority") && n >= 2;
+  const ha = n >= 2, dr = !!o.backups, az = !!o.zone_spread && n >= 2;
+  const profile = az && dr ? {label:"Multi-AZ HA + DR", tone:"ok"}
+    : ha && dr ? {label:"HA + DR", tone:"ok"}
+    : ha ? {label:"HA only · no backups", tone:"warn"}
+    : dr ? {label:"DR only · single node", tone:"warn"}
+    : {label:"Not resilient", tone:"crit"};
+  const stats = [
+    az ? {k:"Availability", v:`survives a zone loss · ${rep} replica${rep>1?"s":""} across zones`, tone:"ok"}
+       : ha ? {k:"Availability", v:`survives primary loss · ${rep} replica${rep>1?"s":""}`, tone:"ok"}
+       : {k:"Availability", v:"single instance — down on failure", tone:"crit"},
+    ha ? {k:"RTO · failover", v:"~10–30s, automatic", tone:"ok"}
+       : {k:"RTO · recovery", v:"manual — minutes", tone:"warn"},
+    !ha ? {k:"RPO · primary loss", v:"total — no replica", tone:"crit"}
+      : zeroRPO ? {k:"RPO · primary loss", v:"zero — synchronous replica", tone:"ok"}
+      : {k:"RPO · primary loss", v:"seconds — async replica", tone:"warn"},
+    dr ? {k:"Point-in-time recovery", v:`any point · last ${o.retention||"?"}`, tone:"ok"}
+       : {k:"Point-in-time recovery", v:"none — no restore path", tone:"crit"},
+    {k:"Base backups", v: dr ? (o.schedule ? humanCron(o.schedule_cron) : "manual only") : "none",
+      tone: dr ? (o.schedule ? "ok" : "warn") : "crit"},
+    {k:"Read scaling", v:`${rep} read replica${rep===1?"":"s"}${o.pooler?` · ${o.pooler_instances||0}× -ro pooler`:""}`,
+      tone: rep>0 ? "ok" : ""},
+    {k:"Placement", v: az ? "one per zone (hard spread)" : "any node (no zone spread)",
+      tone: az ? "ok" : ""},
+  ];
+  const proofs = [];
+  if(az) proofs.push("AZ loss → drain-zone experiment");
+  else if(ha) proofs.push("HA → kill-primary experiment");
+  if(dr) proofs.push("DR → testbed golden path (restore-latest + PITR)");
+  const proven = proofs.length ? "Prove it: " + proofs.join("  ·  ")
+    : "Prove it: add replicas (HA) and backups (DR) first";
+  return {profile, stats, proven};
+}
+function renderResilienceCard(o){
+  const el = document.getElementById("b-statcard"); if(!el) return;
+  const r = resilienceStats(o);
+  el.innerHTML = `<div class="sc-h"><span class="sc-title">Resilience profile</span>
+      <span class="sc-profile ${r.profile.tone}">${esch(r.profile.label)}</span></div>
+    <div class="sc-grid">${r.stats.map(s=>`<div class="sc-stat">
+        <span class="sc-k">${esch(s.k)}</span><span class="sc-v ${s.tone||''}">${esch(s.v)}</span></div>`).join("")}</div>
+    <div class="sc-foot">${esch(r.proven)}</div>`;
 }
 async function genOutput(){
   const opts = builderOpts();
@@ -1832,16 +2033,26 @@ function diffAdded(oldLines, newLines){
   }
   return added;
 }
+function reRenderPane(){ renderManifestPane(OUTPUT==="dashboard"?DASHBOARD:MANIFEST, OUTPUT==="dashboard"); }
 function renderManifestPane(text, dash){
+  const hl = document.getElementById("b-hl");
+  const highlight = !hl || hl.checked;      // the "Highlight changes" toggle
   const lines = text.split("\n");
   const prev = dash ? DASH_PREV : MAN_PREV;
-  // diff vs the previous render so only the changed lines flash (skip on huge output)
-  const added = (prev.length && lines.length<=1500 && prev.length<=1500)
+  // diff vs the previous render so only the changed lines highlight (skip on huge output)
+  const added = (highlight && prev.length && lines.length<=1500 && prev.length<=1500)
     ? diffAdded(prev, lines) : lines.map(()=>false);
-  document.getElementById("manifest").innerHTML =
+  const pane = document.getElementById("manifest");
+  pane.innerHTML =
     lines.map((l,i)=>`<span class="ln${added[i]?" chg":""}">${esch(l)}</span>`).join("");
   if(dash) DASH_PREV = lines; else MAN_PREV = lines;
   document.getElementById("b-deploy").style.display = dash ? "none" : "";   // deploy applies YAML
+  // scroll the FIRST changed line into view within the pane (not the page)
+  if(highlight && added.includes(true)){
+    const first = pane.querySelector(".ln.chg");
+    if(first){ const pr=pane.getBoundingClientRect(), fr=first.getBoundingClientRect();
+      pane.scrollTop += (fr.top - pr.top) - 48; }
+  }
 }
 function manifestSummary(text){
   // list what will be created, kind/name per doc — a plain review, no YAML parser
@@ -1885,6 +2096,14 @@ async function doDeploy(){
       (j.skipped.length?`, ${j.skipped.length} existed`:"")+(j.failed.length?`, ${j.failed.length} failed`:"");
     logActivity("Deploy "+opts.name+" → "+j.context, ok,
       [...j.created.map(x=>"+"+x), ...j.skipped, ...j.failed].join("  ·  "), 0);
+    // watch it come up: point the console at the new cluster and jump to the live view
+    if(j.created.length || j.skipped.length){
+      await fetch("/api/select", {method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({context:j.context, namespace:j.namespace, name:opts.name})});
+      document.getElementById("ctx-sel").value = j.context;
+      loadClusters(j.context, `${j.namespace}/${opts.name}`);   // refresh picker + preselect
+      pick("operate");   // → topology view; the SSE stream shows it bootstrap
+    }
   }catch(e){ hint.textContent = "deploy error: "+e; }
 }
 function copyManifest(){

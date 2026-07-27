@@ -17,7 +17,7 @@ from k8ostester_kernel.k8s import ClusterClient
 
 from k8ostester_pg import ops
 from k8ostester_pg.control import CNPG_ACTIONS
-from k8ostester_pg.discover import CNPG_GROUP, CNPG_VERSION
+from k8ostester_pg.discover import BARMAN_PLUGIN, CNPG_GROUP, CNPG_VERSION
 
 
 class ActionDenied(Exception):
@@ -68,7 +68,8 @@ def _backup(k8s: ClusterClient, ns: str, s: dict, p: dict, name: str) -> str:
             "apiVersion": f"{CNPG_GROUP}/{CNPG_VERSION}",
             "kind": "Backup",
             "metadata": {"name": backup},
-            "spec": {"cluster": {"name": name}, "method": "barmanObjectStore"},
+            "spec": {"cluster": {"name": name}, "method": "plugin",
+                     "pluginConfiguration": {"name": BARMAN_PLUGIN}},
         })
     return f"requested base backup {backup}"
 

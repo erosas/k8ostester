@@ -12,10 +12,32 @@ from __future__ import annotations
 from importlib import resources
 from string import Template
 
-from k8ostester_pg.goals import GOALS, RUNBOOK_ANCHOR, clamp, num
+from k8ostester_pg.goals import GOALS, RUNBOOK_ANCHOR, clamp, goal_threshold
 
 # alerts link back to the runbook doc; override the base for your own fork/host
 RUNBOOK_BASE = "https://github.com/erosas/k8ostester/blob/main/docs/runbooks.md"
+
+# the Barman Cloud plugin (out-of-tree backups) and its prerequisites — pinned so the
+# emitted install snippet is copy-pasteable; bump when you move the cluster's plugin.
+BARMAN_SIDECAR_IMAGE = "ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0"
+CERT_MANAGER_MANIFEST = "https://github.com/cert-manager/cert-manager/releases/download/v1.16.2/cert-manager.yaml"
+BARMAN_PLUGIN_MANIFEST = "https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.13.0/manifest.yaml"
+
+
+def _backup_prereq_note(barman_image: str, cert_manager: str, plugin_manifest: str) -> str:
+    """A YAML comment header explaining the plugin these backup manifests need, and
+    how to point its sidecar at a mirror — so the generated bundle is self-documenting.
+    The manifest URLs and sidecar image are all overridable (mirror/proxy/pinned version)."""
+    return (
+        "# ── Backups use the CloudNativePG Barman Cloud plugin ──────────────────────\n"
+        "# Install it once in the cluster (it also needs cert-manager):\n"
+        f"#   kubectl apply -f {cert_manager}\n"
+        f"#   kubectl apply -f {plugin_manifest}\n"
+        f"# Sidecar image: {barman_image}\n"
+        "# To pull it from your mirror instead, override after install:\n"
+        f"#   kubectl -n cnpg-system set env deploy/barman-cloud SIDECAR_IMAGE={barman_image}\n"
+        "# ───────────────────────────────────────────────────────────────────────────\n"
+    )
 
 # sync policy choice -> (CNPG method, number). "async" omits the block entirely.
 _SYNC = {"quorum": ("any", 1), "priority": ("first", 1)}
@@ -30,7 +52,11 @@ def build_manifest(opts: dict) -> str:
     """Render the manifest for these options. Unknown/blank fields fall back to
     sensible defaults, so a bare ``{}`` still yields a valid single-Cluster spec."""
     name = (opts.get("name") or "pg").strip()
-    version = (opts.get("version") or "16.6").strip()
+    # the standard Debian-trixie operand image: PostgreSQL + the common extensions
+    # (pgvector, pgaudit, failover slots, JIT) and no bundled barman-cloud — backups
+    # come from the separate Barman Cloud plugin (below). CNPG's recommended flavor for
+    # new clusters. A rolling major tag CNPG keeps patched; pin a full ref to fix it.
+    version = (opts.get("version") or "17-standard-trixie").strip()
     repo = (opts.get("image_repo") or "ghcr.io/cloudnative-pg/postgresql").strip()
     # a bare tag is joined to the repo; a value that already looks like a full
     # reference (has a registry path or an explicit tag) is used as-is
@@ -59,14 +85,44 @@ def build_manifest(opts: dict) -> str:
     # drain blocks forever — the node can never be cordoned without deleting the pod.
     if instances < 2:
         extra += "  enablePDB: false\n"
+    # multi-AZ: hard-spread instances one-per-zone (maxSkew 1, DoNotSchedule) so the
+    # cluster survives a zone loss, and — with quorum sync — the sync replica is always
+    # cross-AZ for free. Needs nodes labelled topology.kubernetes.io/zone (≥ instances
+    # zones); a displaced pod stays Pending during an outage rather than doubling up.
+    if opts.get("zone_spread") and instances >= 2:
+        extra += _tmpl("cluster-topology.tmpl.yaml").substitute(name=name)
+    # backups go through the CloudNativePG Barman Cloud plugin (the in-tree
+    # spec.backup.barmanObjectStore is deprecated): a standalone ObjectStore CR holds
+    # the destination, and the cluster loads the plugin as its WAL archiver.
+    store_docs = []
+    barman_image = (opts.get("barman_image") or BARMAN_SIDECAR_IMAGE).strip()
+    cert_manager = (opts.get("cert_manager_manifest") or CERT_MANAGER_MANIFEST).strip()
+    plugin_manifest = (opts.get("plugin_manifest") or BARMAN_PLUGIN_MANIFEST).strip()
     if opts.get("backups"):
-        extra += _tmpl("cluster-backup.tmpl.yaml").substitute(
+        store = f"{name}-store"
+        extra += _tmpl("cluster-plugins.tmpl.yaml").substitute(store=store)
+        # endpoint: explicit for S3-compatible stores (SeaweedFS/MinIO); blank uses AWS's
+        # default endpoint. Absent (bare opts) keeps the local dev default.
+        ep = opts.get("endpoint")
+        endpoint = (ep if ep is not None else "http://seaweedfs:8333").strip()
+        endpoint_line = f"    endpointURL: {endpoint}\n" if endpoint else ""
+        # credentials: an explicit key Secret, or the node/IRSA IAM role (no stored keys)
+        if opts.get("credentials") == "iam":
+            s3credentials = "    s3Credentials:\n      inheritFromIAMRole: true\n"
+        else:
+            secret = (opts.get("secret") or "seaweed-s3").strip()
+            s3credentials = (
+                "    s3Credentials:\n"
+                f"      accessKeyId: {{name: {secret}, key: ACCESS_KEY}}\n"
+                f"      secretAccessKey: {{name: {secret}, key: SECRET_KEY}}\n")
+        store_docs.append(_tmpl("objectstore.tmpl.yaml").substitute(
+            store=store,
             bucket=(opts.get("bucket") or "backups").strip(),
             path=(opts.get("path") or name).strip(),
-            endpoint=(opts.get("endpoint") or "http://seaweedfs:8333").strip(),
-            secret=(opts.get("secret") or "seaweed-s3").strip(),
+            endpoint_line=endpoint_line,
+            s3credentials=s3credentials,
             retention=(opts.get("retention") or "7d").strip(),
-        )
+        ))
 
     # native Prometheus scrape (CNPG exposes metrics; the operator makes a PodMonitor).
     # We also attach a custom-queries ConfigMap so CNPG exposes connection age +
@@ -89,7 +145,7 @@ def build_manifest(opts: dict) -> str:
             secret_docs.append(_tmpl("role-secret.tmpl.yaml").substitute(
                 secret=secret, role=role, password=pw))
 
-    docs = [*secret_docs, *mon_docs, _tmpl("cluster.tmpl.yaml").substitute(
+    docs = [*store_docs, *secret_docs, *mon_docs, _tmpl("cluster.tmpl.yaml").substitute(
         name=name, instances=instances, image=image, storage=storage,
         resources=resources, extra=extra)]
 
@@ -110,19 +166,27 @@ def build_manifest(opts: dict) -> str:
     # The same goals still become dashboard waterlines regardless.
     if opts.get("monitoring"):
         rules = _alert_rules(name, opts.get("goals") or {},
-                             (opts.get("scrape_label") or "pod").strip())
+                             (opts.get("scrape_label") or "pod").strip(), opts)
         if rules:
             docs.append(_tmpl("prometheus-rules.tmpl.yaml").substitute(name=name, rules=rules))
 
-    return "\n---\n".join(d.strip() for d in docs) + "\n"
+    manifest = "\n---\n".join(d.strip() for d in docs) + "\n"
+    # lead with the plugin-install snippet (pointed at the chosen sidecar image) so the
+    # backup manifests below are self-documenting about their one cluster prerequisite
+    if opts.get("backups"):
+        manifest = _backup_prereq_note(barman_image, cert_manager, plugin_manifest) + manifest
+    return manifest
 
 
-def _alert_rules(name: str, goals: dict, label: str = "pod") -> str:
-    """The PrometheusRule entries for whichever goals are set (indented for YAML)."""
+def _alert_rules(name: str, goals: dict, label: str = "pod", opts: dict | None = None) -> str:
+    """The PrometheusRule entries for whichever goals are set (indented for YAML).
+    Goal values are converted to absolute thresholds (CPU/mem % → cores/Gi, txid
+    millions → xids) so the expr and the dashboard waterline agree."""
     pods = f"{name}-[0-9]+"
+    o = opts or {}
     frags = []
     for key, (_panel, alert, expr_t, summary_t) in GOALS.items():
-        v = num(goals.get(key))
+        v = goal_threshold(key, goals.get(key), o)
         if v is None:
             continue
         anchor = RUNBOOK_ANCHOR.get(key, "")

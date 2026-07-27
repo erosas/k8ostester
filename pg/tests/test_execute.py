@@ -29,11 +29,14 @@ def test_partition_pod_targets_any_instance():
     k8s.networking.create_namespaced_network_policy.assert_called_once()
 
 
-def test_backup_creates_a_backup_cr():
+def test_backup_creates_a_plugin_backup_cr():
     k8s = MagicMock()
     execute(k8s, "ns", "backup", snap())
     _, _, ns, plural, body = k8s.custom.create_namespaced_custom_object.call_args.args
     assert plural == "backups" and body["kind"] == "Backup"
+    # plugin-only framework: base backups always go through the Barman Cloud plugin
+    assert body["spec"]["method"] == "plugin"
+    assert body["spec"]["pluginConfiguration"] == {"name": "barman-cloud.cloudnative-pg.io"}
 
 
 def test_execute_gates_on_the_capability():
